@@ -1,0 +1,266 @@
+{
+  "checks": [
+    {
+      "name": "FAT32 512B clusters, 60 tracks: scramble produced a wrong order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 512B clusters, 60 tracks: dry run leaves image untouched",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 512B clusters, 60 tracks: p2u sort reports success",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 512B clusters, 60 tracks: fatsort -l sees playlist order",
+      "ok": true,
+      "detail": "first ['01 - Jetty 51.mp3', '02 - Prairie 57.mp3']"
+    },
+    {
+      "name": "FAT32 512B clusters, 60 tracks: fsck.fat -n clean after sort",
+      "ok": true,
+      "detail": "/tmp/p2u-FAT32 512B clusters, 60 tracks-azb78nru/stick.img: 70 files, 2822/129022 clusters"
+    },
+    {
+      "name": "FAT32 512B clusters, 60 tracks: every file reads back byte-identical",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 512B clusters, 60 tracks: p2u verify (raw) passes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 512B clusters, 60 tracks: second sort is a no-op",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 512B clusters, 60 tracks: restore returns image to pre-sort bytes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 4K clusters, XSPF playlist: scramble produced a wrong order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 4K clusters, XSPF playlist: dry run leaves image untouched",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 4K clusters, XSPF playlist: p2u sort reports success",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 4K clusters, XSPF playlist: fatsort -l sees playlist order",
+      "ok": true,
+      "detail": "first ['01 - Nimbus.mp3', '02 - a.mp3']"
+    },
+    {
+      "name": "FAT32 4K clusters, XSPF playlist: fsck.fat -n clean after sort",
+      "ok": true,
+      "detail": "/tmp/p2u-FAT32 4K clusters, XSPF playlist-upoi9aeo/stick.img: 36 files, 188/76643 clusters"
+    },
+    {
+      "name": "FAT32 4K clusters, XSPF playlist: every file reads back byte-identical",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 4K clusters, XSPF playlist: p2u verify (raw) passes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 4K clusters, XSPF playlist: second sort is a no-op",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 4K clusters, XSPF playlist: restore returns image to pre-sort bytes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16, 40 tracks: scramble produced a wrong order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16, 40 tracks: dry run leaves image untouched",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16, 40 tracks: p2u sort reports success",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16, 40 tracks: fatsort -l sees playlist order",
+      "ok": true,
+      "detail": "first ['01 - Zebra Crossing 30.mp3', '02 - 日本の歌.mp3']"
+    },
+    {
+      "name": "FAT16, 40 tracks: fsck.fat -n clean after sort",
+      "ok": true,
+      "detail": "/tmp/p2u-FAT16, 40 tracks-kc2gtbm3/stick.img: 47 files, 519/16343 clusters"
+    },
+    {
+      "name": "FAT16, 40 tracks: every file reads back byte-identical",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16, 40 tracks: p2u verify (raw) passes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16, 40 tracks: second sort is a no-op",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16, 40 tracks: restore returns image to pre-sort bytes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT12, 12 tracks: scramble produced a wrong order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT12, 12 tracks: dry run leaves image untouched",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT12, 12 tracks: p2u sort reports success",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT12, 12 tracks: fatsort -l sees playlist order",
+      "ok": true,
+      "detail": "first ['01 - a.mp3', '02 - 日本の歌.mp3']"
+    },
+    {
+      "name": "FAT12, 12 tracks: fsck.fat -n clean after sort",
+      "ok": true,
+      "detail": "/tmp/p2u-FAT12, 12 tracks-26l6n0c1/stick.img: 16 files, 159/2036 clusters"
+    },
+    {
+      "name": "FAT12, 12 tracks: every file reads back byte-identical",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT12, 12 tracks: p2u verify (raw) passes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT12, 12 tracks: second sort is a no-op",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT12, 12 tracks: restore returns image to pre-sort bytes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 inside an MBR partition: dry run leaves image untouched",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 inside an MBR partition: p2u sort reports success",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 inside an MBR partition: fsck.fat -n clean after sort",
+      "ok": true,
+      "detail": "/tmp/p2u-FAT32 inside an MBR partition-n1n2mnvm/stick.img.part: 30 files, 1130/159270 clusters"
+    },
+    {
+      "name": "FAT32 inside an MBR partition: every file reads back byte-identical",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 inside an MBR partition: p2u verify (raw) passes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 inside an MBR partition: second sort is a no-op",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 inside an MBR partition: restore returns image to pre-sort bytes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "safety: refuses a volume marked in use",
+      "ok": true,
+      "detail": "refusing to write: the volume is marked as in use (still mou"
+    },
+    {
+      "name": "safety: refuses a directory with orphaned LFN entries",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "safety: only the folder's directory sectors changed",
+      "ok": true,
+      "detail": "1 sector(s) changed"
+    }
+  ],
+  "reorder_reports": {
+    "FAT32 small clusters": {
+      "deleted_slots_reclaimed": 10,
+      "slots_used": 195,
+      "capacity_slots": 208,
+      "changed": true
+    },
+    "FAT32 xspf": {
+      "deleted_slots_reclaimed": 3,
+      "slots_used": 94,
+      "capacity_slots": 128,
+      "changed": true
+    },
+    "FAT16": {
+      "deleted_slots_reclaimed": 5,
+      "slots_used": 135,
+      "capacity_slots": 192,
+      "changed": true
+    },
+    "FAT12": {
+      "deleted_slots_reclaimed": 1,
+      "slots_used": 46,
+      "capacity_slots": 64,
+      "changed": true
+    },
+    "FAT32 MBR": {
+      "deleted_slots_reclaimed": 2,
+      "slots_used": 79,
+      "capacity_slots": 96,
+      "changed": true
+    }
+  }
+}

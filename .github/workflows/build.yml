@@ -1,0 +1,84 @@
+# Linux and Windows are built on Linux; macOS needs a macOS runner because the
+# Apple SDK licence forbids using it on other hardware. Untested draft: the
+# commands mirror what was run locally (see README "Build").
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: FAT tools for the end-to-end tests
+        run: sudo apt-get update && sudo apt-get install -y dosfstools mtools fatsort fdisk
+      - run: cargo test --workspace
+      - run: cargo build --workspace
+      - name: End-to-end tests on FAT12/16/32 images
+        run: python3 tests/e2e.py
+
+  linux-and-windows:
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu,x86_64-pc-windows-msvc
+      - name: System packages (Tauri on Linux; mingw, NSIS and LLVM for Windows)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libayatana-appindicator3-dev libxdo-dev gcc-mingw-w64-x86-64 nsis lld llvm clang
+          cargo install --locked cargo-xwin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Helper sidecars
+        run: |
+          cargo build --release -p p2u-helper
+          cargo build --release -p p2u-helper --target x86_64-pc-windows-gnu
+          mkdir -p app/src-tauri/binaries
+          cp target/release/p2u-helper app/src-tauri/binaries/p2u-helper-x86_64-unknown-linux-gnu
+          # The helper is a standalone exe, so the mingw build serves the MSVC-built app too.
+          cp target/x86_64-pc-windows-gnu/release/p2u-helper.exe app/src-tauri/binaries/p2u-helper-x86_64-pc-windows-msvc.exe
+      - name: Linux bundles (.deb, .rpm, AppImage)
+        working-directory: app/src-tauri
+        run: npx --yes @tauri-apps/cli@^2 build
+      - name: Windows installer (NSIS) from Linux, Tauri's documented cargo-xwin route
+        working-directory: app/src-tauri
+        run: npx --yes @tauri-apps/cli@^2 build --runner cargo-xwin --target x86_64-pc-windows-msvc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-windows
+          path: |
+            app/src-tauri/target/release/bundle/
+            app/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/
+
+  macos:
+    needs: test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Universal .app and .dmg
+        working-directory: app/src-tauri
+        run: npx --yes @tauri-apps/cli@^2 build --target universal-apple-darwin
+        # Signing/notarization: set APPLE_CERTIFICATE, APPLE_SIGNING_IDENTITY,
+        # APPLE_API_KEY etc. as Tauri documents, or sign later with rcodesign.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: app/src-tauri/target/universal-apple-darwin/release/bundle/

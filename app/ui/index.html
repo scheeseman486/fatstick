@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Playlist2USB</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="lcd" aria-live="polite">
+    <div class="lcd-face">
+      <div class="lcd-main">
+        <span class="seg ghost" aria-hidden="true">~~~~~~~~~~~~~~</span>
+        <span class="seg" id="lcd-state">NO PLAYLIST</span>
+      </div>
+      <div class="lcd-count">
+        <span class="seg ghost" aria-hidden="true">~~~</span>
+        <span class="seg" id="lcd-count">---</span>
+        <span class="lcd-unit seg">TRK</span>
+      </div>
+    </div>
+    <p class="lcd-sub" id="lcd-sub">Open a playlist, pick a stick, copy, then lock the order.</p>
+  </header>
+
+  <main>
+    <section class="tracks" aria-labelledby="pl-name">
+      <div class="tracks-head">
+        <div>
+          <h1 id="pl-name">No playlist</h1>
+          <p class="meta" id="pl-meta">M3U, M3U8, XSPF (VLC) and PLS playlists work.</p>
+        </div>
+        <button id="open" type="button">Open playlist…</button>
+      </div>
+      <ol id="list" class="list" aria-describedby="reorder-hint"></ol>
+      <div id="empty" class="empty">
+        <p>Open a playlist to start, or drop the file on this window.</p>
+      </div>
+      <p id="reorder-hint" class="hint">Drag tracks to change the order, or select one and press Alt+↑ / Alt+↓.</p>
+    </section>
+
+    <aside class="stick" aria-labelledby="stick-h">
+      <div class="stick-head">
+        <h2 id="stick-h">USB stick</h2>
+        <button id="refresh" type="button" class="quiet">Refresh</button>
+      </div>
+      <div id="volumes" class="volumes" role="radiogroup" aria-labelledby="stick-h"></div>
+
+      <label class="field">Folder on the stick
+        <input id="folder" type="text" spellcheck="false" autocomplete="off">
+      </label>
+      <label class="check"><input id="numbered" type="checkbox" checked> Number the file names (01 - …)</label>
+      <label class="check"><input id="ascii" type="checkbox"> Plain ASCII names for basic displays</label>
+      <label class="check"><input id="replace" type="checkbox"> Replace the folder if it exists</label>
+
+      <ol class="steps">
+        <li>
+          <h3>Copy in order</h3>
+          <p>Copies one file at a time into a fresh folder. No password needed.</p>
+          <div class="actions"><button id="copy" type="button" class="primary" disabled>Copy to stick</button></div>
+        </li>
+        <li>
+          <h3>Lock the order</h3>
+          <p>Rewrites the folder's entry table so every player follows the playlist. Your system asks for your password or fingerprint.</p>
+          <div class="actions">
+            <button id="lock" type="button" disabled>Lock order</button>
+            <button id="check" type="button" class="quiet" disabled>Check order</button>
+          </div>
+        </li>
+      </ol>
+      <p id="status" class="status" role="status"></p>
+    </aside>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/p2u-core",
+    "crates/p2u-device",
+    "crates/p2u-cli",
+    "crates/p2u-helper",
+]
+# The Tauri shell lives in app/src-tauri and is its own workspace member when
+# its system dependencies (webkit2gtk-4.1 on Linux) are installed:
+#   cargo build --manifest-path app/src-tauri/Cargo.toml
+exclude = ["app/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.80"
+
+[workspace.dependencies]
+p2u-core = { path = "crates/p2u-core" }
+p2u-device = { path = "crates/p2u-device" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

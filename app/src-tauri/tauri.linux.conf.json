@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/p2u-helper"],
+    "linux": {
+      "deb": {
+        "depends": ["udisks2"],
+        "files": {
+          "/usr/share/polkit-1/actions/net.playlist2usb.helper.policy": "../../packaging/linux/net.playlist2usb.helper.policy"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/p2u-helper"],
+    "windows": {
+      "nsis": { "installMode": "currentUser" }
+    }
+  }
+}
