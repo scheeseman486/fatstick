@@ -19,7 +19,8 @@ mod reorder;
 
 pub use dir::{DirEntryGroup, DirListing, EntryKind};
 pub use reorder::{
-    check_order, is_junk_name, normalize_name, Backup, OrderCheck, ReorderOptions, ReorderReport, UnmatchedPlacement,
+    check_order, is_junk_name, normalize_name, Backup, OrderCheck, PreparedReorder, ReorderOptions, ReorderReport,
+    UnmatchedPlacement,
 };
 
 use std::collections::{HashMap, HashSet};
@@ -31,6 +32,10 @@ use serde::Serialize;
 pub trait Device: Read + Write + Seek {
     /// Push written data to the medium.
     fn sync_device(&mut self) -> io::Result<()>;
+    /// Drop any OS cache of this device so the next read comes from the medium.
+    fn invalidate_cache(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 impl Device for std::fs::File {
@@ -38,6 +43,30 @@ impl Device for std::fs::File {
         self.flush()?;
         self.sync_all()
     }
+    fn invalidate_cache(&mut self) -> io::Result<()> {
+        drop_page_cache(self)
+    }
+}
+
+/// Linux block devices are read through the page cache; after an fsync the
+/// cached pages are clean, and POSIX_FADV_DONTNEED evicts them (no privileges
+/// needed), so a verification read really comes from the stick.
+#[cfg(target_os = "linux")]
+pub fn drop_page_cache(f: &std::fs::File) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    f.sync_all()?;
+    // SAFETY: plain syscall on a valid descriptor.
+    let r = unsafe { libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED) };
+    if r != 0 {
+        return Err(io::Error::from_raw_os_error(r));
+    }
+    Ok(())
+}
+
+/// macOS raw disk nodes and Windows volume handles are not page-cached.
+#[cfg(not(target_os = "linux"))]
+pub fn drop_page_cache(_f: &std::fs::File) -> io::Result<()> {
+    Ok(())
 }
 
 impl Device for std::io::Cursor<Vec<u8>> {
@@ -49,6 +78,9 @@ impl Device for std::io::Cursor<Vec<u8>> {
 impl<T: Device + ?Sized> Device for &mut T {
     fn sync_device(&mut self) -> io::Result<()> {
         (**self).sync_device()
+    }
+    fn invalidate_cache(&mut self) -> io::Result<()> {
+        (**self).invalidate_cache()
     }
 }
 
@@ -374,6 +406,17 @@ impl<D: Device> Volume<D> {
 
     pub(crate) fn sync(&mut self) -> io::Result<()> {
         self.dev.sync_device()
+    }
+
+    pub(crate) fn invalidate_cache(&mut self) -> io::Result<()> {
+        self.fat_cache.clear();
+        self.dev.invalidate_cache()
+    }
+
+    /// Forget cached FAT sectors and drop the OS cache of the device, so the
+    /// next reads come from the medium.
+    pub fn drop_caches(&mut self) -> Result<()> {
+        Ok(self.invalidate_cache()?)
     }
 
     /// Read one sector of the active FAT (cached).

@@ -126,31 +126,32 @@ def write_playlists(work, order):
     return m3u, xspf
 
 
-def plan_names(playlist):
-    r = run([P2U, "plan", playlist, "--dest", "/", "--json"])
+def plan_names(playlist, extra=()):
+    r = run([P2U, "plan", playlist, "--dest", "/", "--json", *extra])
     plan = json.loads(r.stdout)
     return plan, [i["target_name"] for i in plan["items"]]
 
 
 def scramble_copy(env, plan, folder, rng, fragment=True):
     """Copy into the image through mtools in a messy order with deletions."""
-    run(["mmd", f"x:/{folder}"], env=env)
+    if folder:
+        run(["mmd", f"x:/{folder}"], env=env)
     items = plan["items"][:]
     rng.shuffle(items)
     half = len(items) // 2
     # First pass: copy some, plus decoys that get deleted later (leaving holes).
     for k, it in enumerate(items[:half]):
-        run(["mcopy", "-o", it["source"], f"x:/{folder}/{it['target_name']}"], env=env)
+        run(["mcopy", "-o", it["source"], f"x:{folder}/{it['target_name']}"], env=env)
         if k % 3 == 0:
-            run(["mcopy", "-o", it["source"], f"x:/{folder}/decoy {k} with a long name.tmp"], env=env)
+            run(["mcopy", "-o", it["source"], f"x:{folder}/decoy {k} with a long name.tmp"], env=env)
         if fragment and k % 4 == 0:
             # Writes elsewhere between directory growth fragment the dir's chain.
             run(["mcopy", "-o", it["source"], f"x:/filler{k}.bin"], env=env)
     for k in range(0, half, 3):
-        run(["mdel", f"x:/{folder}/decoy {k} with a long name.tmp"], env=env)
+        run(["mdel", f"x:{folder}/decoy {k} with a long name.tmp"], env=env)
     # Second pass fills the holes first, scrambling order further.
     for it in items[half:]:
-        run(["mcopy", "-o", it["source"], f"x:/{folder}/{it['target_name']}"], env=env)
+        run(["mcopy", "-o", it["source"], f"x:{folder}/{it['target_name']}"], env=env)
 
 
 def check_contents(env, plan, folder, work):
@@ -158,20 +159,21 @@ def check_contents(env, plan, folder, work):
     os.makedirs(out, exist_ok=True)
     for it in plan["items"]:
         dst = os.path.join(out, "f")
-        run(["mcopy", "-o", "-n", f"x:/{folder}/{it['target_name']}", dst], env=env)
+        run(["mcopy", "-o", "-n", f"x:{folder}/{it['target_name']}", dst], env=env)
         if sha(dst) != sha(it["source"]):
             return False, it["target_name"]
     return True, ""
 
 
-def scenario(label, fat_bits, size_mb, n, sectors_per_cluster=None, partitioned=False, playlist_kind="m3u"):
+def scenario(label, fat_bits, size_mb, n, sectors_per_cluster=None, partitioned=False, playlist_kind="m3u", top_level=False):
     rng = random.Random(fat_bits * 1000 + n)
     work = tempfile.mkdtemp(prefix=f"p2u-{label}-")
     try:
         order = make_sources(work, n, rng)
         m3u, xspf = write_playlists(work, order)
         playlist = m3u if playlist_kind == "m3u" else xspf
-        plan, names = plan_names(playlist)
+        tl = ["--top-level"] if top_level else []
+        plan, names = plan_names(playlist, tl)
         assert len(names) == n, f"plan has {len(names)} items"
         img = os.path.join(work, "stick.img")
         offset = 0
@@ -189,10 +191,10 @@ def scenario(label, fat_bits, size_mb, n, sectors_per_cluster=None, partitioned=
             mk += [img]
         run(mk)
         env = mtools_env(img, offset)
-        folder = "Road Trip"
+        folder = "" if top_level else "/Road Trip"
         scramble_copy(env, plan, folder, rng, fragment=True)
 
-        before = fatsort_order(img, f"/{folder}") if not partitioned else None
+        before = fatsort_order(img, folder or "/") if not partitioned else None
         img_before = os.path.join(work, "before.img")
         shutil.copyfile(img, img_before)
 
@@ -200,18 +202,18 @@ def scenario(label, fat_bits, size_mb, n, sectors_per_cluster=None, partitioned=
             record(f"{label}: scramble produced a wrong order", before[: len(names)] != names)
 
         # Dry run must not change a byte.
-        r = run([P2U, "sort", img, "--playlist", playlist, "--dry-run", "--backup-dir", work])
+        r = run([P2U, "sort", img, "--playlist", playlist, *tl, "--dry-run", "--backup-dir", work])
         record(f"{label}: dry run leaves image untouched", sha(img) == sha(img_before))
 
-        r = run([P2U, "sort", img, "--playlist", playlist, "--backup-dir", work], check=False)
+        r = run([P2U, "sort", img, "--playlist", playlist, *tl, "--backup-dir", work], check=False)
         out = json.loads(r.stdout)
         record(f"{label}: p2u sort reports success", r.returncode == 0 and out["ok"], out.get("error") or "")
         rep = out.get("report") or {}
 
         # Independent checks.
         if not partitioned:
-            after = fatsort_order(img, f"/{folder}")
-            files_after = [x for x in after if not x.lower().startswith("decoy")]
+            after = fatsort_order(img, folder or "/")
+            files_after = [x for x in after if not x.lower().startswith("decoy") and not x.lower().startswith("filler")]
             record(f"{label}: fatsort -l sees playlist order", files_after[: len(names)] == names,
                    f"first {files_after[:2]}")
         ok, tail = fsck_clean(img, offset)
@@ -219,10 +221,10 @@ def scenario(label, fat_bits, size_mb, n, sectors_per_cluster=None, partitioned=
         ok, bad = check_contents(env, plan, folder, work)
         record(f"{label}: every file reads back byte-identical", ok, bad)
 
-        r = run([P2U, "verify", img, "--playlist", playlist], check=False)
-        record(f"{label}: p2u verify (raw) passes", r.returncode == 0)
+        r = run([P2U, "verify", img, "--playlist", playlist, *tl], check=False)
+        record(f"{label}: p2u verify (raw order and sizes) passes", r.returncode == 0)
 
-        r = run([P2U, "sort", img, "--playlist", playlist, "--backup-dir", work], check=False)
+        r = run([P2U, "sort", img, "--playlist", playlist, *tl, "--backup-dir", work], check=False)
         again = json.loads(r.stdout)
         record(f"{label}: second sort is a no-op", again["ok"] and not again["report"]["changed"])
 
@@ -292,6 +294,29 @@ def safety_tests():
         record("safety: only the folder's directory sectors changed",
                r.returncode == 0 and changed and all(dir_lo <= c < dir_hi for c in changed),
                f"{len(changed)} sector(s) changed")
+
+        # 4. No backup, no write: an unwritable backup folder stops the sort before it touches the stick.
+        open(order, "w").write("Track One.mp3\nTrack Two.mp3\nTrack Three.mp3\n")
+        h = sha(img)
+        r = run([P2U, "sort", img, "--dir", "/A", "--order-file", order, "--backup-dir", os.path.join(work, "no-such-dir")], check=False)
+        err = (json.loads(r.stdout).get("error") or "")
+        record("safety: backup failure means nothing is written", r.returncode != 0 and sha(img) == h, err[:60])
+
+        # 5. A truncated copy is caught by the size check, even when the order is right.
+        src = os.path.join(work, "Track Two.mp3")
+        short = os.path.join(work, "short.mp3")
+        open(short, "wb").write(b"x" * 400)
+        run(["mcopy", "-o", short, "x:/A/Track Two.mp3"], env=env)
+        pl = os.path.join(work, "three.m3u")
+        open(pl, "w").write("Track One.mp3\nTrack Two.mp3\nTrack Three.mp3\n")
+        r = run([P2U, "sort", img, "--dir", "/A", "--playlist", pl, "--no-number", "--backup-dir", work], check=False)
+        o = json.loads(r.stdout)
+        record("safety: a truncated file makes the lock fail even though the order is set",
+               r.returncode != 0 and not o["ok"] and o["check"]["in_order"] and len(o["size_mismatches"]) == 1,
+               f"{o['size_mismatches'][:1]}")
+        r = run([P2U, "verify", img, "--dir", "/A", "--playlist", pl, "--no-number"], check=False)
+        v = json.loads(r.stdout)
+        record("safety: verify reports the truncated file", r.returncode != 0 and len(v["size_mismatches"]) == 1)
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -305,6 +330,8 @@ def main():
     reps["FAT16"] = scenario("FAT16, 40 tracks", 16, 32, 40)
     reps["FAT12"] = scenario("FAT12, 12 tracks", 12, 4, 12)
     reps["FAT32 MBR"] = scenario("FAT32 inside an MBR partition", 32, 80, 25, sectors_per_cluster=1, partitioned=True)
+    reps["FAT32 top level"] = scenario("FAT32 top level, 30 tracks", 32, 64, 30, sectors_per_cluster=1, top_level=True)
+    reps["FAT16 top level"] = scenario("FAT16 fixed root, 20 tracks", 16, 32, 20, top_level=True)
     safety_tests()
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     print(f"\n{passed}/{len(RESULTS)} checks passed")

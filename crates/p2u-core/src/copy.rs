@@ -1,12 +1,14 @@
-//! Ordered copy through the OS's own FAT driver. No elevation needed.
+//! Copying the files through the OS's own FAT driver. No elevation needed.
 //!
-//! Every driver we checked (Linux vfat, Windows fastfat, macOS msdosfs) puts a
-//! new entry in the first free slot, and a newly created directory has nothing
-//! but free slots after "." and "..". So creating the files one at a time, in
-//! playlist order, inside a brand-new folder lays the entries out in that order.
-//! What breaks it: temp-file-then-rename, parallel copies, deleting files
-//! afterwards, and macOS writing `._` AppleDouble files for extended attributes.
-//! This module avoids all four, and the raw reorder pass fixes anything left.
+//! This step only gets the bytes onto the stick. The order the driver leaves
+//! the entries in is NOT trusted: overwriting an earlier copy keeps each file's
+//! old slot, copying into an existing folder or the top level fills deleted
+//! slots, and Linux, Windows and macOS pick slots differently (tests/kernel_vfat.py
+//! shows all of these with the real Linux driver). The FAT-level step in
+//! `job.rs` always runs afterwards and is what decides and verifies the order.
+//!
+//! The copy still avoids what would make that step harder or the stick messier:
+//! temp-file-then-rename, parallel copies, and macOS `._` AppleDouble files.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -45,8 +47,9 @@ pub struct CopyReport {
     pub files_copied: usize,
     pub bytes_copied: u64,
     pub junk_removed: Vec<String>,
-    /// Order as the OS reports it after the copy (see [`readdir_order`]).
-    pub check: OrderCheck,
+    /// The order the OS lists right after copying, for diagnostics only.
+    /// Not a guarantee of on-disk order; the FAT-level step (job.rs) decides.
+    pub os_listing: OrderCheck,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -55,15 +58,17 @@ pub enum CopyError {
     Io(#[from] io::Error),
     #[error("destination folder {0} already exists and is not empty")]
     DestinationNotEmpty(String),
+    #[error("{0} already exists on the stick (allow replacing to overwrite it)")]
+    FileExists(String),
     #[error("not enough free space: need {need} bytes, {have} available")]
     NoSpace { need: u64, have: u64 },
     #[error("copy cancelled")]
     Cancelled,
 }
 
-/// Names in a folder in the order the OS returns them. FAT drivers return
-/// entries in on-disk order, so this is an unprivileged (best-effort) view of
-/// the raw order; only the raw read in [`crate::fat`] is authoritative.
+/// Names in a folder in the order the OS lists them. Diagnostics only: nothing
+/// guarantees a driver lists in on-disk order (macOS's user-space FAT driver
+/// is unpublished), so only the raw read in [`crate::fat`] decides "in order".
 pub fn readdir_order(dir: &Path) -> io::Result<Vec<String>> {
     let mut v = Vec::new();
     for e in fs::read_dir(dir)? {
@@ -123,21 +128,29 @@ pub fn execute_copy(
         }
     }
     let dest = &plan.dest_dir;
-    if dest.exists() {
-        let empty = fs::read_dir(dest)?.next().is_none();
-        if !empty {
-            if opts.replace_existing {
-                fs::remove_dir_all(dest)?;
-            } else {
+    if plan.is_top_level() {
+        // The top level can't be recreated: copy beside whatever is there.
+        // Replacing deletes the old file first so it is written fresh.
+        for item in &plan.items {
+            let t = dest.join(&item.target_name);
+            if t.exists() {
+                if opts.replace_existing {
+                    fs::remove_file(&t)?;
+                } else {
+                    return Err(CopyError::FileExists(item.target_name.clone()));
+                }
+            }
+        }
+    } else {
+        if dest.exists() {
+            let empty = fs::read_dir(dest)?.next().is_none();
+            if !empty && !opts.replace_existing {
                 return Err(CopyError::DestinationNotEmpty(dest.display().to_string()));
             }
-        } else {
-            // An empty folder may still hold deleted slots; recreate it so the
-            // driver starts from a zeroed cluster.
-            fs::remove_dir(dest)?;
+            fs::remove_dir_all(dest)?;
         }
+        fs::create_dir(dest)?;
     }
-    fs::create_dir(dest)?;
 
     let total = plan.items.len();
     let base_time = SystemTime::now() - Duration::from_secs(2 * total as u64 + 2);
@@ -172,11 +185,25 @@ pub fn execute_copy(
             m3u.push_str(&item.target_name);
             m3u.push_str("\r\n");
         }
-        let name = format!("{}.m3u", plan.folder_name);
+        let base = if plan.is_top_level() { &plan.playlist_name } else { &plan.folder_name };
+        let name = format!("{base}.m3u");
         let mut f = OpenOptions::new().write(true).create_new(true).open(dest.join(name))?;
         f.write_all(m3u.as_bytes())?;
     }
-    let junk_removed = remove_junk(dest)?;
-    let check = check_order(&readdir_order(dest)?, &plan.target_names());
-    Ok(CopyReport { files_copied: total, bytes_copied: bytes, junk_removed, check })
+    let junk_removed = if plan.is_top_level() {
+        // Only our own files' AppleDouble twins; leave the user's other files alone.
+        let mut v = Vec::new();
+        for item in &plan.items {
+            let twin = dest.join(format!("._{}", item.target_name));
+            if twin.is_file() {
+                fs::remove_file(&twin)?;
+                v.push(format!("._{}", item.target_name));
+            }
+        }
+        v
+    } else {
+        remove_junk(dest)?
+    };
+    let os_listing = check_order(&readdir_order(dest)?, &plan.target_names());
+    Ok(CopyReport { files_copied: total, bytes_copied: bytes, junk_removed, os_listing })
 }

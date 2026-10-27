@@ -12,7 +12,6 @@ const state = {
   tracks: [],
   volumes: [],
   volumeId: null,
-  lastCopy: null, // { volume_path, order }
   busy: false,
 };
 
@@ -84,7 +83,6 @@ function moveTrack(from, to) {
   if (to < 0 || to >= state.tracks.length || from === to) return;
   const [t] = state.tracks.splice(from, 1);
   state.tracks.splice(to, 0, t);
-  state.lastCopy = null;
   renderTracks();
   const li = $("list").children[to];
   if (li) li.focus();
@@ -131,7 +129,6 @@ async function loadPlaylist(path) {
     const pl = await invoke("load_playlist", { path });
     state.playlist = pl;
     state.tracks = pl.tracks;
-    state.lastCopy = null;
     $("pl-name").textContent = pl.name;
     $("folder").value = pl.name;
     renderTracks();
@@ -171,7 +168,6 @@ function renderVolumes(errorText) {
     radio.checked = v.id === state.volumeId;
     radio.addEventListener("change", () => {
       state.volumeId = v.id;
-      state.lastCopy = null;
       renderVolumes();
       updateButtons();
     });
@@ -203,10 +199,10 @@ async function refreshVolumes() {
 $("refresh").addEventListener("click", refreshVolumes);
 
 function updateButtons() {
-  const ready = !state.busy && state.tracks.some((t) => t.exists) && state.volumeId;
+  const vol = state.volumes.find((v) => v.id === state.volumeId);
+  const ready = !state.busy && state.tracks.some((t) => t.exists) && vol && vol.mount_point;
   $("copy").disabled = !ready;
-  $("lock").disabled = !(ready && state.lastCopy);
-  $("check").disabled = !(ready && state.lastCopy);
+  $("lock").disabled = !ready;
   $("open").disabled = state.busy;
 }
 
@@ -225,62 +221,68 @@ async function run(label, fn) {
     await fn();
   } catch (err) {
     lcd("ERROR", undefined, label);
-    setStatus(String(err), true);
+    setStatus(String((err && err.message) || err), true);
   } finally {
     state.busy = false;
     updateButtons();
   }
 }
 
+function request() {
+  return {
+    name: state.playlist.name,
+    tracks: state.tracks.filter((t) => t.exists).map((t) => ({ path: t.path, title: t.title })),
+    volume_id: state.volumeId,
+    folder: $("folder").value.trim(),
+    number_prefix: $("numbered").checked,
+    ascii_names: $("ascii").checked,
+    replace: $("replace").checked,
+  };
+}
+
+// The order is only ever reported from the FAT-level read-back, never from
+// the OS's own listing.
+async function lockOrder(plan) {
+  lcd("LOCKING", undefined, "Waiting for your system's authorization…");
+  const res = await invoke("lock_order", {
+    req: {
+      volume_id: state.volumeId,
+      volume_path: plan.volume_path,
+      order: plan.items.map((i) => i.target_name),
+      sizes: plan.items.map((i) => i.size),
+    },
+  });
+  const o = res.outcome;
+  if (!o.ok) {
+    const why = o.error
+      || (o.size_mismatches.length ? `${o.size_mismatches.length} files on the stick have the wrong size; copy again.` : "")
+      || (o.check && o.check.missing.length ? `${o.check.missing.length} tracks are not on the stick.` : "")
+      || "The order read back from the stick does not match the playlist.";
+    throw new Error(why);
+  }
+  const c = o.check;
+  const extra = c.extra.length ? ` ${c.extra.length} other files in that folder come after them.` : "";
+  lcd("ORDER LOCKED", c.found, `Read back from the stick: ${c.found} tracks in playlist order, sizes match. Safe to unplug.${extra}`);
+  setStatus(o.backup_file ? `Undo backup saved: ${o.backup_file}` : "The stick already matched the playlist; nothing was rewritten.");
+  await refreshVolumes();
+}
+
 $("copy").addEventListener("click", () =>
   run("Copy failed", async () => {
-    const tracks = state.tracks.filter((t) => t.exists).map((t) => ({ path: t.path, title: t.title }));
-    const res = await invoke("copy_playlist", {
-      req: {
-        name: state.playlist.name,
-        tracks,
-        volume_id: state.volumeId,
-        folder: $("folder").value.trim() || state.playlist.name,
-        number_prefix: $("numbered").checked,
-        ascii_names: $("ascii").checked,
-        replace: $("replace").checked,
-      },
-    });
-    state.lastCopy = { volume_path: res.plan.volume_path, order: res.plan.items.map((i) => i.target_name) };
-    const ok = res.report.check.in_order;
-    lcd(ok ? "COPIED IN ORDER" : "COPIED", res.report.files_copied,
-      ok ? "The copy came out in playlist order. Lock the order to make sure no player sees otherwise."
-         : "Copied, but the stick lists the files in a different order. Lock the order to fix it.");
-    setStatus(`Copied ${res.report.files_copied} files to ${res.plan.folder_name}.`);
+    const res = await invoke("copy_playlist", { req: request() });
+    lcd("COPIED", res.report.files_copied, "Files copied. Setting the order at FAT level next.");
+    try {
+      await lockOrder(res.plan);
+    } catch (err) {
+      lcd("NOT LOCKED", res.report.files_copied, "The files are copied, but their order is not set. Select Lock order only to finish.");
+      setStatus(String(err.message || err), true);
+    }
   }));
 
 $("lock").addEventListener("click", () =>
   run("Lock failed", async () => {
-    lcd("LOCKING", undefined, "Waiting for your system's authorization…");
-    const res = await invoke("lock_order", {
-      req: { volume_id: state.volumeId, volume_path: state.lastCopy.volume_path, order: state.lastCopy.order },
-    });
-    const o = res.outcome;
-    if (!o.ok) throw new Error(o.error || "The stick's order does not match after locking.");
-    lcd("ORDER LOCKED", o.check ? o.check.found : undefined,
-      o.report && o.report.changed ? "Folder table rewritten and read back: it matches the playlist."
-                                   : "The folder table already matched the playlist; nothing was written.");
-    setStatus(o.backup_file ? `Undo backup saved: ${o.backup_file}` : "No changes were needed.");
-    await refreshVolumes();
-  }));
-
-$("check").addEventListener("click", () =>
-  run("Check failed", async () => {
-    const c = await invoke("check_mounted_order", {
-      volumeId: state.volumeId, volumePath: state.lastCopy.volume_path, order: state.lastCopy.order,
-    });
-    if (c.in_order) {
-      lcd("IN ORDER", c.found, "The stick lists every track in playlist order.");
-      setStatus(c.junk.length ? `${c.junk.length} hidden metadata files are in the folder.` : "");
-    } else {
-      lcd("OUT OF ORDER", c.found, "Lock the order to fix it.");
-      setStatus(c.missing.length ? `${c.missing.length} tracks are missing from the stick.` : "The tracks are present but out of order.", true);
-    }
+    const plan = await invoke("plan_playlist", { req: request() });
+    await lockOrder(plan);
   }));
 
 // ---- start -------------------------------------------------------------------------

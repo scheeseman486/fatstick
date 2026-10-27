@@ -600,6 +600,7 @@ dependencies = [
  "deunicode",
  "encoding_rs",
  "filetime",
+ "libc",
  "percent-encoding",
  "quick-xml 0.38.4",
  "serde",

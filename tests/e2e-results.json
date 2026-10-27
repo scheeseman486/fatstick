@@ -23,7 +23,7 @@
     {
       "name": "FAT32 512B clusters, 60 tracks: fsck.fat -n clean after sort",
       "ok": true,
-      "detail": "/tmp/p2u-FAT32 512B clusters, 60 tracks-azb78nru/stick.img: 70 files, 2822/129022 clusters"
+      "detail": "/tmp/p2u-FAT32 512B clusters, 60 tracks-2_hm2y64/stick.img: 70 files, 2822/129022 clusters"
     },
     {
       "name": "FAT32 512B clusters, 60 tracks: every file reads back byte-identical",
@@ -31,7 +31,7 @@
       "detail": ""
     },
     {
-      "name": "FAT32 512B clusters, 60 tracks: p2u verify (raw) passes",
+      "name": "FAT32 512B clusters, 60 tracks: p2u verify (raw order and sizes) passes",
       "ok": true,
       "detail": ""
     },
@@ -68,7 +68,7 @@
     {
       "name": "FAT32 4K clusters, XSPF playlist: fsck.fat -n clean after sort",
       "ok": true,
-      "detail": "/tmp/p2u-FAT32 4K clusters, XSPF playlist-upoi9aeo/stick.img: 36 files, 188/76643 clusters"
+      "detail": "/tmp/p2u-FAT32 4K clusters, XSPF playlist-bzt5jv1c/stick.img: 36 files, 188/76643 clusters"
     },
     {
       "name": "FAT32 4K clusters, XSPF playlist: every file reads back byte-identical",
@@ -76,7 +76,7 @@
       "detail": ""
     },
     {
-      "name": "FAT32 4K clusters, XSPF playlist: p2u verify (raw) passes",
+      "name": "FAT32 4K clusters, XSPF playlist: p2u verify (raw order and sizes) passes",
       "ok": true,
       "detail": ""
     },
@@ -113,7 +113,7 @@
     {
       "name": "FAT16, 40 tracks: fsck.fat -n clean after sort",
       "ok": true,
-      "detail": "/tmp/p2u-FAT16, 40 tracks-kc2gtbm3/stick.img: 47 files, 519/16343 clusters"
+      "detail": "/tmp/p2u-FAT16, 40 tracks-57r0ooqv/stick.img: 47 files, 519/16343 clusters"
     },
     {
       "name": "FAT16, 40 tracks: every file reads back byte-identical",
@@ -121,7 +121,7 @@
       "detail": ""
     },
     {
-      "name": "FAT16, 40 tracks: p2u verify (raw) passes",
+      "name": "FAT16, 40 tracks: p2u verify (raw order and sizes) passes",
       "ok": true,
       "detail": ""
     },
@@ -158,7 +158,7 @@
     {
       "name": "FAT12, 12 tracks: fsck.fat -n clean after sort",
       "ok": true,
-      "detail": "/tmp/p2u-FAT12, 12 tracks-26l6n0c1/stick.img: 16 files, 159/2036 clusters"
+      "detail": "/tmp/p2u-FAT12, 12 tracks-073wbzj5/stick.img: 16 files, 159/2036 clusters"
     },
     {
       "name": "FAT12, 12 tracks: every file reads back byte-identical",
@@ -166,7 +166,7 @@
       "detail": ""
     },
     {
-      "name": "FAT12, 12 tracks: p2u verify (raw) passes",
+      "name": "FAT12, 12 tracks: p2u verify (raw order and sizes) passes",
       "ok": true,
       "detail": ""
     },
@@ -193,7 +193,7 @@
     {
       "name": "FAT32 inside an MBR partition: fsck.fat -n clean after sort",
       "ok": true,
-      "detail": "/tmp/p2u-FAT32 inside an MBR partition-n1n2mnvm/stick.img.part: 30 files, 1130/159270 clusters"
+      "detail": "/tmp/p2u-FAT32 inside an MBR partition-q81i8i54/stick.img.part: 30 files, 1130/159270 clusters"
     },
     {
       "name": "FAT32 inside an MBR partition: every file reads back byte-identical",
@@ -201,7 +201,7 @@
       "detail": ""
     },
     {
-      "name": "FAT32 inside an MBR partition: p2u verify (raw) passes",
+      "name": "FAT32 inside an MBR partition: p2u verify (raw order and sizes) passes",
       "ok": true,
       "detail": ""
     },
@@ -212,6 +212,96 @@
     },
     {
       "name": "FAT32 inside an MBR partition: restore returns image to pre-sort bytes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 top level, 30 tracks: scramble produced a wrong order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 top level, 30 tracks: dry run leaves image untouched",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 top level, 30 tracks: p2u sort reports success",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 top level, 30 tracks: fatsort -l sees playlist order",
+      "ok": true,
+      "detail": "first ['01 - Nimbus.mp3', '02 - a.mp3']"
+    },
+    {
+      "name": "FAT32 top level, 30 tracks: fsck.fat -n clean after sort",
+      "ok": true,
+      "detail": "/tmp/p2u-FAT32 top level, 30 tracks-u64ftc6c/stick.img: 35 files, 1374/129022 clusters"
+    },
+    {
+      "name": "FAT32 top level, 30 tracks: every file reads back byte-identical",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 top level, 30 tracks: p2u verify (raw order and sizes) passes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 top level, 30 tracks: second sort is a no-op",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 top level, 30 tracks: restore returns image to pre-sort bytes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16 fixed root, 20 tracks: scramble produced a wrong order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16 fixed root, 20 tracks: dry run leaves image untouched",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16 fixed root, 20 tracks: p2u sort reports success",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16 fixed root, 20 tracks: fatsort -l sees playlist order",
+      "ok": true,
+      "detail": "first ['01 - Night Drive.mp3', '02 - Track with  two spaces.mp3']"
+    },
+    {
+      "name": "FAT16 fixed root, 20 tracks: fsck.fat -n clean after sort",
+      "ok": true,
+      "detail": "/tmp/p2u-FAT16 fixed root, 20 tracks-jfczb8wa/stick.img: 24 files, 287/16343 clusters"
+    },
+    {
+      "name": "FAT16 fixed root, 20 tracks: every file reads back byte-identical",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16 fixed root, 20 tracks: p2u verify (raw order and sizes) passes",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16 fixed root, 20 tracks: second sort is a no-op",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16 fixed root, 20 tracks: restore returns image to pre-sort bytes",
       "ok": true,
       "detail": ""
     },
@@ -229,6 +319,21 @@
       "name": "safety: only the folder's directory sectors changed",
       "ok": true,
       "detail": "1 sector(s) changed"
+    },
+    {
+      "name": "safety: backup failure means nothing is written",
+      "ok": true,
+      "detail": "nothing was written: the undo backup could not be saved (No "
+    },
+    {
+      "name": "safety: a truncated file makes the lock fail even though the order is set",
+      "ok": true,
+      "detail": "[{'name': 'Track Two.mp3', 'expected': 1000, 'on_stick': 400}]"
+    },
+    {
+      "name": "safety: verify reports the truncated file",
+      "ok": true,
+      "detail": ""
     }
   ],
   "reorder_reports": {
@@ -260,6 +365,18 @@
       "deleted_slots_reclaimed": 2,
       "slots_used": 79,
       "capacity_slots": 96,
+      "changed": true
+    },
+    "FAT32 top level": {
+      "deleted_slots_reclaimed": 3,
+      "slots_used": 97,
+      "capacity_slots": 112,
+      "changed": true
+    },
+    "FAT16 top level": {
+      "deleted_slots_reclaimed": 2,
+      "slots_used": 68,
+      "capacity_slots": 512,
       "changed": true
     }
   }

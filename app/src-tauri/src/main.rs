@@ -5,8 +5,7 @@
 
 use std::path::PathBuf;
 
-use p2u_core::copy::{execute_copy, readdir_order, CopyOptions, CopyReport};
-use p2u_core::fat::{check_order, OrderCheck};
+use p2u_core::copy::{execute_copy, CopyOptions, CopyReport};
 use p2u_core::job::{run_lock, LockJob, LockOutcome};
 use p2u_core::plan::{make_plan, Plan, PlanOptions};
 use p2u_core::playlist::{self, Playlist, PlaylistEntry, Source};
@@ -86,10 +85,38 @@ struct CopyRequest {
     name: String,
     tracks: Vec<TrackIn>,
     volume_id: String,
+    /// Empty string = top level of the stick.
     folder: String,
     number_prefix: bool,
     ascii_names: bool,
+    #[serde(default)]
     replace: bool,
+}
+
+fn build_plan(req: &CopyRequest, mount: &std::path::Path) -> Plan {
+    let pl = Playlist {
+        name: req.name.clone(),
+        path: PathBuf::new(),
+        entries: req
+            .tracks
+            .iter()
+            .map(|t| PlaylistEntry { source: Source::File(PathBuf::from(&t.path)), title: t.title.clone(), duration_secs: None })
+            .collect(),
+        warnings: vec![],
+    };
+    make_plan(
+        &pl,
+        mount,
+        &PlanOptions { folder_name: Some(req.folder.clone()), number_prefix: req.number_prefix, ascii_names: req.ascii_names },
+    )
+}
+
+/// The names and sizes the stick should hold, without copying ("Lock order only").
+#[tauri::command]
+fn plan_playlist(req: CopyRequest) -> Result<Plan, String> {
+    let vol = find_volume(&req.volume_id)?;
+    let mount = vol.mount_point.clone().unwrap_or_default();
+    Ok(build_plan(&req, &mount))
 }
 
 #[derive(Serialize)]
@@ -103,21 +130,7 @@ async fn copy_playlist(app: AppHandle, req: CopyRequest) -> Result<CopyResult, S
     let vol = find_volume(&req.volume_id)?;
     let mount = vol.mount_point.clone().ok_or("The stick is not mounted. Unplug it and plug it in again.")?;
     tauri::async_runtime::spawn_blocking(move || {
-        let pl = Playlist {
-            name: req.name.clone(),
-            path: PathBuf::new(),
-            entries: req
-                .tracks
-                .iter()
-                .map(|t| PlaylistEntry { source: Source::File(PathBuf::from(&t.path)), title: t.title.clone(), duration_secs: None })
-                .collect(),
-            warnings: vec![],
-        };
-        let plan = make_plan(
-            &pl,
-            &mount,
-            &PlanOptions { folder_name: Some(req.folder.clone()), number_prefix: req.number_prefix, ascii_names: req.ascii_names },
-        );
+        let plan = build_plan(&req, &mount);
         let opts = CopyOptions { replace_existing: req.replace, stamp_times: true, write_m3u: false, sync_each_file: false };
         let report = execute_copy(&plan, &opts, None, |p| {
             let _ = app.emit("copy-progress", p);
@@ -135,6 +148,8 @@ struct LockRequest {
     volume_id: String,
     volume_path: String,
     order: Vec<String>,
+    /// Expected sizes, parallel to `order`.
+    sizes: Option<Vec<u64>>,
 }
 
 #[derive(Serialize)]
@@ -150,11 +165,22 @@ async fn lock_order(app: AppHandle, req: LockRequest) -> Result<LockResult, Stri
     let backups = app.path().app_data_dir().map_err(|e| e.to_string())?.join("backups");
     std::fs::create_dir_all(&backups).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let job = LockJob { dir_path: req.volume_path, order: req.order, options: Default::default(), partition: None };
+        let job = LockJob {
+            dir_path: req.volume_path,
+            order: req.order,
+            expected_sizes: req.sizes,
+            options: Default::default(),
+            partition: None,
+            eject: true,
+        };
         match p2u_device::acquire(&vol) {
-            Ok(raw) => {
-                let outcome = run_lock(raw, &job, Some(&backups));
-                let mp = p2u_device::remount_after(&vol).ok().flatten();
+            Ok(mut raw) => {
+                let outcome = run_lock(&mut raw, &job, Some(&backups));
+                // On success leave the stick unmounted so nothing writes to it
+                // after the verification; on failure mount it again.
+                let _ = if outcome.ok { raw.eject() } else { Ok(()) };
+                drop(raw);
+                let mp = if outcome.ok { None } else { p2u_device::remount_after(&vol).ok().flatten() };
                 Ok(LockResult { outcome, mount_point: mp.map(|m| m.display().to_string()), method: "system" })
             }
             Err(DeviceError::NeedsElevation) | Err(DeviceError::NoBroker(_)) => {
@@ -175,15 +201,6 @@ async fn lock_order(app: AppHandle, req: LockRequest) -> Result<LockResult, Stri
     .map_err(|e| e.to_string())?
 }
 
-/// Unprivileged check: FAT drivers list a folder in on-disk order.
-#[tauri::command]
-fn check_mounted_order(volume_id: String, volume_path: String, order: Vec<String>) -> Result<OrderCheck, String> {
-    let vol = find_volume(&volume_id)?;
-    let mount = vol.mount_point.ok_or("The stick is not mounted.")?;
-    let dir = mount.join(volume_path.trim_start_matches(['/', '\\']));
-    Ok(check_order(&readdir_order(&dir).map_err(|e| e.to_string())?, &order))
-}
-
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -191,9 +208,9 @@ fn main() {
             load_playlist,
             startup_playlist,
             list_volumes,
+            plan_playlist,
             copy_playlist,
-            lock_order,
-            check_mounted_order
+            lock_order
         ])
         .run(tauri::generate_context!())
         .expect("error while running Playlist2USB");

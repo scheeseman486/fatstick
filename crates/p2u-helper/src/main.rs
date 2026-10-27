@@ -21,7 +21,7 @@ use p2u_core::job::{create_exclusive, run_lock, LockJob, LockOutcome};
 const MAX_JOB_BYTES: u64 = 4 << 20;
 
 fn fail(msg: String) -> LockOutcome {
-    LockOutcome { ok: false, error: Some(msg), report: None, check: None, backup_file: None }
+    LockOutcome { ok: false, error: Some(msg), report: None, check: None, size_mismatches: vec![], backup_file: None }
 }
 
 fn main() -> ExitCode {
@@ -50,11 +50,18 @@ fn main() -> ExitCode {
             Some(j) => j,
             None => return fail("job file is not a valid job".into()),
         };
-        let raw = match p2u_device::open_direct(device) {
+        let mut raw = match p2u_device::open_direct(device) {
             Ok(r) => r,
             Err(e) => return fail(e.to_string()),
         };
-        run_lock(raw, &job, result_path.parent())
+        let mut outcome = run_lock(&mut raw, &job, result_path.parent());
+        // Keep the OS from remounting (and writing to) the verified volume.
+        if outcome.ok && job.eject {
+            if let Err(e) = raw.eject() {
+                outcome.error = Some(format!("order verified; {e}"));
+            }
+        }
+        outcome
     })();
 
     let ok = outcome.ok;

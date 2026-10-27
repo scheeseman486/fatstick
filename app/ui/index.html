@@ -46,25 +46,29 @@
       <div id="volumes" class="volumes" role="radiogroup" aria-labelledby="stick-h"></div>
 
       <label class="field">Folder on the stick
-        <input id="folder" type="text" spellcheck="false" autocomplete="off">
+        <input id="folder" type="text" spellcheck="false" autocomplete="off" aria-describedby="folder-hint">
       </label>
+      <p id="folder-hint" class="field-hint">Leave empty to use the top level of the stick.</p>
       <label class="check"><input id="numbered" type="checkbox" checked> Number the file names (01 - …)</label>
       <label class="check"><input id="ascii" type="checkbox"> Plain ASCII names for basic displays</label>
-      <label class="check"><input id="replace" type="checkbox"> Replace the folder if it exists</label>
+      <label class="check"><input id="replace" type="checkbox"> Replace files already on the stick</label>
 
-      <ol class="steps">
+      <div class="actions">
+        <button id="copy" type="button" class="primary" disabled>Copy and lock order</button>
+        <button id="lock" type="button" class="quiet" disabled>Lock order only</button>
+      </div>
+      <ol class="steps" aria-label="What Copy and lock order does">
         <li>
-          <h3>Copy in order</h3>
-          <p>Copies one file at a time into a fresh folder. No password needed.</p>
-          <div class="actions"><button id="copy" type="button" class="primary" disabled>Copy to stick</button></div>
+          <h3>Copy the files</h3>
+          <p>One at a time, through your system.</p>
         </li>
         <li>
-          <h3>Lock the order</h3>
-          <p>Rewrites the folder's entry table so every player follows the playlist. Your system asks for your password or fingerprint.</p>
-          <div class="actions">
-            <button id="lock" type="button" disabled>Lock order</button>
-            <button id="check" type="button" class="quiet" disabled>Check order</button>
-          </div>
+          <h3>Set the order at FAT level</h3>
+          <p>Rewrites the folder's entry table, then reads it back from the stick and checks every track. Your system asks for your password or fingerprint.</p>
+        </li>
+        <li>
+          <h3>Unplug</h3>
+          <p>The stick stays unmounted, so nothing changes it after the check.</p>
         </li>
       </ol>
       <p id="status" class="status" role="status"></p>

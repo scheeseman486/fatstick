@@ -113,6 +113,24 @@ impl p2u_core::fat::Device for RawVolume {
             self.file.sync_all()
         }
     }
+
+    fn invalidate_cache(&mut self) -> io::Result<()> {
+        // Linux reads a block device through the page cache; evict it so the
+        // verification read comes from the stick. No-op elsewhere.
+        p2u_core::fat::drop_page_cache(&self.file)
+    }
+}
+
+impl RawVolume {
+    /// Finish without letting the OS mount the volume again, so the verified
+    /// write is the last thing that touches the stick. Linux and macOS leave
+    /// an unmounted volume alone; Windows remounts on next access unless the
+    /// media is ejected while still locked.
+    pub fn eject(&mut self) -> Result<()> {
+        #[cfg(windows)]
+        windows::eject(&self.file)?;
+        Ok(())
+    }
 }
 
 impl Drop for RawVolume {

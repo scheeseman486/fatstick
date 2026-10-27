@@ -12,6 +12,7 @@ use crate::playlist::{Playlist, Source};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanOptions {
     /// Folder to create at the volume root; defaults to the playlist's name.
+    /// An empty string means the top level of the stick (no folder).
     pub folder_name: Option<String>,
     /// Prefix names with "001 - " so players that sort by name agree too.
     pub number_prefix: bool,
@@ -37,7 +38,7 @@ pub struct PlanItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Plan {
     pub playlist_name: String,
-    /// Folder name created at the volume root.
+    /// Folder name created at the volume root; empty for the top level.
     pub folder_name: String,
     /// Where the folder will be created (volume mount point / folder).
     pub dest_dir: PathBuf,
@@ -52,6 +53,14 @@ pub struct Plan {
 impl Plan {
     pub fn target_names(&self) -> Vec<String> {
         self.items.iter().map(|i| i.target_name.clone()).collect()
+    }
+
+    pub fn expected_sizes(&self) -> Vec<u64> {
+        self.items.iter().map(|i| i.size).collect()
+    }
+
+    pub fn is_top_level(&self) -> bool {
+        self.folder_name.is_empty()
     }
 }
 
@@ -92,7 +101,11 @@ fn fit_name(stem: &str, ext: &str, max: usize) -> String {
 
 /// Build the copy plan. `dest_root` is the volume's mount point (or drive root).
 pub fn make_plan(playlist: &Playlist, dest_root: &Path, opts: &PlanOptions) -> Plan {
-    let folder_name = sanitize_component(opts.folder_name.as_deref().unwrap_or(&playlist.name), opts.ascii_names);
+    let folder_name = match opts.folder_name.as_deref() {
+        Some(f) if f.trim().is_empty() => String::new(),
+        Some(f) => sanitize_component(f, opts.ascii_names),
+        None => sanitize_component(&playlist.name, opts.ascii_names),
+    };
     let files: Vec<(usize, &PathBuf, Option<&String>)> = playlist
         .entries
         .iter()
@@ -143,7 +156,7 @@ pub fn make_plan(playlist: &Playlist, dest_root: &Path, opts: &PlanOptions) -> P
     }
     Plan {
         playlist_name: playlist.name.clone(),
-        dest_dir: dest_root.join(&folder_name),
+        dest_dir: if folder_name.is_empty() { dest_root.to_path_buf() } else { dest_root.join(&folder_name) },
         volume_path: format!("/{folder_name}"),
         folder_name,
         items,

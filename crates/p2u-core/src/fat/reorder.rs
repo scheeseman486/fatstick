@@ -86,6 +86,16 @@ impl Backup {
     }
 }
 
+/// A computed rewrite of one directory, not yet written.
+#[derive(Debug, Clone)]
+pub struct PreparedReorder {
+    pub report: ReorderReport,
+    /// The directory's current bytes; save this before applying.
+    pub backup: Backup,
+    new: Vec<u8>,
+    extents: Vec<Extent>,
+}
+
 /// How a folder's actual order compares with the order wanted.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderCheck {
@@ -149,17 +159,16 @@ impl<D: Device> Volume<D> {
             .collect())
     }
 
-    /// Rewrite directory `d` so the entries named in `order` come first (or last),
-    /// in that order. Deleted slots are compacted away; nothing outside the
-    /// directory's own clusters is touched. Returns the report and, if a write
-    /// happened, the backup of the previous bytes.
-    pub fn reorder_dir(
+    /// Work out how directory `d` must be rewritten so the entries named in
+    /// `order` come first (or last), in that order, with deleted slots compacted
+    /// away. Reads only; nothing is written until [`Volume::apply_reorder`].
+    pub fn prepare_reorder(
         &mut self,
         d: DirRef,
         dir_path: &str,
         order: &[String],
         opts: &ReorderOptions,
-    ) -> Result<(ReorderReport, Option<Backup>)> {
+    ) -> Result<PreparedReorder> {
         let mut warnings = Vec::new();
         let health = self.health(false)?;
         if health.boot_sector_dirty || !health.fat_clean_shutdown {
@@ -267,10 +276,6 @@ impl<D: Device> Volume<D> {
             final_order: sequence.iter().map(|&i| movable[i].name().to_string()).collect(),
             warnings,
         };
-        if !changed || opts.dry_run {
-            return Ok((report, None));
-        }
-
         let backup = Backup {
             format: 1,
             volume_serial: self.geometry().volume_serial,
@@ -279,12 +284,43 @@ impl<D: Device> Volume<D> {
             extents: extents.clone(),
             data: old,
         };
-        self.write_extents(&extents, &new)?;
-        let reread = self.read_extents(&extents)?;
-        if reread != new {
-            return Err(FatError::VerifyFailed("directory bytes differ after write".into()));
+        Ok(PreparedReorder { report, backup, new, extents })
+    }
+
+    /// Write a prepared reorder, push it to the medium, drop any OS cache of the
+    /// device and read the sectors back from the medium to confirm them.
+    /// Refuses if the directory changed since it was prepared.
+    pub fn apply_reorder(&mut self, p: &PreparedReorder) -> Result<()> {
+        if !p.report.changed {
+            return Ok(());
         }
-        Ok((report, Some(backup)))
+        if self.read_extents(&p.extents)? != p.backup.data {
+            return Err(FatError::Unsafe("the directory changed after it was read".into()));
+        }
+        self.write_extents(&p.extents, &p.new)?;
+        self.invalidate_cache()?;
+        if self.read_extents(&p.extents)? != p.new {
+            return Err(FatError::VerifyFailed("directory bytes on the medium differ from what was written".into()));
+        }
+        Ok(())
+    }
+
+    /// Prepare and apply in one step. Returns the report and, if a write
+    /// happened, the backup of the previous bytes. Callers that must keep the
+    /// backup safe before writing use prepare/apply separately (see job.rs).
+    pub fn reorder_dir(
+        &mut self,
+        d: DirRef,
+        dir_path: &str,
+        order: &[String],
+        opts: &ReorderOptions,
+    ) -> Result<(ReorderReport, Option<Backup>)> {
+        let p = self.prepare_reorder(d, dir_path, order, opts)?;
+        if !p.report.changed || opts.dry_run {
+            return Ok((p.report, None));
+        }
+        self.apply_reorder(&p)?;
+        Ok((p.report, Some(p.backup)))
     }
 
     /// Put a directory back exactly as a [`Backup`] recorded it.
@@ -297,6 +333,10 @@ impl<D: Device> Volume<D> {
             return Err(FatError::Unsafe("directory layout changed since the backup".into()));
         }
         self.write_extents(&b.extents, &b.data)?;
+        self.invalidate_cache()?;
+        if self.read_extents(&b.extents)? != b.data {
+            return Err(FatError::VerifyFailed("restored bytes differ on the medium".into()));
+        }
         Ok(())
     }
 }

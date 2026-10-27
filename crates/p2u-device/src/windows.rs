@@ -16,7 +16,10 @@ use windows_sys::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_EL
 use windows_sys::Win32::Storage::FileSystem::{
     GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW, FILE_SHARE_READ, FILE_SHARE_WRITE,
 };
-use windows_sys::Win32::System::Ioctl::{FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME};
+use windows_sys::Win32::System::Ioctl::{
+    FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME, IOCTL_STORAGE_EJECT_MEDIA, IOCTL_STORAGE_MEDIA_REMOVAL,
+    PREVENT_MEDIA_REMOVAL,
+};
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetExitCodeProcess, OpenProcessToken, WaitForSingleObject, INFINITE,
 };
@@ -105,6 +108,33 @@ fn ioctl(f: &File, code: u32) -> bool {
 
 pub(crate) fn unlock(f: &File) {
     ioctl(f, FSCTL_UNLOCK_VOLUME);
+}
+
+/// Microsoft's documented sequence for removable media, after lock + dismount:
+/// allow removal, then eject. USB sticks that are not "removable media" may
+/// refuse the eject; that is reported, and the volume stays dismounted until
+/// the handle closes.
+pub(crate) fn eject(f: &File) -> Result<()> {
+    let allow = PREVENT_MEDIA_REMOVAL { PreventMediaRemoval: false };
+    let mut returned = 0u32;
+    // SAFETY: input buffer is a valid PREVENT_MEDIA_REMOVAL.
+    unsafe {
+        DeviceIoControl(
+            f.as_raw_handle() as HANDLE,
+            IOCTL_STORAGE_MEDIA_REMOVAL,
+            (&allow as *const PREVENT_MEDIA_REMOVAL).cast(),
+            std::mem::size_of::<PREVENT_MEDIA_REMOVAL>() as u32,
+            null_mut(),
+            0,
+            &mut returned,
+            null_mut(),
+        );
+    }
+    if ioctl(f, IOCTL_STORAGE_EJECT_MEDIA) {
+        Ok(())
+    } else {
+        Err(DeviceError::Other(format!("eject failed: {}", std::io::Error::last_os_error())))
+    }
 }
 
 pub fn open_direct(device: &str) -> Result<RawVolume> {
