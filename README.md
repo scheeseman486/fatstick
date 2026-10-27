@@ -3,8 +3,10 @@
 ![Playlist2USB main window](docs/gui.png)
 
 Copies an M3U/M3U8, XSPF (VLC) or PLS playlist onto a FAT32 USB stick so that
-cheap MP3 players and car stereos, which play files in **raw FAT directory-entry
-order** rather than by name or tag, play it in playlist order.
+cheap MP3 players and car stereos, which play files in **FAT order** rather than
+by name or tag, play it in playlist order. FAT order is the order of the entries
+in each folder's table on the FAT volume (what fatsort, YAFS and DriveSort sort);
+it is not stored in the File Allocation Table itself, which only chains clusters.
 
 ## How it works
 
