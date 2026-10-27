@@ -51,20 +51,21 @@
       <p id="folder-hint" class="field-hint">Leave empty to use the top level of the stick.</p>
       <label class="check"><input id="numbered" type="checkbox" checked> Number the file names (01 - …)</label>
       <label class="check"><input id="ascii" type="checkbox"> Plain ASCII names for basic displays</label>
-      <label class="check"><input id="replace" type="checkbox"> Replace files already on the stick</label>
+      <label class="check"><input id="replace" type="checkbox"> Replace an earlier copy on the stick</label>
+      <label class="check"><input id="fragmented" type="checkbox"> Allow split files if free space is scattered</label>
 
       <div class="actions">
-        <button id="copy" type="button" class="primary" disabled>Copy and lock order</button>
-        <button id="lock" type="button" class="quiet" disabled>Lock order only</button>
+        <button id="write" type="button" class="primary" disabled>Write to stick</button>
+        <button id="lock" type="button" class="quiet" disabled>Fix order only</button>
       </div>
-      <ol class="steps" aria-label="What Copy and lock order does">
+      <ol class="steps" aria-label="What Write to stick does">
         <li>
-          <h3>Copy the files</h3>
-          <p>One at a time, through your system.</p>
+          <h3>Write at FAT level</h3>
+          <p>The files go straight into the stick's file system: entries in playlist order, each file in one unbroken block, back to back. Your system asks for your password or fingerprint once.</p>
         </li>
         <li>
-          <h3>Set the order at FAT level</h3>
-          <p>Rewrites the folder's entry table, then reads it back from the stick and checks every track. Your system asks for your password or fingerprint.</p>
+          <h3>Read it all back</h3>
+          <p>The order, where every file sits and every byte are checked against your files.</p>
         </li>
         <li>
           <h3>Unplug</h3>

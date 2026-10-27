@@ -1,0 +1,330 @@
+{
+  "checks": [
+    {
+      "name": "FAT32 512B clusters 40 tracks: p2u write ok and self-verified (order, layout, FAT copies, data)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 512B clusters 40 tracks: p2u reports one unbroken block",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 512B clusters 40 tracks: fsck.fat clean",
+      "ok": true,
+      "detail": "/tmp/p2u-write-biuc6f94/FAT32_512B_clusters_40_tracks.img: 42 files, 1809/129022 clusters"
+    },
+    {
+      "name": "FAT32 512B clusters 40 tracks: fatsort -l lists the playlist in FAT order",
+      "ok": true,
+      "detail": "first ['01 - FAT3240 27.mp3', '02 - FAT3240 28 with a long title.mp3']"
+    },
+    {
+      "name": "FAT32 512B clusters 40 tracks: mshowfat: one unbroken run per file, back to back in playlist order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 512B clusters 40 tracks: every file reads back byte-identical (mcopy)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16 25 tracks: p2u write ok and self-verified (order, layout, FAT copies, data)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16 25 tracks: p2u reports one unbroken block",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16 25 tracks: fsck.fat clean",
+      "ok": true,
+      "detail": "/tmp/p2u-write-biuc6f94/FAT16_25_tracks.img: 27 files, 294/16343 clusters"
+    },
+    {
+      "name": "FAT16 25 tracks: fatsort -l lists the playlist in FAT order",
+      "ok": true,
+      "detail": "first ['01 - FAT1625 23 with a long title with a long title.mp3', '02 - FAT1625 06.mp3']"
+    },
+    {
+      "name": "FAT16 25 tracks: mshowfat: one unbroken run per file, back to back in playlist order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT16 25 tracks: every file reads back byte-identical (mcopy)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT12 10 tracks: p2u write ok and self-verified (order, layout, FAT copies, data)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT12 10 tracks: p2u reports one unbroken block",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT12 10 tracks: fsck.fat clean",
+      "ok": true,
+      "detail": "/tmp/p2u-write-biuc6f94/FAT12_10_tracks.img: 12 files, 102/2036 clusters"
+    },
+    {
+      "name": "FAT12 10 tracks: fatsort -l lists the playlist in FAT order",
+      "ok": true,
+      "detail": "first ['01 - FAT1210 00.mp3', '02 - FAT1210 06.mp3']"
+    },
+    {
+      "name": "FAT12 10 tracks: mshowfat: one unbroken run per file, back to back in playlist order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT12 10 tracks: every file reads back byte-identical (mcopy)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 in MBR partition 20 tracks: p2u write ok and self-verified (order, layout, FAT copies, data)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 in MBR partition 20 tracks: p2u reports one unbroken block",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 in MBR partition 20 tracks: fsck.fat clean",
+      "ok": true,
+      "detail": "/tmp/p2u-write-biuc6f94/FAT32_in_MBR_partition_20_tracks.img.part: 22 files, 855/159270 clusters"
+    },
+    {
+      "name": "FAT32 in MBR partition 20 tracks: raw listing (p2u ls) shows the playlist in FAT order",
+      "ok": true,
+      "detail": "first ['01 - FAT3220 01 with a long title.mp3', '02 - FAT3220 10 with a long title.mp3']"
+    },
+    {
+      "name": "FAT32 in MBR partition 20 tracks: mshowfat: one unbroken run per file, back to back in playlist order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "FAT32 in MBR partition 20 tracks: every file reads back byte-identical (mcopy)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "used stick with holes: write ok",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "used stick with holes: still one unbroken block (holes skipped)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "used stick with holes: fsck.fat clean",
+      "ok": true,
+      "detail": "/tmp/p2u-write-biuc6f94/used.img: 132 files, 1921/129022 clusters"
+    },
+    {
+      "name": "used stick with holes: fatsort -l lists the playlist in FAT order",
+      "ok": true,
+      "detail": "first ['01 - Used 08 with a long title with a long title.mp3', '02 - Used 17 with a long title with a long title.mp3']"
+    },
+    {
+      "name": "used stick with holes: mshowfat: one unbroken run per file, back to back in playlist order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "used stick with holes: every file reads back byte-identical (mcopy)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "no single free block: refused by default",
+      "ok": true,
+      "detail": "refusing to write: no single free block is large enough: 0 MB needed, "
+    },
+    {
+      "name": "no single free block: refusal wrote nothing",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "allow fragmented: write ok and self-verified",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "allow fragmented: ascending, not contiguous",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "allow fragmented: fsck.fat clean",
+      "ok": true,
+      "detail": "/tmp/p2u-write-biuc6f94/holes.img: 138 files, 64642/68528 clusters"
+    },
+    {
+      "name": "allow fragmented: fatsort -l lists the playlist in FAT order",
+      "ok": true,
+      "detail": "first ['01 - Tight 09.mp3', '02 - Tight 08 with a long title with a long title.mp3']"
+    },
+    {
+      "name": "allow fragmented: mshowfat: clusters ascend through the playlist",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "allow fragmented: every file reads back byte-identical (mcopy)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "replace: refused without --replace",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "replace: refusal wrote nothing",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "replace: write ok and self-verified",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "replace: fsck.fat clean",
+      "ok": true,
+      "detail": "/tmp/p2u-write-biuc6f94/replace.img: 22 files, 767/129022 clusters"
+    },
+    {
+      "name": "replace: fatsort -l lists the playlist in FAT order",
+      "ok": true,
+      "detail": "first ['01 - Mix 00.mp3', '02 - Mix 11 with a long title with a long title.mp3']"
+    },
+    {
+      "name": "replace: mshowfat: one unbroken run per file, back to back in playlist order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "replace: every file reads back byte-identical (mcopy)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "replace: no clusters leaked",
+      "ok": true,
+      "detail": "767 vs 767 used"
+    },
+    {
+      "name": "top level: write ok and self-verified",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "top level: fsck.fat clean",
+      "ok": true,
+      "detail": "/tmp/p2u-write-biuc6f94/top.img: 32 files, 768/129022 clusters"
+    },
+    {
+      "name": "top level: fatsort -l lists the playlist in FAT order",
+      "ok": true,
+      "detail": "first ['01 - Top 09.mp3', '02 - Top 07 with a long title.mp3']"
+    },
+    {
+      "name": "top level: mshowfat: one unbroken run per file, back to back in playlist order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "top level: every file reads back byte-identical (mcopy)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "top level: existing files untouched",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "restore: file system clean, folder gone, space returned",
+      "ok": true,
+      "detail": "1 vs 1"
+    },
+    {
+      "name": "restore: refused after later changes, nothing written",
+      "ok": true,
+      "detail": "error: refusing to write: the stick has changed since this backup was "
+    },
+    {
+      "name": "forced reuse: replace ok and self-verified",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "forced reuse: result says the old folder can't be brought back",
+      "ok": true,
+      "detail": "The old folder's space was reused, so only the new write can"
+    },
+    {
+      "name": "forced reuse: restore undoes the write, refuses the superseded backup, stick stays clean",
+      "ok": true,
+      "detail": "error: refusing to write: this backup can no longer be restored: the replaced fi"
+    },
+    {
+      "name": "pull during a new-folder write: completes once no write fails (k=19)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "pull during a new-folder write: safe after a pull at every one of 19 write points; restore always clean",
+      "ok": true,
+      "detail": "18x absent, 1x new complete"
+    },
+    {
+      "name": "pull during a replace: completes once no write fails (k=22)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "pull during a replace: safe after a pull at every one of 22 write points; restore always clean",
+      "ok": true,
+      "detail": "20x absent, 1x new complete, 1x old complete"
+    },
+    {
+      "name": "pull during a top-level write: completes once no write fails (k=21)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "pull during a top-level write: safe after a pull at every one of 21 write points; restore always clean",
+      "ok": true,
+      "detail": "17x 0 visible, 1x 2 visible, 3x 6 visible"
+    },
+    {
+      "name": "pull during the lock step: completes once no write fails (k=14)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "pull during the lock step: safe after a pull at every one of 14 write points, never a duplicate; restore exact",
+      "ok": true,
+      "detail": "1x 0 listed, 2x 11 listed, 2x 15 listed, 2x 19 listed, 2x 23 listed, 1x 24 listed, 2x 3 listed, 2x 7 listed"
+    }
+  ],
+  "simulated_pulls": 76
+}

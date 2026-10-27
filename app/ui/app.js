@@ -156,7 +156,7 @@ function renderVolumes(errorText) {
   if (errorText || state.volumes.length === 0) {
     const p = document.createElement("p");
     p.className = "vol-msg";
-    p.textContent = errorText || "No FAT32 stick found. Plug one in, then select Refresh.";
+    p.textContent = errorText || "No FAT32 stick found. Plug one in, then select Refresh. (exFAT sticks aren't supported yet.)";
     box.append(p);
   }
   for (const v of state.volumes) {
@@ -201,16 +201,18 @@ $("refresh").addEventListener("click", refreshVolumes);
 function updateButtons() {
   const vol = state.volumes.find((v) => v.id === state.volumeId);
   const ready = !state.busy && state.tracks.some((t) => t.exists) && vol && vol.mount_point;
-  $("copy").disabled = !ready;
+  $("write").disabled = !ready;
   $("lock").disabled = !ready;
   $("open").disabled = state.busy;
 }
 
 // ---- copy, lock, check --------------------------------------------------------------
-T.event.listen("copy-progress", (e) => {
+T.event.listen("write-progress", (e) => {
   const p = e.payload;
   const n = String(p.index + 1).padStart(2, "0");
-  lcd(`COPY ${n}-${String(p.total).padStart(2, "0")}`, undefined, `Copying ${p.name}`);
+  const word = p.stage === "verify" ? "CHECK" : "WRITE";
+  const pct = p.bytes_total ? ` ${Math.round((100 * p.bytes_done) / p.bytes_total)}%` : "";
+  lcd(`${word} ${n}-${String(p.total).padStart(2, "0")}`, undefined, `${p.stage === "verify" ? "Reading back" : "Writing"} ${p.name}${pct}`);
 });
 
 async function run(label, fn) {
@@ -237,6 +239,8 @@ function request() {
     number_prefix: $("numbered").checked,
     ascii_names: $("ascii").checked,
     replace: $("replace").checked,
+    allow_fragmented: $("fragmented").checked,
+    verify_data: true,
   };
 }
 
@@ -267,16 +271,31 @@ async function lockOrder(plan) {
   await refreshVolumes();
 }
 
-$("copy").addEventListener("click", () =>
-  run("Copy failed", async () => {
-    const res = await invoke("copy_playlist", { req: request() });
-    lcd("COPIED", res.report.files_copied, "Files copied. Setting the order at FAT level next.");
-    try {
-      await lockOrder(res.plan);
-    } catch (err) {
-      lcd("NOT LOCKED", res.report.files_copied, "The files are copied, but their order is not set. Select Lock order only to finish.");
-      setStatus(String(err.message || err), true);
+$("write").addEventListener("click", () =>
+  run("Write failed", async () => {
+    lcd("WAITING", undefined, "Waiting for your system's authorization…");
+    const res = await invoke("write_playlist", { req: request() });
+    const o = res.outcome;
+    const r = o.result;
+    const v = o.verification;
+    if (!o.ok) {
+      const why = o.error
+        || (v && v.problems.length ? v.problems[0] : "")
+        || (v && v.data_mismatches.length ? `${v.data_mismatches.length} files read back differently.` : "")
+        || "The check after writing failed.";
+      throw new Error(why);
     }
+    const n = r.names.length;
+    const shape = r.layout.contiguous
+      ? "each file in one unbroken block, back to back"
+      : `in ascending order, ${r.layout.files.filter((f) => f.fragments > 1).length} files split`;
+    lcd("WRITTEN OK", n, `Read back from the stick: ${n} tracks in FAT order, ${shape}, every byte matches. Safe to unplug.`);
+    const notes = [];
+    if (r.deleted.length) notes.push(`Replaced ${r.deleted.length === 1 ? r.deleted[0] : r.deleted.length + " items"}.`);
+    if (r.undo_note) notes.push(r.undo_note);
+    if (r.backups.length) notes.push(`Undo backups: ${r.backups.join(", ")}`);
+    setStatus(notes.join(" "));
+    await refreshVolumes();
   }));
 
 $("lock").addEventListener("click", () =>

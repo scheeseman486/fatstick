@@ -1,0 +1,46 @@
+[
+  {
+    "stick": "fat32_used",
+    "write_ok": true,
+    "self_verified": true,
+    "contiguous": true,
+    "kernel_lists_in_order": true,
+    "kernel_reads_identical": true,
+    "fsck_clean_after_kernel_use": true,
+    "mshowfat_one_run_each_ascending": true,
+    "error": null
+  },
+  {
+    "stick": "fat16_used",
+    "write_ok": true,
+    "self_verified": true,
+    "contiguous": true,
+    "kernel_lists_in_order": true,
+    "kernel_reads_identical": true,
+    "fsck_clean_after_kernel_use": true,
+    "mshowfat_one_run_each_ascending": true,
+    "error": null
+  },
+  {
+    "stick": "fat32_top",
+    "write_ok": true,
+    "self_verified": true,
+    "contiguous": true,
+    "kernel_lists_in_order": true,
+    "kernel_reads_identical": true,
+    "fsck_clean_after_kernel_use": true,
+    "mshowfat_one_run_each_ascending": true,
+    "error": null
+  },
+  {
+    "stick": "fat32_replace",
+    "write_ok": true,
+    "self_verified": true,
+    "contiguous": true,
+    "kernel_lists_in_order": true,
+    "kernel_reads_identical": true,
+    "fsck_clean_after_kernel_use": true,
+    "mshowfat_one_run_each_ascending": true,
+    "error": null
+  }
+]

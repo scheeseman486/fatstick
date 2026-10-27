@@ -5,8 +5,8 @@
 
 use std::path::PathBuf;
 
-use p2u_core::copy::{execute_copy, CopyOptions, CopyReport};
-use p2u_core::job::{run_lock, LockJob, LockOutcome};
+use p2u_core::fat::write::{WriteItem, WriteOptions};
+use p2u_core::job::{run_lock, run_write, LockJob, LockOutcome, WriteJob, WriteOutcome};
 use p2u_core::plan::{make_plan, Plan, PlanOptions};
 use p2u_core::playlist::{self, Playlist, PlaylistEntry, Source};
 use p2u_device::{DeviceError, VolumeInfo};
@@ -91,6 +91,16 @@ struct CopyRequest {
     ascii_names: bool,
     #[serde(default)]
     replace: bool,
+    /// Allow files to be split when no single free block is large enough.
+    #[serde(default)]
+    allow_fragmented: bool,
+    /// Compare every byte on the stick with the source afterwards.
+    #[serde(default = "yes")]
+    verify_data: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn build_plan(req: &CopyRequest, mount: &std::path::Path) -> Plan {
@@ -120,24 +130,54 @@ fn plan_playlist(req: CopyRequest) -> Result<Plan, String> {
 }
 
 #[derive(Serialize)]
-struct CopyResult {
-    report: CopyReport,
+struct WriteResponse {
+    outcome: WriteOutcome,
     plan: Plan,
+    method: &'static str,
 }
 
+/// The main action: write the files straight into the FAT volume (order and
+/// placement chosen here), then read everything back from the stick.
 #[tauri::command]
-async fn copy_playlist(app: AppHandle, req: CopyRequest) -> Result<CopyResult, String> {
+async fn write_playlist(app: AppHandle, req: CopyRequest) -> Result<WriteResponse, String> {
     let vol = find_volume(&req.volume_id)?;
-    let mount = vol.mount_point.clone().ok_or("The stick is not mounted. Unplug it and plug it in again.")?;
+    let backups = app.path().app_data_dir().map_err(|e| e.to_string())?.join("backups");
+    std::fs::create_dir_all(&backups).map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let plan = build_plan(&req, &mount);
-        let opts = CopyOptions { replace_existing: req.replace, stamp_times: true, write_m3u: false, sync_each_file: false };
-        let report = execute_copy(&plan, &opts, None, |p| {
-            let _ = app.emit("copy-progress", p);
-            true
-        })
-        .map_err(|e| e.to_string())?;
-        Ok(CopyResult { report, plan })
+        let plan = build_plan(&req, std::path::Path::new("/"));
+        let job = WriteJob {
+            target_dir: plan.volume_path.clone(),
+            items: plan.items.iter().map(|i| WriteItem { source: i.source.clone(), name: i.target_name.clone() }).collect(),
+            options: WriteOptions { replace: req.replace, allow_fragmented: req.allow_fragmented, force: false, dry_run: false },
+            verify_data: req.verify_data,
+            partition: None,
+            eject: true,
+        };
+        match p2u_device::acquire(&vol) {
+            Ok(mut raw) => {
+                let outcome = run_write(&mut raw, &job, Some(&backups), &mut |p| {
+                    let _ = app.emit("write-progress", p);
+                });
+                let _ = if outcome.ok { raw.eject() } else { Ok(()) };
+                drop(raw);
+                if !outcome.ok {
+                    let _ = p2u_device::remount_after(&vol);
+                }
+                Ok(WriteResponse { outcome, plan, method: "system" })
+            }
+            Err(DeviceError::NeedsElevation) | Err(DeviceError::NoBroker(_)) => {
+                let outcome = p2u_device::write_via_helper(&vol, &job).map_err(|e| e.to_string())?;
+                Ok(WriteResponse { outcome, plan, method: "helper" })
+            }
+            Err(DeviceError::NotAuthorized) => {
+                let _ = p2u_device::remount_after(&vol);
+                Err("Authorization was cancelled. The stick was not changed.".into())
+            }
+            Err(e) => {
+                let _ = p2u_device::remount_after(&vol);
+                Err(e.to_string())
+            }
+        }
     })
     .await
     .map_err(|e| e.to_string())?
@@ -209,7 +249,7 @@ fn main() {
             startup_playlist,
             list_volumes,
             plan_playlist,
-            copy_playlist,
+            write_playlist,
             lock_order
         ])
         .run(tauri::generate_context!())

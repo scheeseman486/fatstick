@@ -191,9 +191,9 @@ pub fn helper_path() -> Result<PathBuf> {
     p.ok_or_else(|| DeviceError::Other(format!("{name} not found next to {}", exe.display())))
 }
 
-/// Run a lock job in the elevated helper and collect its outcome.
+/// Run a job in the elevated helper and collect its outcome.
 /// The job and result files live in a fresh private temp folder.
-pub fn lock_via_helper(vol: &VolumeInfo, job: &p2u_core::job::LockJob) -> Result<p2u_core::job::LockOutcome> {
+pub fn run_job_via_helper(vol: &VolumeInfo, job: &p2u_core::job::HelperJob) -> Result<p2u_core::job::HelperOutcome> {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let dir = std::env::temp_dir().join(format!("p2u-{}-{nanos}", std::process::id()));
     #[cfg_attr(not(unix), allow(unused_mut))]
@@ -204,13 +204,25 @@ pub fn lock_via_helper(vol: &VolumeInfo, job: &p2u_core::job::LockJob) -> Result
     let job_path = dir.join("job.json");
     let result_path = dir.join("result.json");
     std::fs::write(&job_path, serde_json::to_vec(job).map_err(|e| DeviceError::Other(e.to_string()))?)?;
-    let args = vec![
-        vol.device.clone(),
-        job_path.display().to_string(),
-        result_path.display().to_string(),
-    ];
+    let args = vec![vol.device.clone(), job_path.display().to_string(), result_path.display().to_string()];
     let code = run_helper_elevated(&helper_path()?, &args)?;
     let bytes = std::fs::read(&result_path)
         .map_err(|_| DeviceError::Other(format!("helper exited with code {code} and wrote no result")))?;
     serde_json::from_slice(&bytes).map_err(|e| DeviceError::Other(format!("helper result: {e}")))
+}
+
+/// Run a lock job in the elevated helper.
+pub fn lock_via_helper(vol: &VolumeInfo, job: &p2u_core::job::LockJob) -> Result<p2u_core::job::LockOutcome> {
+    match run_job_via_helper(vol, &p2u_core::job::HelperJob::Lock(job.clone()))? {
+        p2u_core::job::HelperOutcome::Lock(o) => Ok(o),
+        _ => Err(DeviceError::Other("helper answered a different job".into())),
+    }
+}
+
+/// Run a raw write job in the elevated helper.
+pub fn write_via_helper(vol: &VolumeInfo, job: &p2u_core::job::WriteJob) -> Result<p2u_core::job::WriteOutcome> {
+    match run_job_via_helper(vol, &p2u_core::job::HelperJob::Write(job.clone()))? {
+        p2u_core::job::HelperOutcome::Write(o) => Ok(o),
+        _ => Err(DeviceError::Other("helper answered a different job".into())),
+    }
 }

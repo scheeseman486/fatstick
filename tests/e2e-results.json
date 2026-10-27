@@ -23,7 +23,7 @@
     {
       "name": "FAT32 512B clusters, 60 tracks: fsck.fat -n clean after sort",
       "ok": true,
-      "detail": "/tmp/p2u-FAT32 512B clusters, 60 tracks-2_hm2y64/stick.img: 70 files, 2822/129022 clusters"
+      "detail": "/tmp/p2u-FAT32 512B clusters, 60 tracks-xuhecok2/stick.img: 70 files, 2822/129022 clusters"
     },
     {
       "name": "FAT32 512B clusters, 60 tracks: every file reads back byte-identical",
@@ -68,7 +68,7 @@
     {
       "name": "FAT32 4K clusters, XSPF playlist: fsck.fat -n clean after sort",
       "ok": true,
-      "detail": "/tmp/p2u-FAT32 4K clusters, XSPF playlist-bzt5jv1c/stick.img: 36 files, 188/76643 clusters"
+      "detail": "/tmp/p2u-FAT32 4K clusters, XSPF playlist-mf8v43gq/stick.img: 36 files, 188/76643 clusters"
     },
     {
       "name": "FAT32 4K clusters, XSPF playlist: every file reads back byte-identical",
@@ -113,7 +113,7 @@
     {
       "name": "FAT16, 40 tracks: fsck.fat -n clean after sort",
       "ok": true,
-      "detail": "/tmp/p2u-FAT16, 40 tracks-57r0ooqv/stick.img: 47 files, 519/16343 clusters"
+      "detail": "/tmp/p2u-FAT16, 40 tracks-iyuq_o1u/stick.img: 47 files, 519/16343 clusters"
     },
     {
       "name": "FAT16, 40 tracks: every file reads back byte-identical",
@@ -158,7 +158,7 @@
     {
       "name": "FAT12, 12 tracks: fsck.fat -n clean after sort",
       "ok": true,
-      "detail": "/tmp/p2u-FAT12, 12 tracks-073wbzj5/stick.img: 16 files, 159/2036 clusters"
+      "detail": "/tmp/p2u-FAT12, 12 tracks-xn7z1fz0/stick.img: 16 files, 159/2036 clusters"
     },
     {
       "name": "FAT12, 12 tracks: every file reads back byte-identical",
@@ -193,7 +193,7 @@
     {
       "name": "FAT32 inside an MBR partition: fsck.fat -n clean after sort",
       "ok": true,
-      "detail": "/tmp/p2u-FAT32 inside an MBR partition-q81i8i54/stick.img.part: 30 files, 1130/159270 clusters"
+      "detail": "/tmp/p2u-FAT32 inside an MBR partition-x62p839_/stick.img.part: 30 files, 1130/159270 clusters"
     },
     {
       "name": "FAT32 inside an MBR partition: every file reads back byte-identical",
@@ -238,7 +238,7 @@
     {
       "name": "FAT32 top level, 30 tracks: fsck.fat -n clean after sort",
       "ok": true,
-      "detail": "/tmp/p2u-FAT32 top level, 30 tracks-u64ftc6c/stick.img: 35 files, 1374/129022 clusters"
+      "detail": "/tmp/p2u-FAT32 top level, 30 tracks-kgqhbtyy/stick.img: 35 files, 1374/129022 clusters"
     },
     {
       "name": "FAT32 top level, 30 tracks: every file reads back byte-identical",
@@ -283,7 +283,7 @@
     {
       "name": "FAT16 fixed root, 20 tracks: fsck.fat -n clean after sort",
       "ok": true,
-      "detail": "/tmp/p2u-FAT16 fixed root, 20 tracks-jfczb8wa/stick.img: 24 files, 287/16343 clusters"
+      "detail": "/tmp/p2u-FAT16 fixed root, 20 tracks-4gegp4ol/stick.img: 24 files, 287/16343 clusters"
     },
     {
       "name": "FAT16 fixed root, 20 tracks: every file reads back byte-identical",

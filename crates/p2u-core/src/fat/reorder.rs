@@ -48,9 +48,13 @@ pub struct ReorderReport {
     pub warnings: Vec<String>,
 }
 
-/// The directory's bytes before a write, so it can be put back exactly.
+/// The bytes of every sector an operation is about to change: `data` is what
+/// they held before, `after` what the operation writes. Restore puts `data`
+/// back, but only if each sector still holds one of the two (so a backup
+/// can't be applied over later changes), and never if it is superseded.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Backup {
+    /// 1 = one directory (reorder), 2 = metadata sectors of a raw write.
     pub format: u32,
     pub volume_serial: u32,
     pub partition_offset: u64,
@@ -58,15 +62,31 @@ pub struct Backup {
     pub extents: Vec<Extent>,
     #[serde(skip)]
     pub data: Vec<u8>,
+    #[serde(skip)]
+    pub after: Vec<u8>,
+    #[serde(default)]
+    pub after_len: u64,
+    /// Per extent: true for directory-table sectors (which may legitimately be
+    /// caught between passes of a two-pass rewrite).
+    #[serde(default)]
+    pub dir_sectors: Vec<bool>,
+    /// Set when a later step overwrote data this backup would point back to.
+    #[serde(default)]
+    pub superseded: bool,
+    #[serde(default)]
+    pub note: String,
 }
 
 impl Backup {
-    /// One JSON header line, then the raw directory bytes.
+    /// One JSON header line, then the before bytes, then the after bytes.
     pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let mut header = self.clone();
+        header.after_len = self.after.len() as u64;
         let mut f = std::fs::File::create(path)?;
-        serde_json::to_writer(&mut f, self)?;
+        serde_json::to_writer(&mut f, &header)?;
         f.write_all(b"\n")?;
         f.write_all(&self.data)?;
+        f.write_all(&self.after)?;
         f.sync_all()
     }
 
@@ -75,14 +95,23 @@ impl Backup {
         let mut header = String::new();
         r.read_line(&mut header)?;
         let mut b: Backup = serde_json::from_str(&header)?;
-        let mut data = Vec::new();
-        std::io::Read::read_to_end(&mut r, &mut data)?;
+        let mut rest = Vec::new();
+        std::io::Read::read_to_end(&mut r, &mut rest)?;
         let expected: u64 = b.extents.iter().map(|e| e.len).sum();
-        if data.len() as u64 != expected {
+        if rest.len() as u64 != expected + b.after_len || (b.after_len != 0 && b.after_len != expected) {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "backup size mismatch"));
         }
-        b.data = data;
+        b.after = rest.split_off(expected as usize);
+        b.data = rest;
         Ok(b)
+    }
+
+    /// Mark a saved backup as no longer restorable, with the reason.
+    pub fn supersede(path: &std::path::Path, note: &str) -> std::io::Result<()> {
+        let mut b = Backup::load(path)?;
+        b.superseded = true;
+        b.note = note.to_string();
+        b.save(path)
     }
 }
 
@@ -283,6 +312,11 @@ impl<D: Device> Volume<D> {
             dir_path: dir_path.to_string(),
             extents: extents.clone(),
             data: old,
+            after: new.clone(),
+            after_len: 0,
+            dir_sectors: vec![true; extents.len()],
+            superseded: false,
+            note: String::new(),
         };
         Ok(PreparedReorder { report, backup, new, extents })
     }
@@ -297,7 +331,9 @@ impl<D: Device> Volume<D> {
         if self.read_extents(&p.extents)? != p.backup.data {
             return Err(FatError::Unsafe("the directory changed after it was read".into()));
         }
-        self.write_extents(&p.extents, &p.new)?;
+        // Delete-before-add: moving entries are first marked deleted, then
+        // written in their new places, so an interruption cannot duplicate one.
+        self.rewrite_dir_two_pass(&p.extents, &p.backup.data, &p.new)?;
         self.invalidate_cache()?;
         if self.read_extents(&p.extents)? != p.new {
             return Err(FatError::VerifyFailed("directory bytes on the medium differ from what was written".into()));
@@ -323,10 +359,49 @@ impl<D: Device> Volume<D> {
         Ok((p.report, Some(p.backup)))
     }
 
-    /// Put a directory back exactly as a [`Backup`] recorded it.
+    /// Put a directory (format 1) or a set of metadata sectors (format 2,
+    /// from a raw write) back exactly as a [`Backup`] recorded them.
     pub fn restore(&mut self, b: &Backup) -> Result<()> {
         if b.volume_serial != self.geometry().volume_serial || b.partition_offset != self.geometry().partition_offset {
             return Err(FatError::Unsafe("backup belongs to a different volume".into()));
+        }
+        if b.superseded {
+            return Err(FatError::Unsafe(format!("this backup can no longer be restored: {}", b.note)));
+        }
+        if !b.after.is_empty() {
+            // Every sector must still hold its before or after bytes (an
+            // interrupted operation leaves a mix). A directory sector may also
+            // be caught mid-way: each slot before, after, marked deleted, or
+            // zeroed. Anything else means the stick changed since, and putting
+            // old bytes back could corrupt newer data.
+            self.invalidate_cache()?;
+            let now = self.read_extents(&b.extents)?;
+            let mut pos = 0usize;
+            for (i, e) in b.extents.iter().enumerate() {
+                let r = pos..pos + e.len as usize;
+                pos += e.len as usize;
+                let (cur, bef, aft) = (&now[r.clone()], &b.data[r.clone()], &b.after[r]);
+                if cur == bef || cur == aft {
+                    continue;
+                }
+                let is_dir = b.dir_sectors.get(i).copied().unwrap_or(false);
+                let slot_ok = |k: usize| {
+                    let s = k * ENTRY..(k + 1) * ENTRY;
+                    let (c, o, n) = (&cur[s.clone()], &bef[s.clone()], &aft[s]);
+                    c == o || c == n || c.iter().all(|&x| x == 0) || (c[0] == 0xE5 && c[1..] == o[1..])
+                };
+                if !is_dir || !(0..cur.len() / ENTRY).all(slot_ok) {
+                    return Err(FatError::Unsafe("the stick has changed since this backup was made; restoring it could corrupt newer data".into()));
+                }
+            }
+        }
+        if b.format == 2 {
+            self.write_extents(&b.extents, &b.data)?;
+            self.invalidate_cache()?;
+            if self.read_extents(&b.extents)? != b.data {
+                return Err(FatError::VerifyFailed("restored bytes differ on the medium".into()));
+            }
+            return Ok(());
         }
         let d = self.find_dir(&b.dir_path)?;
         if self.dir_extents(d)? != b.extents {

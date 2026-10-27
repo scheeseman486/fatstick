@@ -152,3 +152,77 @@ pub fn verify_on_medium<D: Device>(
 pub fn create_exclusive(p: &Path) -> std::io::Result<std::fs::File> {
     std::fs::OpenOptions::new().write(true).create_new(true).open(p)
 }
+
+// ---------------------------------------------------------------------------
+// Raw write: the files themselves, placed and ordered at FAT level.
+
+use crate::fat::write::{WriteItem, WriteOptions, WriteProgress, WriteResult, WriteVerification};
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WriteJob {
+    /// "/Road Trip" creates that folder; "/" writes to the top level.
+    pub target_dir: String,
+    pub items: Vec<WriteItem>,
+    #[serde(default)]
+    pub options: WriteOptions,
+    /// Compare every byte on the stick with the source after writing.
+    #[serde(default = "default_true")]
+    pub verify_data: bool,
+    #[serde(default)]
+    pub partition: Option<usize>,
+    /// Eject the media afterwards (Windows helper; see LockJob::eject).
+    #[serde(default)]
+    pub eject: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WriteOutcome {
+    pub ok: bool,
+    pub error: Option<String>,
+    pub result: Option<WriteResult>,
+    pub verification: Option<WriteVerification>,
+}
+
+/// Write the files at FAT level, then verify everything from the medium.
+pub fn run_write<D: Device>(
+    dev: D,
+    job: &WriteJob,
+    backup_dir: Option<&Path>,
+    progress: &mut dyn FnMut(&WriteProgress),
+) -> WriteOutcome {
+    let fail = |e: String| WriteOutcome { ok: false, error: Some(e), result: None, verification: None };
+    let mut vol = match Volume::open(dev, job.partition) {
+        Ok(v) => v,
+        Err(e) => return fail(e.to_string()),
+    };
+    let result = match vol.write_playlist(&job.target_dir, &job.items, &job.options, backup_dir, progress) {
+        Ok(r) => r,
+        Err(e) => return fail(e.to_string()),
+    };
+    if job.options.dry_run {
+        return WriteOutcome { ok: true, error: None, result: Some(result), verification: None };
+    }
+    match vol.verify_written(&result, &job.items, job.verify_data, progress) {
+        Ok(v) => WriteOutcome { ok: v.ok(), error: None, result: Some(result), verification: Some(v) },
+        Err(e) => WriteOutcome { ok: false, error: Some(format!("written, but verification failed to run: {e}")), result: Some(result), verification: None },
+    }
+}
+
+/// What the elevated helper is asked to do.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum HelperJob {
+    Lock(LockJob),
+    Write(WriteJob),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum HelperOutcome {
+    Lock(LockOutcome),
+    Write(WriteOutcome),
+}

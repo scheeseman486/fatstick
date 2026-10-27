@@ -1,0 +1,3388 @@
+c[?7l[2J[0mSeaBIOS (version 1.16.3-debian-1.16.3-2)
+
+
+iPXE (https://ipxe.org) 00:03.0 CA00 PCI2.10 PnP PMM+2EFCACC0+2EF0ACC0 CA00
+Press Ctrl-B to configure iPXE (PCI 00:03.0)...
+                                                                               
+
+
+Booting from ROM..c[?7l[2J=== fat32_used
+<<WRITE
+{
+  "ok": true,
+  "error": null,
+  "result": {
+    "written": true,
+    "target_dir": "/Road Trip",
+    "names": [
+      "01 - Track 06.mp3",
+      "02 - Track 21.mp3",
+      "03 - Track 18.mp3",
+      "04 - Track 26 long title long title.mp3",
+      "05 - Track 39.mp3",
+      "06 - Track 01 long title.mp3",
+      "07 - Track 00.mp3",
+      "08 - Track 05 long title long title.mp3",
+      "09 - Track 04 long title.mp3",
+      "10 - Track 32 long title long title.mp3",
+      "11 - Track 29 long title long title.mp3",
+      "12 - Track 28 long title.mp3",
+      "13 - Track 08 long title long title.mp3",
+      "14 - Track 34 long title.mp3",
+      "15 - Track 37 long title.mp3",
+      "16 - Track 33.mp3",
+      "17 - Track 16 long title.mp3",
+      "18 - Track 25 long title.mp3",
+      "19 - Track 38 long title long title.mp3",
+      "20 - Track 30.mp3",
+      "21 - Track 10 long title.mp3",
+      "22 - Track 12.mp3",
+      "23 - Track 19 long title.mp3",
+      "24 - Track 07 long title.mp3",
+      "25 - Track 31 long title.mp3",
+      "26 - Track 24.mp3",
+      "27 - Track 03.mp3",
+      "28 - Track 36.mp3",
+      "29 - Track 13 long title.mp3",
+      "30 - Track 27.mp3",
+      "31 - Track 11 long title long title.mp3",
+      "32 - Track 35 long title long title.mp3",
+      "33 - Track 02 long title long title.mp3",
+      "34 - Track 22 long title.mp3",
+      "35 - Track 20 long title long title.mp3",
+      "36 - Track 14 long title long title.mp3",
+      "37 - Track 17 long title long title.mp3",
+      "38 - Track 15.mp3",
+      "39 - Track 23 long title long title.mp3",
+      "40 - Track 09.mp3"
+    ],
+    "sizes": [
+      25818,
+      38087,
+      43725,
+      14321,
+      9564,
+      28438,
+      31242,
+      38477,
+      31139,
+      42914,
+      29166,
+      8716,
+      52443,
+      15364,
+      51814,
+      47335,
+      18117,
+      9945,
+      36615,
+      12518,
+      41834,
+      5224,
+      43773,
+      37962,
+      19016,
+      9304,
+      21715,
+      28625,
+      40198,
+      58992,
+      46816,
+      57812,
+      36006,
+      11835,
+      7270,
+      19542,
+      52328,
+      28093,
+      35886,
+      42887
+    ],
+    "layout": {
+      "contiguous": true,
+      "ascending": true,
+      "dir_clusters": [
+        652,
+        653,
+        654,
+        655,
+        656,
+        657,
+        658,
+        659,
+        660,
+        661
+      ],
+      "files": [
+        {
+          "name": "01 - Track 06.mp3",
+          "first_cluster": 662,
+          "clusters": 51,
+          "fragments": 1
+        },
+        {
+          "name": "02 - Track 21.mp3",
+          "first_cluster": 713,
+          "clusters": 75,
+          "fragments": 1
+        },
+        {
+          "name": "03 - Track 18.mp3",
+          "first_cluster": 788,
+          "clusters": 86,
+          "fragments": 1
+        },
+        {
+          "name": "04 - Track 26 long title long title.mp3",
+          "first_cluster": 874,
+          "clusters": 28,
+          "fragments": 1
+        },
+        {
+          "name": "05 - Track 39.mp3",
+          "first_cluster": 902,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "06 - Track 01 long title.mp3",
+          "first_cluster": 921,
+          "clusters": 56,
+          "fragments": 1
+        },
+        {
+          "name": "07 - Track 00.mp3",
+          "first_cluster": 977,
+          "clusters": 62,
+          "fragments": 1
+        },
+        {
+          "name": "08 - Track 05 long title long title.mp3",
+          "first_cluster": 1039,
+          "clusters": 76,
+          "fragments": 1
+        },
+        {
+          "name": "09 - Track 04 long title.mp3",
+          "first_cluster": 1115,
+          "clusters": 61,
+          "fragments": 1
+        },
+        {
+          "name": "10 - Track 32 long title long title.mp3",
+          "first_cluster": 1176,
+          "clusters": 84,
+          "fragments": 1
+        },
+        {
+          "name": "11 - Track 29 long title long title.mp3",
+          "first_cluster": 1260,
+          "clusters": 57,
+          "fragments": 1
+        },
+        {
+          "name": "12 - Track 28 long title.mp3",
+          "first_cluster": 1317,
+          "clusters": 18,
+          "fragments": 1
+        },
+        {
+          "name": "13 - Track 08 long title long title.mp3",
+          "first_cluster": 1335,
+          "clusters": 103,
+          "fragments": 1
+        },
+        {
+          "name": "14 - Track 34 long title.mp3",
+          "first_cluster": 1438,
+          "clusters": 31,
+          "fragments": 1
+        },
+        {
+          "name": "15 - Track 37 long title.mp3",
+          "first_cluster": 1469,
+          "clusters": 102,
+          "fragments": 1
+        },
+        {
+          "name": "16 - Track 33.mp3",
+          "first_cluster": 1571,
+          "clusters": 93,
+          "fragments": 1
+        },
+        {
+          "name": "17 - Track 16 long title.mp3",
+          "first_cluster": 1664,
+          "clusters": 36,
+          "fragments": 1
+        },
+        {
+          "name": "18 - Track 25 long title.mp3",
+          "first_cluster": 1700,
+          "clusters": 20,
+          "fragments": 1
+        },
+        {
+          "name": "19 - Track 38 long title long title.mp3",
+          "first_cluster": 1720,
+          "clusters": 72,
+          "fragments": 1
+        },
+        {
+          "name": "20 - Track 30.mp3",
+          "first_cluster": 1792,
+          "clusters": 25,
+          "fragments": 1
+        },
+        {
+          "name": "21 - Track 10 long title.mp3",
+          "first_cluster": 1817,
+          "clusters": 82,
+          "fragments": 1
+        },
+        {
+          "name": "22 - Track 12.mp3",
+          "first_cluster": 1899,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "23 - Track 19 long title.mp3",
+          "first_cluster": 1910,
+          "clusters": 86,
+          "fragments": 1
+        },
+        {
+          "name": "24 - Track 07 long title.mp3",
+          "first_cluster": 1996,
+          "clusters": 75,
+          "fragments": 1
+        },
+        {
+          "name": "25 - Track 31 long title.mp3",
+          "first_cluster": 2071,
+          "clusters": 38,
+          "fragments": 1
+        },
+        {
+          "name": "26 - Track 24.mp3",
+          "first_cluster": 2109,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "27 - Track 03.mp3",
+          "first_cluster": 2128,
+          "clusters": 43,
+          "fragments": 1
+        },
+        {
+          "name": "28 - Track 36.mp3",
+          "first_cluster": 2171,
+          "clusters": 56,
+          "fragments": 1
+        },
+        {
+          "name": "29 - Track 13 long title.mp3",
+          "first_cluster": 2227,
+          "clusters": 79,
+          "fragments": 1
+        },
+        {
+          "name": "30 - Track 27.mp3",
+          "first_cluster": 2306,
+          "clusters": 116,
+          "fragments": 1
+        },
+        {
+          "name": "31 - Track 11 long title long title.mp3",
+          "first_cluster": 2422,
+          "clusters": 92,
+          "fragments": 1
+        },
+        {
+          "name": "32 - Track 35 long title long title.mp3",
+          "first_cluster": 2514,
+          "clusters": 113,
+          "fragments": 1
+        },
+        {
+          "name": "33 - Track 02 long title long title.mp3",
+          "first_cluster": 2627,
+          "clusters": 71,
+          "fragments": 1
+        },
+        {
+          "name": "34 - Track 22 long title.mp3",
+          "first_cluster": 2698,
+          "clusters": 24,
+          "fragments": 1
+        },
+        {
+          "name": "35 - Track 20 long title long title.mp3",
+          "first_cluster": 2722,
+          "clusters": 15,
+          "fragments": 1
+        },
+        {
+          "name": "36 - Track 14 long title long title.mp3",
+          "first_cluster": 2737,
+          "clusters": 39,
+          "fragments": 1
+        },
+        {
+          "name": "37 - Track 17 long title long title.mp3",
+          "first_cluster": 2776,
+          "clusters": 103,
+          "fragments": 1
+        },
+        {
+          "name": "38 - Track 15.mp3",
+          "first_cluster": 2879,
+          "clusters": 55,
+          "fragments": 1
+        },
+        {
+          "name": "39 - Track 23 long title long title.mp3",
+          "first_cluster": 2934,
+          "clusters": 71,
+          "fragments": 1
+        },
+        {
+          "name": "40 - Track 09.mp3",
+          "first_cluster": 3005,
+          "clusters": 84,
+          "fragments": 1
+        }
+      ]
+    },
+    "needed_clusters": 2437,
+    "free_clusters_before": 128672,
+    "largest_free_run": 128372,
+    "deleted": [],
+    "backups": [
+      "/tmp/p2u-backup-782c4f86-1793079175221065671-2-write.bin"
+    ],
+    "bytes_written": 1230876,
+    "undo_note": null
+  },
+  "verification": {
+    "order_ok": true,
+    "layout_matches_plan": true,
+    "layout": {
+      "contiguous": true,
+      "ascending": true,
+      "dir_clusters": [
+        652,
+        653,
+        654,
+        655,
+        656,
+        657,
+        658,
+        659,
+        660,
+        661
+      ],
+      "files": [
+        {
+          "name": "01 - Track 06.mp3",
+          "first_cluster": 662,
+          "clusters": 51,
+          "fragments": 1
+        },
+        {
+          "name": "02 - Track 21.mp3",
+          "first_cluster": 713,
+          "clusters": 75,
+          "fragments": 1
+        },
+        {
+          "name": "03 - Track 18.mp3",
+          "first_cluster": 788,
+          "clusters": 86,
+          "fragments": 1
+        },
+        {
+          "name": "04 - Track 26 long title long title.mp3",
+          "first_cluster": 874,
+          "clusters": 28,
+          "fragments": 1
+        },
+        {
+          "name": "05 - Track 39.mp3",
+          "first_cluster": 902,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "06 - Track 01 long title.mp3",
+          "first_cluster": 921,
+          "clusters": 56,
+          "fragments": 1
+        },
+        {
+          "name": "07 - Track 00.mp3",
+          "first_cluster": 977,
+          "clusters": 62,
+          "fragments": 1
+        },
+        {
+          "name": "08 - Track 05 long title long title.mp3",
+          "first_cluster": 1039,
+          "clusters": 76,
+          "fragments": 1
+        },
+        {
+          "name": "09 - Track 04 long title.mp3",
+          "first_cluster": 1115,
+          "clusters": 61,
+          "fragments": 1
+        },
+        {
+          "name": "10 - Track 32 long title long title.mp3",
+          "first_cluster": 1176,
+          "clusters": 84,
+          "fragments": 1
+        },
+        {
+          "name": "11 - Track 29 long title long title.mp3",
+          "first_cluster": 1260,
+          "clusters": 57,
+          "fragments": 1
+        },
+        {
+          "name": "12 - Track 28 long title.mp3",
+          "first_cluster": 1317,
+          "clusters": 18,
+          "fragments": 1
+        },
+        {
+          "name": "13 - Track 08 long title long title.mp3",
+          "first_cluster": 1335,
+          "clusters": 103,
+          "fragments": 1
+        },
+        {
+          "name": "14 - Track 34 long title.mp3",
+          "first_cluster": 1438,
+          "clusters": 31,
+          "fragments": 1
+        },
+        {
+          "name": "15 - Track 37 long title.mp3",
+          "first_cluster": 1469,
+          "clusters": 102,
+          "fragments": 1
+        },
+        {
+          "name": "16 - Track 33.mp3",
+          "first_cluster": 1571,
+          "clusters": 93,
+          "fragments": 1
+        },
+        {
+          "name": "17 - Track 16 long title.mp3",
+          "first_cluster": 1664,
+          "clusters": 36,
+          "fragments": 1
+        },
+        {
+          "name": "18 - Track 25 long title.mp3",
+          "first_cluster": 1700,
+          "clusters": 20,
+          "fragments": 1
+        },
+        {
+          "name": "19 - Track 38 long title long title.mp3",
+          "first_cluster": 1720,
+          "clusters": 72,
+          "fragments": 1
+        },
+        {
+          "name": "20 - Track 30.mp3",
+          "first_cluster": 1792,
+          "clusters": 25,
+          "fragments": 1
+        },
+        {
+          "name": "21 - Track 10 long title.mp3",
+          "first_cluster": 1817,
+          "clusters": 82,
+          "fragments": 1
+        },
+        {
+          "name": "22 - Track 12.mp3",
+          "first_cluster": 1899,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "23 - Track 19 long title.mp3",
+          "first_cluster": 1910,
+          "clusters": 86,
+          "fragments": 1
+        },
+        {
+          "name": "24 - Track 07 long title.mp3",
+          "first_cluster": 1996,
+          "clusters": 75,
+          "fragments": 1
+        },
+        {
+          "name": "25 - Track 31 long title.mp3",
+          "first_cluster": 2071,
+          "clusters": 38,
+          "fragments": 1
+        },
+        {
+          "name": "26 - Track 24.mp3",
+          "first_cluster": 2109,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "27 - Track 03.mp3",
+          "first_cluster": 2128,
+          "clusters": 43,
+          "fragments": 1
+        },
+        {
+          "name": "28 - Track 36.mp3",
+          "first_cluster": 2171,
+          "clusters": 56,
+          "fragments": 1
+        },
+        {
+          "name": "29 - Track 13 long title.mp3",
+          "first_cluster": 2227,
+          "clusters": 79,
+          "fragments": 1
+        },
+        {
+          "name": "30 - Track 27.mp3",
+          "first_cluster": 2306,
+          "clusters": 116,
+          "fragments": 1
+        },
+        {
+          "name": "31 - Track 11 long title long title.mp3",
+          "first_cluster": 2422,
+          "clusters": 92,
+          "fragments": 1
+        },
+        {
+          "name": "32 - Track 35 long title long title.mp3",
+          "first_cluster": 2514,
+          "clusters": 113,
+          "fragments": 1
+        },
+        {
+          "name": "33 - Track 02 long title long title.mp3",
+          "first_cluster": 2627,
+          "clusters": 71,
+          "fragments": 1
+        },
+        {
+          "name": "34 - Track 22 long title.mp3",
+          "first_cluster": 2698,
+          "clusters": 24,
+          "fragments": 1
+        },
+        {
+          "name": "35 - Track 20 long title long title.mp3",
+          "first_cluster": 2722,
+          "clusters": 15,
+          "fragments": 1
+        },
+        {
+          "name": "36 - Track 14 long title long title.mp3",
+          "first_cluster": 2737,
+          "clusters": 39,
+          "fragments": 1
+        },
+        {
+          "name": "37 - Track 17 long title long title.mp3",
+          "first_cluster": 2776,
+          "clusters": 103,
+          "fragments": 1
+        },
+        {
+          "name": "38 - Track 15.mp3",
+          "first_cluster": 2879,
+          "clusters": 55,
+          "fragments": 1
+        },
+        {
+          "name": "39 - Track 23 long title long title.mp3",
+          "first_cluster": 2934,
+          "clusters": 71,
+          "fragments": 1
+        },
+        {
+          "name": "40 - Track 09.mp3",
+          "first_cluster": 3005,
+          "clusters": 84,
+          "fragments": 1
+        }
+      ]
+    },
+    "fat_copies_identical": true,
+    "data_mismatches": [],
+    "problems": []
+  }
+}
+>>
+<<KERNEL_LIST
+{
+  "in_order": true,
+  "expected": 40,
+  "found": 40,
+  "missing": [],
+  "extra": [],
+  "junk": [],
+  "first_mismatch": null,
+  "actual": [
+    "01 - Track 06.mp3",
+    "02 - Track 21.mp3",
+    "03 - Track 18.mp3",
+    "04 - Track 26 long title long title.mp3",
+    "05 - Track 39.mp3",
+    "06 - Track 01 long title.mp3",
+    "07 - Track 00.mp3",
+    "08 - Track 05 long title long title.mp3",
+    "09 - Track 04 long title.mp3",
+    "10 - Track 32 long title long title.mp3",
+    "11 - Track 29 long title long title.mp3",
+    "12 - Track 28 long title.mp3",
+    "13 - Track 08 long title long title.mp3",
+    "14 - Track 34 long title.mp3",
+    "15 - Track 37 long title.mp3",
+    "16 - Track 33.mp3",
+    "17 - Track 16 long title.mp3",
+    "18 - Track 25 long title.mp3",
+    "19 - Track 38 long title long title.mp3",
+    "20 - Track 30.mp3",
+    "21 - Track 10 long title.mp3",
+    "22 - Track 12.mp3",
+    "23 - Track 19 long title.mp3",
+    "24 - Track 07 long title.mp3",
+    "25 - Track 31 long title.mp3",
+    "26 - Track 24.mp3",
+    "27 - Track 03.mp3",
+    "28 - Track 36.mp3",
+    "29 - Track 13 long title.mp3",
+    "30 - Track 27.mp3",
+    "31 - Track 11 long title long title.mp3",
+    "32 - Track 35 long title long title.mp3",
+    "33 - Track 02 long title long title.mp3",
+    "34 - Track 22 long title.mp3",
+    "35 - Track 20 long title long title.mp3",
+    "36 - Track 14 long title long title.mp3",
+    "37 - Track 17 long title long title.mp3",
+    "38 - Track 15.mp3",
+    "39 - Track 23 long title long title.mp3",
+    "40 - Track 09.mp3"
+  ]
+}
+>>
+CONTENT_BAD 0
+=== fat16_used
+<<WRITE
+{
+  "ok": true,
+  "error": null,
+  "result": {
+    "written": true,
+    "target_dir": "/Road Trip",
+    "names": [
+      "01 - Track 06.mp3",
+      "02 - Track 21.mp3",
+      "03 - Track 18.mp3",
+      "04 - Track 26 long title long title.mp3",
+      "05 - Track 39.mp3",
+      "06 - Track 01 long title.mp3",
+      "07 - Track 00.mp3",
+      "08 - Track 05 long title long title.mp3",
+      "09 - Track 04 long title.mp3",
+      "10 - Track 32 long title long title.mp3",
+      "11 - Track 29 long title long title.mp3",
+      "12 - Track 28 long title.mp3",
+      "13 - Track 08 long title long title.mp3",
+      "14 - Track 34 long title.mp3",
+      "15 - Track 37 long title.mp3",
+      "16 - Track 33.mp3",
+      "17 - Track 16 long title.mp3",
+      "18 - Track 25 long title.mp3",
+      "19 - Track 38 long title long title.mp3",
+      "20 - Track 30.mp3",
+      "21 - Track 10 long title.mp3",
+      "22 - Track 12.mp3",
+      "23 - Track 19 long title.mp3",
+      "24 - Track 07 long title.mp3",
+      "25 - Track 31 long title.mp3",
+      "26 - Track 24.mp3",
+      "27 - Track 03.mp3",
+      "28 - Track 36.mp3",
+      "29 - Track 13 long title.mp3",
+      "30 - Track 27.mp3",
+      "31 - Track 11 long title long title.mp3",
+      "32 - Track 35 long title long title.mp3",
+      "33 - Track 02 long title long title.mp3",
+      "34 - Track 22 long title.mp3",
+      "35 - Track 20 long title long title.mp3",
+      "36 - Track 14 long title long title.mp3",
+      "37 - Track 17 long title long title.mp3",
+      "38 - Track 15.mp3",
+      "39 - Track 23 long title long title.mp3",
+      "40 - Track 09.mp3"
+    ],
+    "sizes": [
+      25818,
+      38087,
+      43725,
+      14321,
+      9564,
+      28438,
+      31242,
+      38477,
+      31139,
+      42914,
+      29166,
+      8716,
+      52443,
+      15364,
+      51814,
+      47335,
+      18117,
+      9945,
+      36615,
+      12518,
+      41834,
+      5224,
+      43773,
+      37962,
+      19016,
+      9304,
+      21715,
+      28625,
+      40198,
+      58992,
+      46816,
+      57812,
+      36006,
+      11835,
+      7270,
+      19542,
+      52328,
+      28093,
+      35886,
+      42887
+    ],
+    "layout": {
+      "contiguous": true,
+      "ascending": true,
+      "dir_clusters": [
+        171,
+        172,
+        173
+      ],
+      "files": [
+        {
+          "name": "01 - Track 06.mp3",
+          "first_cluster": 174,
+          "clusters": 13,
+          "fragments": 1
+        },
+        {
+          "name": "02 - Track 21.mp3",
+          "first_cluster": 187,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "03 - Track 18.mp3",
+          "first_cluster": 206,
+          "clusters": 22,
+          "fragments": 1
+        },
+        {
+          "name": "04 - Track 26 long title long title.mp3",
+          "first_cluster": 228,
+          "clusters": 7,
+          "fragments": 1
+        },
+        {
+          "name": "05 - Track 39.mp3",
+          "first_cluster": 235,
+          "clusters": 5,
+          "fragments": 1
+        },
+        {
+          "name": "06 - Track 01 long title.mp3",
+          "first_cluster": 240,
+          "clusters": 14,
+          "fragments": 1
+        },
+        {
+          "name": "07 - Track 00.mp3",
+          "first_cluster": 254,
+          "clusters": 16,
+          "fragments": 1
+        },
+        {
+          "name": "08 - Track 05 long title long title.mp3",
+          "first_cluster": 270,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "09 - Track 04 long title.mp3",
+          "first_cluster": 289,
+          "clusters": 16,
+          "fragments": 1
+        },
+        {
+          "name": "10 - Track 32 long title long title.mp3",
+          "first_cluster": 305,
+          "clusters": 21,
+          "fragments": 1
+        },
+        {
+          "name": "11 - Track 29 long title long title.mp3",
+          "first_cluster": 326,
+          "clusters": 15,
+          "fragments": 1
+        },
+        {
+          "name": "12 - Track 28 long title.mp3",
+          "first_cluster": 341,
+          "clusters": 5,
+          "fragments": 1
+        },
+        {
+          "name": "13 - Track 08 long title long title.mp3",
+          "first_cluster": 346,
+          "clusters": 26,
+          "fragments": 1
+        },
+        {
+          "name": "14 - Track 34 long title.mp3",
+          "first_cluster": 372,
+          "clusters": 8,
+          "fragments": 1
+        },
+        {
+          "name": "15 - Track 37 long title.mp3",
+          "first_cluster": 380,
+          "clusters": 26,
+          "fragments": 1
+        },
+        {
+          "name": "16 - Track 33.mp3",
+          "first_cluster": 406,
+          "clusters": 24,
+          "fragments": 1
+        },
+        {
+          "name": "17 - Track 16 long title.mp3",
+          "first_cluster": 430,
+          "clusters": 9,
+          "fragments": 1
+        },
+        {
+          "name": "18 - Track 25 long title.mp3",
+          "first_cluster": 439,
+          "clusters": 5,
+          "fragments": 1
+        },
+        {
+          "name": "19 - Track 38 long title long title.mp3",
+          "first_cluster": 444,
+          "clusters": 18,
+          "fragments": 1
+        },
+        {
+          "name": "20 - Track 30.mp3",
+          "first_cluster": 462,
+          "clusters": 7,
+          "fragments": 1
+        },
+        {
+          "name": "21 - Track 10 long title.mp3",
+          "first_cluster": 469,
+          "clusters": 21,
+          "fragments": 1
+        },
+        {
+          "name": "22 - Track 12.mp3",
+          "first_cluster": 490,
+          "clusters": 3,
+          "fragments": 1
+        },
+        {
+          "name": "23 - Track 19 long title.mp3",
+          "first_cluster": 493,
+          "clusters": 22,
+          "fragments": 1
+        },
+        {
+          "name": "24 - Track 07 long title.mp3",
+          "first_cluster": 515,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "25 - Track 31 long title.mp3",
+          "first_cluster": 534,
+          "clusters": 10,
+          "fragments": 1
+        },
+        {
+          "name": "26 - Track 24.mp3",
+          "first_cluster": 544,
+          "clusters": 5,
+          "fragments": 1
+        },
+        {
+          "name": "27 - Track 03.mp3",
+          "first_cluster": 549,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "28 - Track 36.mp3",
+          "first_cluster": 560,
+          "clusters": 14,
+          "fragments": 1
+        },
+        {
+          "name": "29 - Track 13 long title.mp3",
+          "first_cluster": 574,
+          "clusters": 20,
+          "fragments": 1
+        },
+        {
+          "name": "30 - Track 27.mp3",
+          "first_cluster": 594,
+          "clusters": 29,
+          "fragments": 1
+        },
+        {
+          "name": "31 - Track 11 long title long title.mp3",
+          "first_cluster": 623,
+          "clusters": 23,
+          "fragments": 1
+        },
+        {
+          "name": "32 - Track 35 long title long title.mp3",
+          "first_cluster": 646,
+          "clusters": 29,
+          "fragments": 1
+        },
+        {
+          "name": "33 - Track 02 long title long title.mp3",
+          "first_cluster": 675,
+          "clusters": 18,
+          "fragments": 1
+        },
+        {
+          "name": "34 - Track 22 long title.mp3",
+          "first_cluster": 693,
+          "clusters": 6,
+          "fragments": 1
+        },
+        {
+          "name": "35 - Track 20 long title long title.mp3",
+          "first_cluster": 699,
+          "clusters": 4,
+          "fragments": 1
+        },
+        {
+          "name": "36 - Track 14 long title long title.mp3",
+          "first_cluster": 703,
+          "clusters": 10,
+          "fragments": 1
+        },
+        {
+          "name": "37 - Track 17 long title long title.mp3",
+          "first_cluster": 713,
+          "clusters": 26,
+          "fragments": 1
+        },
+        {
+          "name": "38 - Track 15.mp3",
+          "first_cluster": 739,
+          "clusters": 14,
+          "fragments": 1
+        },
+        {
+          "name": "39 - Track 23 long title long title.mp3",
+          "first_cluster": 753,
+          "clusters": 18,
+          "fragments": 1
+        },
+        {
+          "name": "40 - Track 09.mp3",
+          "first_cluster": 771,
+          "clusters": 21,
+          "fragments": 1
+        }
+      ]
+    },
+    "needed_clusters": 621,
+    "free_clusters_before": 32616,
+    "largest_free_run": 32526,
+    "deleted": [],
+    "backups": [
+      "/tmp/p2u-backup-782ef737-1793079176275428251-2-write.bin"
+    ],
+    "bytes_written": 1230876,
+    "undo_note": null
+  },
+  "verification": {
+    "order_ok": true,
+    "layout_matches_plan": true,
+    "layout": {
+      "contiguous": true,
+      "ascending": true,
+      "dir_clusters": [
+        171,
+        172,
+        173
+      ],
+      "files": [
+        {
+          "name": "01 - Track 06.mp3",
+          "first_cluster": 174,
+          "clusters": 13,
+          "fragments": 1
+        },
+        {
+          "name": "02 - Track 21.mp3",
+          "first_cluster": 187,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "03 - Track 18.mp3",
+          "first_cluster": 206,
+          "clusters": 22,
+          "fragments": 1
+        },
+        {
+          "name": "04 - Track 26 long title long title.mp3",
+          "first_cluster": 228,
+          "clusters": 7,
+          "fragments": 1
+        },
+        {
+          "name": "05 - Track 39.mp3",
+          "first_cluster": 235,
+          "clusters": 5,
+          "fragments": 1
+        },
+        {
+          "name": "06 - Track 01 long title.mp3",
+          "first_cluster": 240,
+          "clusters": 14,
+          "fragments": 1
+        },
+        {
+          "name": "07 - Track 00.mp3",
+          "first_cluster": 254,
+          "clusters": 16,
+          "fragments": 1
+        },
+        {
+          "name": "08 - Track 05 long title long title.mp3",
+          "first_cluster": 270,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "09 - Track 04 long title.mp3",
+          "first_cluster": 289,
+          "clusters": 16,
+          "fragments": 1
+        },
+        {
+          "name": "10 - Track 32 long title long title.mp3",
+          "first_cluster": 305,
+          "clusters": 21,
+          "fragments": 1
+        },
+        {
+          "name": "11 - Track 29 long title long title.mp3",
+          "first_cluster": 326,
+          "clusters": 15,
+          "fragments": 1
+        },
+        {
+          "name": "12 - Track 28 long title.mp3",
+          "first_cluster": 341,
+          "clusters": 5,
+          "fragments": 1
+        },
+        {
+          "name": "13 - Track 08 long title long title.mp3",
+          "first_cluster": 346,
+          "clusters": 26,
+          "fragments": 1
+        },
+        {
+          "name": "14 - Track 34 long title.mp3",
+          "first_cluster": 372,
+          "clusters": 8,
+          "fragments": 1
+        },
+        {
+          "name": "15 - Track 37 long title.mp3",
+          "first_cluster": 380,
+          "clusters": 26,
+          "fragments": 1
+        },
+        {
+          "name": "16 - Track 33.mp3",
+          "first_cluster": 406,
+          "clusters": 24,
+          "fragments": 1
+        },
+        {
+          "name": "17 - Track 16 long title.mp3",
+          "first_cluster": 430,
+          "clusters": 9,
+          "fragments": 1
+        },
+        {
+          "name": "18 - Track 25 long title.mp3",
+          "first_cluster": 439,
+          "clusters": 5,
+          "fragments": 1
+        },
+        {
+          "name": "19 - Track 38 long title long title.mp3",
+          "first_cluster": 444,
+          "clusters": 18,
+          "fragments": 1
+        },
+        {
+          "name": "20 - Track 30.mp3",
+          "first_cluster": 462,
+          "clusters": 7,
+          "fragments": 1
+        },
+        {
+          "name": "21 - Track 10 long title.mp3",
+          "first_cluster": 469,
+          "clusters": 21,
+          "fragments": 1
+        },
+        {
+          "name": "22 - Track 12.mp3",
+          "first_cluster": 490,
+          "clusters": 3,
+          "fragments": 1
+        },
+        {
+          "name": "23 - Track 19 long title.mp3",
+          "first_cluster": 493,
+          "clusters": 22,
+          "fragments": 1
+        },
+        {
+          "name": "24 - Track 07 long title.mp3",
+          "first_cluster": 515,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "25 - Track 31 long title.mp3",
+          "first_cluster": 534,
+          "clusters": 10,
+          "fragments": 1
+        },
+        {
+          "name": "26 - Track 24.mp3",
+          "first_cluster": 544,
+          "clusters": 5,
+          "fragments": 1
+        },
+        {
+          "name": "27 - Track 03.mp3",
+          "first_cluster": 549,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "28 - Track 36.mp3",
+          "first_cluster": 560,
+          "clusters": 14,
+          "fragments": 1
+        },
+        {
+          "name": "29 - Track 13 long title.mp3",
+          "first_cluster": 574,
+          "clusters": 20,
+          "fragments": 1
+        },
+        {
+          "name": "30 - Track 27.mp3",
+          "first_cluster": 594,
+          "clusters": 29,
+          "fragments": 1
+        },
+        {
+          "name": "31 - Track 11 long title long title.mp3",
+          "first_cluster": 623,
+          "clusters": 23,
+          "fragments": 1
+        },
+        {
+          "name": "32 - Track 35 long title long title.mp3",
+          "first_cluster": 646,
+          "clusters": 29,
+          "fragments": 1
+        },
+        {
+          "name": "33 - Track 02 long title long title.mp3",
+          "first_cluster": 675,
+          "clusters": 18,
+          "fragments": 1
+        },
+        {
+          "name": "34 - Track 22 long title.mp3",
+          "first_cluster": 693,
+          "clusters": 6,
+          "fragments": 1
+        },
+        {
+          "name": "35 - Track 20 long title long title.mp3",
+          "first_cluster": 699,
+          "clusters": 4,
+          "fragments": 1
+        },
+        {
+          "name": "36 - Track 14 long title long title.mp3",
+          "first_cluster": 703,
+          "clusters": 10,
+          "fragments": 1
+        },
+        {
+          "name": "37 - Track 17 long title long title.mp3",
+          "first_cluster": 713,
+          "clusters": 26,
+          "fragments": 1
+        },
+        {
+          "name": "38 - Track 15.mp3",
+          "first_cluster": 739,
+          "clusters": 14,
+          "fragments": 1
+        },
+        {
+          "name": "39 - Track 23 long title long title.mp3",
+          "first_cluster": 753,
+          "clusters": 18,
+          "fragments": 1
+        },
+        {
+          "name": "40 - Track 09.mp3",
+          "first_cluster": 771,
+          "clusters": 21,
+          "fragments": 1
+        }
+      ]
+    },
+    "fat_copies_identical": true,
+    "data_mismatches": [],
+    "problems": []
+  }
+}
+>>
+<<KERNEL_LIST
+{
+  "in_order": true,
+  "expected": 40,
+  "found": 40,
+  "missing": [],
+  "extra": [],
+  "junk": [],
+  "first_mismatch": null,
+  "actual": [
+    "01 - Track 06.mp3",
+    "02 - Track 21.mp3",
+    "03 - Track 18.mp3",
+    "04 - Track 26 long title long title.mp3",
+    "05 - Track 39.mp3",
+    "06 - Track 01 long title.mp3",
+    "07 - Track 00.mp3",
+    "08 - Track 05 long title long title.mp3",
+    "09 - Track 04 long title.mp3",
+    "10 - Track 32 long title long title.mp3",
+    "11 - Track 29 long title long title.mp3",
+    "12 - Track 28 long title.mp3",
+    "13 - Track 08 long title long title.mp3",
+    "14 - Track 34 long title.mp3",
+    "15 - Track 37 long title.mp3",
+    "16 - Track 33.mp3",
+    "17 - Track 16 long title.mp3",
+    "18 - Track 25 long title.mp3",
+    "19 - Track 38 long title long title.mp3",
+    "20 - Track 30.mp3",
+    "21 - Track 10 long title.mp3",
+    "22 - Track 12.mp3",
+    "23 - Track 19 long title.mp3",
+    "24 - Track 07 long title.mp3",
+    "25 - Track 31 long title.mp3",
+    "26 - Track 24.mp3",
+    "27 - Track 03.mp3",
+    "28 - Track 36.mp3",
+    "29 - Track 13 long title.mp3",
+    "30 - Track 27.mp3",
+    "31 - Track 11 long title long title.mp3",
+    "32 - Track 35 long title long title.mp3",
+    "33 - Track 02 long title long title.mp3",
+    "34 - Track 22 long title.mp3",
+    "35 - Track 20 long title long title.mp3",
+    "36 - Track 14 long title long title.mp3",
+    "37 - Track 17 long title long title.mp3",
+    "38 - Track 15.mp3",
+    "39 - Track 23 long title long title.mp3",
+    "40 - Track 09.mp3"
+  ]
+}
+>>
+CONTENT_BAD 0
+=== fat32_top
+<<WRITE
+{
+  "ok": true,
+  "error": null,
+  "result": {
+    "written": true,
+    "target_dir": "/",
+    "names": [
+      "01 - Track 06.mp3",
+      "02 - Track 21.mp3",
+      "03 - Track 18.mp3",
+      "04 - Track 26 long title long title.mp3",
+      "05 - Track 39.mp3",
+      "06 - Track 01 long title.mp3",
+      "07 - Track 00.mp3",
+      "08 - Track 05 long title long title.mp3",
+      "09 - Track 04 long title.mp3",
+      "10 - Track 32 long title long title.mp3",
+      "11 - Track 29 long title long title.mp3",
+      "12 - Track 28 long title.mp3",
+      "13 - Track 08 long title long title.mp3",
+      "14 - Track 34 long title.mp3",
+      "15 - Track 37 long title.mp3",
+      "16 - Track 33.mp3",
+      "17 - Track 16 long title.mp3",
+      "18 - Track 25 long title.mp3",
+      "19 - Track 38 long title long title.mp3",
+      "20 - Track 30.mp3",
+      "21 - Track 10 long title.mp3",
+      "22 - Track 12.mp3",
+      "23 - Track 19 long title.mp3",
+      "24 - Track 07 long title.mp3",
+      "25 - Track 31 long title.mp3",
+      "26 - Track 24.mp3",
+      "27 - Track 03.mp3",
+      "28 - Track 36.mp3",
+      "29 - Track 13 long title.mp3",
+      "30 - Track 27.mp3",
+      "31 - Track 11 long title long title.mp3",
+      "32 - Track 35 long title long title.mp3",
+      "33 - Track 02 long title long title.mp3",
+      "34 - Track 22 long title.mp3",
+      "35 - Track 20 long title long title.mp3",
+      "36 - Track 14 long title long title.mp3",
+      "37 - Track 17 long title long title.mp3",
+      "38 - Track 15.mp3",
+      "39 - Track 23 long title long title.mp3",
+      "40 - Track 09.mp3"
+    ],
+    "sizes": [
+      25818,
+      38087,
+      43725,
+      14321,
+      9564,
+      28438,
+      31242,
+      38477,
+      31139,
+      42914,
+      29166,
+      8716,
+      52443,
+      15364,
+      51814,
+      47335,
+      18117,
+      9945,
+      36615,
+      12518,
+      41834,
+      5224,
+      43773,
+      37962,
+      19016,
+      9304,
+      21715,
+      28625,
+      40198,
+      58992,
+      46816,
+      57812,
+      36006,
+      11835,
+      7270,
+      19542,
+      52328,
+      28093,
+      35886,
+      42887
+    ],
+    "layout": {
+      "contiguous": true,
+      "ascending": true,
+      "dir_clusters": [],
+      "files": [
+        {
+          "name": "01 - Track 06.mp3",
+          "first_cluster": 111,
+          "clusters": 7,
+          "fragments": 1
+        },
+        {
+          "name": "02 - Track 21.mp3",
+          "first_cluster": 118,
+          "clusters": 10,
+          "fragments": 1
+        },
+        {
+          "name": "03 - Track 18.mp3",
+          "first_cluster": 128,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "04 - Track 26 long title long title.mp3",
+          "first_cluster": 139,
+          "clusters": 4,
+          "fragments": 1
+        },
+        {
+          "name": "05 - Track 39.mp3",
+          "first_cluster": 143,
+          "clusters": 3,
+          "fragments": 1
+        },
+        {
+          "name": "06 - Track 01 long title.mp3",
+          "first_cluster": 146,
+          "clusters": 7,
+          "fragments": 1
+        },
+        {
+          "name": "07 - Track 00.mp3",
+          "first_cluster": 153,
+          "clusters": 8,
+          "fragments": 1
+        },
+        {
+          "name": "08 - Track 05 long title long title.mp3",
+          "first_cluster": 161,
+          "clusters": 10,
+          "fragments": 1
+        },
+        {
+          "name": "09 - Track 04 long title.mp3",
+          "first_cluster": 171,
+          "clusters": 8,
+          "fragments": 1
+        },
+        {
+          "name": "10 - Track 32 long title long title.mp3",
+          "first_cluster": 179,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "11 - Track 29 long title long title.mp3",
+          "first_cluster": 190,
+          "clusters": 8,
+          "fragments": 1
+        },
+        {
+          "name": "12 - Track 28 long title.mp3",
+          "first_cluster": 198,
+          "clusters": 3,
+          "fragments": 1
+        },
+        {
+          "name": "13 - Track 08 long title long title.mp3",
+          "first_cluster": 201,
+          "clusters": 13,
+          "fragments": 1
+        },
+        {
+          "name": "14 - Track 34 long title.mp3",
+          "first_cluster": 214,
+          "clusters": 4,
+          "fragments": 1
+        },
+        {
+          "name": "15 - Track 37 long title.mp3",
+          "first_cluster": 218,
+          "clusters": 13,
+          "fragments": 1
+        },
+        {
+          "name": "16 - Track 33.mp3",
+          "first_cluster": 231,
+          "clusters": 12,
+          "fragments": 1
+        },
+        {
+          "name": "17 - Track 16 long title.mp3",
+          "first_cluster": 243,
+          "clusters": 5,
+          "fragments": 1
+        },
+        {
+          "name": "18 - Track 25 long title.mp3",
+          "first_cluster": 248,
+          "clusters": 3,
+          "fragments": 1
+        },
+        {
+          "name": "19 - Track 38 long title long title.mp3",
+          "first_cluster": 251,
+          "clusters": 9,
+          "fragments": 1
+        },
+        {
+          "name": "20 - Track 30.mp3",
+          "first_cluster": 260,
+          "clusters": 4,
+          "fragments": 1
+        },
+        {
+          "name": "21 - Track 10 long title.mp3",
+          "first_cluster": 264,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "22 - Track 12.mp3",
+          "first_cluster": 275,
+          "clusters": 2,
+          "fragments": 1
+        },
+        {
+          "name": "23 - Track 19 long title.mp3",
+          "first_cluster": 277,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "24 - Track 07 long title.mp3",
+          "first_cluster": 288,
+          "clusters": 10,
+          "fragments": 1
+        },
+        {
+          "name": "25 - Track 31 long title.mp3",
+          "first_cluster": 298,
+          "clusters": 5,
+          "fragments": 1
+        },
+        {
+          "name": "26 - Track 24.mp3",
+          "first_cluster": 303,
+          "clusters": 3,
+          "fragments": 1
+        },
+        {
+          "name": "27 - Track 03.mp3",
+          "first_cluster": 306,
+          "clusters": 6,
+          "fragments": 1
+        },
+        {
+          "name": "28 - Track 36.mp3",
+          "first_cluster": 312,
+          "clusters": 7,
+          "fragments": 1
+        },
+        {
+          "name": "29 - Track 13 long title.mp3",
+          "first_cluster": 319,
+          "clusters": 10,
+          "fragments": 1
+        },
+        {
+          "name": "30 - Track 27.mp3",
+          "first_cluster": 329,
+          "clusters": 15,
+          "fragments": 1
+        },
+        {
+          "name": "31 - Track 11 long title long title.mp3",
+          "first_cluster": 344,
+          "clusters": 12,
+          "fragments": 1
+        },
+        {
+          "name": "32 - Track 35 long title long title.mp3",
+          "first_cluster": 356,
+          "clusters": 15,
+          "fragments": 1
+        },
+        {
+          "name": "33 - Track 02 long title long title.mp3",
+          "first_cluster": 371,
+          "clusters": 9,
+          "fragments": 1
+        },
+        {
+          "name": "34 - Track 22 long title.mp3",
+          "first_cluster": 380,
+          "clusters": 3,
+          "fragments": 1
+        },
+        {
+          "name": "35 - Track 20 long title long title.mp3",
+          "first_cluster": 383,
+          "clusters": 2,
+          "fragments": 1
+        },
+        {
+          "name": "36 - Track 14 long title long title.mp3",
+          "first_cluster": 385,
+          "clusters": 5,
+          "fragments": 1
+        },
+        {
+          "name": "37 - Track 17 long title long title.mp3",
+          "first_cluster": 390,
+          "clusters": 13,
+          "fragments": 1
+        },
+        {
+          "name": "38 - Track 15.mp3",
+          "first_cluster": 403,
+          "clusters": 7,
+          "fragments": 1
+        },
+        {
+          "name": "39 - Track 23 long title long title.mp3",
+          "first_cluster": 410,
+          "clusters": 9,
+          "fragments": 1
+        },
+        {
+          "name": "40 - Track 09.mp3",
+          "first_cluster": 419,
+          "clusters": 11,
+          "fragments": 1
+        }
+      ]
+    },
+    "needed_clusters": 319,
+    "free_clusters_before": 76590,
+    "largest_free_run": 76534,
+    "deleted": [],
+    "backups": [
+      "/tmp/p2u-backup-783230bb-1793079177213470829-2-write.bin"
+    ],
+    "bytes_written": 1230876,
+    "undo_note": null
+  },
+  "verification": {
+    "order_ok": true,
+    "layout_matches_plan": true,
+    "layout": {
+      "contiguous": true,
+      "ascending": true,
+      "dir_clusters": [],
+      "files": [
+        {
+          "name": "01 - Track 06.mp3",
+          "first_cluster": 111,
+          "clusters": 7,
+          "fragments": 1
+        },
+        {
+          "name": "02 - Track 21.mp3",
+          "first_cluster": 118,
+          "clusters": 10,
+          "fragments": 1
+        },
+        {
+          "name": "03 - Track 18.mp3",
+          "first_cluster": 128,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "04 - Track 26 long title long title.mp3",
+          "first_cluster": 139,
+          "clusters": 4,
+          "fragments": 1
+        },
+        {
+          "name": "05 - Track 39.mp3",
+          "first_cluster": 143,
+          "clusters": 3,
+          "fragments": 1
+        },
+        {
+          "name": "06 - Track 01 long title.mp3",
+          "first_cluster": 146,
+          "clusters": 7,
+          "fragments": 1
+        },
+        {
+          "name": "07 - Track 00.mp3",
+          "first_cluster": 153,
+          "clusters": 8,
+          "fragments": 1
+        },
+        {
+          "name": "08 - Track 05 long title long title.mp3",
+          "first_cluster": 161,
+          "clusters": 10,
+          "fragments": 1
+        },
+        {
+          "name": "09 - Track 04 long title.mp3",
+          "first_cluster": 171,
+          "clusters": 8,
+          "fragments": 1
+        },
+        {
+          "name": "10 - Track 32 long title long title.mp3",
+          "first_cluster": 179,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "11 - Track 29 long title long title.mp3",
+          "first_cluster": 190,
+          "clusters": 8,
+          "fragments": 1
+        },
+        {
+          "name": "12 - Track 28 long title.mp3",
+          "first_cluster": 198,
+          "clusters": 3,
+          "fragments": 1
+        },
+        {
+          "name": "13 - Track 08 long title long title.mp3",
+          "first_cluster": 201,
+          "clusters": 13,
+          "fragments": 1
+        },
+        {
+          "name": "14 - Track 34 long title.mp3",
+          "first_cluster": 214,
+          "clusters": 4,
+          "fragments": 1
+        },
+        {
+          "name": "15 - Track 37 long title.mp3",
+          "first_cluster": 218,
+          "clusters": 13,
+          "fragments": 1
+        },
+        {
+          "name": "16 - Track 33.mp3",
+          "first_cluster": 231,
+          "clusters": 12,
+          "fragments": 1
+        },
+        {
+          "name": "17 - Track 16 long title.mp3",
+          "first_cluster": 243,
+          "clusters": 5,
+          "fragments": 1
+        },
+        {
+          "name": "18 - Track 25 long title.mp3",
+          "first_cluster": 248,
+          "clusters": 3,
+          "fragments": 1
+        },
+        {
+          "name": "19 - Track 38 long title long title.mp3",
+          "first_cluster": 251,
+          "clusters": 9,
+          "fragments": 1
+        },
+        {
+          "name": "20 - Track 30.mp3",
+          "first_cluster": 260,
+          "clusters": 4,
+          "fragments": 1
+        },
+        {
+          "name": "21 - Track 10 long title.mp3",
+          "first_cluster": 264,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "22 - Track 12.mp3",
+          "first_cluster": 275,
+          "clusters": 2,
+          "fragments": 1
+        },
+        {
+          "name": "23 - Track 19 long title.mp3",
+          "first_cluster": 277,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "24 - Track 07 long title.mp3",
+          "first_cluster": 288,
+          "clusters": 10,
+          "fragments": 1
+        },
+        {
+          "name": "25 - Track 31 long title.mp3",
+          "first_cluster": 298,
+          "clusters": 5,
+          "fragments": 1
+        },
+        {
+          "name": "26 - Track 24.mp3",
+          "first_cluster": 303,
+          "clusters": 3,
+          "fragments": 1
+        },
+        {
+          "name": "27 - Track 03.mp3",
+          "first_cluster": 306,
+          "clusters": 6,
+          "fragments": 1
+        },
+        {
+          "name": "28 - Track 36.mp3",
+          "first_cluster": 312,
+          "clusters": 7,
+          "fragments": 1
+        },
+        {
+          "name": "29 - Track 13 long title.mp3",
+          "first_cluster": 319,
+          "clusters": 10,
+          "fragments": 1
+        },
+        {
+          "name": "30 - Track 27.mp3",
+          "first_cluster": 329,
+          "clusters": 15,
+          "fragments": 1
+        },
+        {
+          "name": "31 - Track 11 long title long title.mp3",
+          "first_cluster": 344,
+          "clusters": 12,
+          "fragments": 1
+        },
+        {
+          "name": "32 - Track 35 long title long title.mp3",
+          "first_cluster": 356,
+          "clusters": 15,
+          "fragments": 1
+        },
+        {
+          "name": "33 - Track 02 long title long title.mp3",
+          "first_cluster": 371,
+          "clusters": 9,
+          "fragments": 1
+        },
+        {
+          "name": "34 - Track 22 long title.mp3",
+          "first_cluster": 380,
+          "clusters": 3,
+          "fragments": 1
+        },
+        {
+          "name": "35 - Track 20 long title long title.mp3",
+          "first_cluster": 383,
+          "clusters": 2,
+          "fragments": 1
+        },
+        {
+          "name": "36 - Track 14 long title long title.mp3",
+          "first_cluster": 385,
+          "clusters": 5,
+          "fragments": 1
+        },
+        {
+          "name": "37 - Track 17 long title long title.mp3",
+          "first_cluster": 390,
+          "clusters": 13,
+          "fragments": 1
+        },
+        {
+          "name": "38 - Track 15.mp3",
+          "first_cluster": 403,
+          "clusters": 7,
+          "fragments": 1
+        },
+        {
+          "name": "39 - Track 23 long title long title.mp3",
+          "first_cluster": 410,
+          "clusters": 9,
+          "fragments": 1
+        },
+        {
+          "name": "40 - Track 09.mp3",
+          "first_cluster": 419,
+          "clusters": 11,
+          "fragments": 1
+        }
+      ]
+    },
+    "fat_copies_identical": true,
+    "data_mismatches": [],
+    "problems": []
+  }
+}
+>>
+<<KERNEL_LIST
+{
+  "in_order": true,
+  "expected": 40,
+  "found": 40,
+  "missing": [],
+  "extra": [
+    "old document 01.dat",
+    "old document 03.dat",
+    "old document 05.dat",
+    "old document 07.dat",
+    "old document 09.dat",
+    "old document 11.dat",
+    "old document 13.dat",
+    "old document 15.dat",
+    "old document 17.dat",
+    "old document 19.dat",
+    "old document 21.dat",
+    "old document 23.dat",
+    "old document 25.dat",
+    "old document 27.dat",
+    "old document 29.dat",
+    "old document 31.dat",
+    "old document 33.dat",
+    "old document 35.dat",
+    "old document 37.dat",
+    "old document 39.dat",
+    "old document 41.dat",
+    "old document 43.dat",
+    "old document 45.dat",
+    "old document 47.dat",
+    "old document 49.dat",
+    "old document 51.dat",
+    "old document 53.dat",
+    "old document 55.dat",
+    "old document 57.dat",
+    "old document 59.dat"
+  ],
+  "junk": [],
+  "first_mismatch": null,
+  "actual": [
+    "01 - Track 06.mp3",
+    "02 - Track 21.mp3",
+    "03 - Track 18.mp3",
+    "04 - Track 26 long title long title.mp3",
+    "05 - Track 39.mp3",
+    "06 - Track 01 long title.mp3",
+    "07 - Track 00.mp3",
+    "08 - Track 05 long title long title.mp3",
+    "09 - Track 04 long title.mp3",
+    "10 - Track 32 long title long title.mp3",
+    "11 - Track 29 long title long title.mp3",
+    "12 - Track 28 long title.mp3",
+    "13 - Track 08 long title long title.mp3",
+    "14 - Track 34 long title.mp3",
+    "15 - Track 37 long title.mp3",
+    "16 - Track 33.mp3",
+    "17 - Track 16 long title.mp3",
+    "18 - Track 25 long title.mp3",
+    "19 - Track 38 long title long title.mp3",
+    "20 - Track 30.mp3",
+    "21 - Track 10 long title.mp3",
+    "22 - Track 12.mp3",
+    "23 - Track 19 long title.mp3",
+    "24 - Track 07 long title.mp3",
+    "25 - Track 31 long title.mp3",
+    "26 - Track 24.mp3",
+    "27 - Track 03.mp3",
+    "28 - Track 36.mp3",
+    "29 - Track 13 long title.mp3",
+    "30 - Track 27.mp3",
+    "31 - Track 11 long title long title.mp3",
+    "32 - Track 35 long title long title.mp3",
+    "33 - Track 02 long title long title.mp3",
+    "34 - Track 22 long title.mp3",
+    "35 - Track 20 long title long title.mp3",
+    "36 - Track 14 long title long title.mp3",
+    "37 - Track 17 long title long title.mp3",
+    "38 - Track 15.mp3",
+    "39 - Track 23 long title long title.mp3",
+    "40 - Track 09.mp3",
+    "old document 01.dat",
+    "old document 03.dat",
+    "old document 05.dat",
+    "old document 07.dat",
+    "old document 09.dat",
+    "old document 11.dat",
+    "old document 13.dat",
+    "old document 15.dat",
+    "old document 17.dat",
+    "old document 19.dat",
+    "old document 21.dat",
+    "old document 23.dat",
+    "old document 25.dat",
+    "old document 27.dat",
+    "old document 29.dat",
+    "old document 31.dat",
+    "old document 33.dat",
+    "old document 35.dat",
+    "old document 37.dat",
+    "old document 39.dat",
+    "old document 41.dat",
+    "old document 43.dat",
+    "old document 45.dat",
+    "old document 47.dat",
+    "old document 49.dat",
+    "old document 51.dat",
+    "old document 53.dat",
+    "old document 55.dat",
+    "old document 57.dat",
+    "old document 59.dat"
+  ]
+}
+>>
+CONTENT_BAD 0
+=== fat32_replace
+<<PRE
+{
+  "ok": true,
+  "error": null,
+  "result": {
+    "written": true,
+    "target_dir": "/Road Trip",
+    "names": [
+      "01 - Track 09.mp3",
+      "02 - Track 23 long title long title.mp3",
+      "03 - Track 15.mp3",
+      "04 - Track 17 long title long title.mp3",
+      "05 - Track 14 long title long title.mp3",
+      "06 - Track 20 long title long title.mp3",
+      "07 - Track 22 long title.mp3",
+      "08 - Track 02 long title long title.mp3",
+      "09 - Track 35 long title long title.mp3",
+      "10 - Track 11 long title long title.mp3",
+      "11 - Track 27.mp3",
+      "12 - Track 13 long title.mp3",
+      "13 - Track 36.mp3",
+      "14 - Track 03.mp3",
+      "15 - Track 24.mp3",
+      "16 - Track 31 long title.mp3",
+      "17 - Track 07 long title.mp3",
+      "18 - Track 19 long title.mp3",
+      "19 - Track 12.mp3",
+      "20 - Track 10 long title.mp3",
+      "21 - Track 30.mp3",
+      "22 - Track 38 long title long title.mp3",
+      "23 - Track 25 long title.mp3",
+      "24 - Track 16 long title.mp3",
+      "25 - Track 33.mp3",
+      "26 - Track 37 long title.mp3",
+      "27 - Track 34 long title.mp3",
+      "28 - Track 08 long title long title.mp3",
+      "29 - Track 28 long title.mp3",
+      "30 - Track 29 long title long title.mp3",
+      "31 - Track 32 long title long title.mp3",
+      "32 - Track 04 long title.mp3",
+      "33 - Track 05 long title long title.mp3",
+      "34 - Track 00.mp3",
+      "35 - Track 01 long title.mp3",
+      "36 - Track 39.mp3",
+      "37 - Track 26 long title long title.mp3",
+      "38 - Track 18.mp3",
+      "39 - Track 21.mp3",
+      "40 - Track 06.mp3"
+    ],
+    "sizes": [
+      42887,
+      35886,
+      28093,
+      52328,
+      19542,
+      7270,
+      11835,
+      36006,
+      57812,
+      46816,
+      58992,
+      40198,
+      28625,
+      21715,
+      9304,
+      19016,
+      37962,
+      43773,
+      5224,
+      41834,
+      12518,
+      36615,
+      9945,
+      18117,
+      47335,
+      51814,
+      15364,
+      52443,
+      8716,
+      29166,
+      42914,
+      31139,
+      38477,
+      31242,
+      28438,
+      9564,
+      14321,
+      43725,
+      38087,
+      25818
+    ],
+    "layout": {
+      "contiguous": true,
+      "ascending": true,
+      "dir_clusters": [
+        653,
+        654,
+        655,
+        656,
+        657,
+        658,
+        659,
+        660,
+        661,
+        662
+      ],
+      "files": [
+        {
+          "name": "01 - Track 09.mp3",
+          "first_cluster": 663,
+          "clusters": 84,
+          "fragments": 1
+        },
+        {
+          "name": "02 - Track 23 long title long title.mp3",
+          "first_cluster": 747,
+          "clusters": 71,
+          "fragments": 1
+        },
+        {
+          "name": "03 - Track 15.mp3",
+          "first_cluster": 818,
+          "clusters": 55,
+          "fragments": 1
+        },
+        {
+          "name": "04 - Track 17 long title long title.mp3",
+          "first_cluster": 873,
+          "clusters": 103,
+          "fragments": 1
+        },
+        {
+          "name": "05 - Track 14 long title long title.mp3",
+          "first_cluster": 976,
+          "clusters": 39,
+          "fragments": 1
+        },
+        {
+          "name": "06 - Track 20 long title long title.mp3",
+          "first_cluster": 1015,
+          "clusters": 15,
+          "fragments": 1
+        },
+        {
+          "name": "07 - Track 22 long title.mp3",
+          "first_cluster": 1030,
+          "clusters": 24,
+          "fragments": 1
+        },
+        {
+          "name": "08 - Track 02 long title long title.mp3",
+          "first_cluster": 1054,
+          "clusters": 71,
+          "fragments": 1
+        },
+        {
+          "name": "09 - Track 35 long title long title.mp3",
+          "first_cluster": 1125,
+          "clusters": 113,
+          "fragments": 1
+        },
+        {
+          "name": "10 - Track 11 long title long title.mp3",
+          "first_cluster": 1238,
+          "clusters": 92,
+          "fragments": 1
+        },
+        {
+          "name": "11 - Track 27.mp3",
+          "first_cluster": 1330,
+          "clusters": 116,
+          "fragments": 1
+        },
+        {
+          "name": "12 - Track 13 long title.mp3",
+          "first_cluster": 1446,
+          "clusters": 79,
+          "fragments": 1
+        },
+        {
+          "name": "13 - Track 36.mp3",
+          "first_cluster": 1525,
+          "clusters": 56,
+          "fragments": 1
+        },
+        {
+          "name": "14 - Track 03.mp3",
+          "first_cluster": 1581,
+          "clusters": 43,
+          "fragments": 1
+        },
+        {
+          "name": "15 - Track 24.mp3",
+          "first_cluster": 1624,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "16 - Track 31 long title.mp3",
+          "first_cluster": 1643,
+          "clusters": 38,
+          "fragments": 1
+        },
+        {
+          "name": "17 - Track 07 long title.mp3",
+          "first_cluster": 1681,
+          "clusters": 75,
+          "fragments": 1
+        },
+        {
+          "name": "18 - Track 19 long title.mp3",
+          "first_cluster": 1756,
+          "clusters": 86,
+          "fragments": 1
+        },
+        {
+          "name": "19 - Track 12.mp3",
+          "first_cluster": 1842,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "20 - Track 10 long title.mp3",
+          "first_cluster": 1853,
+          "clusters": 82,
+          "fragments": 1
+        },
+        {
+          "name": "21 - Track 30.mp3",
+          "first_cluster": 1935,
+          "clusters": 25,
+          "fragments": 1
+        },
+        {
+          "name": "22 - Track 38 long title long title.mp3",
+          "first_cluster": 1960,
+          "clusters": 72,
+          "fragments": 1
+        },
+        {
+          "name": "23 - Track 25 long title.mp3",
+          "first_cluster": 2032,
+          "clusters": 20,
+          "fragments": 1
+        },
+        {
+          "name": "24 - Track 16 long title.mp3",
+          "first_cluster": 2052,
+          "clusters": 36,
+          "fragments": 1
+        },
+        {
+          "name": "25 - Track 33.mp3",
+          "first_cluster": 2088,
+          "clusters": 93,
+          "fragments": 1
+        },
+        {
+          "name": "26 - Track 37 long title.mp3",
+          "first_cluster": 2181,
+          "clusters": 102,
+          "fragments": 1
+        },
+        {
+          "name": "27 - Track 34 long title.mp3",
+          "first_cluster": 2283,
+          "clusters": 31,
+          "fragments": 1
+        },
+        {
+          "name": "28 - Track 08 long title long title.mp3",
+          "first_cluster": 2314,
+          "clusters": 103,
+          "fragments": 1
+        },
+        {
+          "name": "29 - Track 28 long title.mp3",
+          "first_cluster": 2417,
+          "clusters": 18,
+          "fragments": 1
+        },
+        {
+          "name": "30 - Track 29 long title long title.mp3",
+          "first_cluster": 2435,
+          "clusters": 57,
+          "fragments": 1
+        },
+        {
+          "name": "31 - Track 32 long title long title.mp3",
+          "first_cluster": 2492,
+          "clusters": 84,
+          "fragments": 1
+        },
+        {
+          "name": "32 - Track 04 long title.mp3",
+          "first_cluster": 2576,
+          "clusters": 61,
+          "fragments": 1
+        },
+        {
+          "name": "33 - Track 05 long title long title.mp3",
+          "first_cluster": 2637,
+          "clusters": 76,
+          "fragments": 1
+        },
+        {
+          "name": "34 - Track 00.mp3",
+          "first_cluster": 2713,
+          "clusters": 62,
+          "fragments": 1
+        },
+        {
+          "name": "35 - Track 01 long title.mp3",
+          "first_cluster": 2775,
+          "clusters": 56,
+          "fragments": 1
+        },
+        {
+          "name": "36 - Track 39.mp3",
+          "first_cluster": 2831,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "37 - Track 26 long title long title.mp3",
+          "first_cluster": 2850,
+          "clusters": 28,
+          "fragments": 1
+        },
+        {
+          "name": "38 - Track 18.mp3",
+          "first_cluster": 2878,
+          "clusters": 86,
+          "fragments": 1
+        },
+        {
+          "name": "39 - Track 21.mp3",
+          "first_cluster": 2964,
+          "clusters": 75,
+          "fragments": 1
+        },
+        {
+          "name": "40 - Track 06.mp3",
+          "first_cluster": 3039,
+          "clusters": 51,
+          "fragments": 1
+        }
+      ]
+    },
+    "needed_clusters": 2437,
+    "free_clusters_before": 128703,
+    "largest_free_run": 128371,
+    "deleted": [],
+    "backups": [
+      "/tmp/p2u-backup-78349a99-1793079178135099154-2-write.bin"
+    ],
+    "bytes_written": 1230876,
+    "undo_note": null
+  },
+  "verification": {
+    "order_ok": true,
+    "layout_matches_plan": true,
+    "layout": {
+      "contiguous": true,
+      "ascending": true,
+      "dir_clusters": [
+        653,
+        654,
+        655,
+        656,
+        657,
+        658,
+        659,
+        660,
+        661,
+        662
+      ],
+      "files": [
+        {
+          "name": "01 - Track 09.mp3",
+          "first_cluster": 663,
+          "clusters": 84,
+          "fragments": 1
+        },
+        {
+          "name": "02 - Track 23 long title long title.mp3",
+          "first_cluster": 747,
+          "clusters": 71,
+          "fragments": 1
+        },
+        {
+          "name": "03 - Track 15.mp3",
+          "first_cluster": 818,
+          "clusters": 55,
+          "fragments": 1
+        },
+        {
+          "name": "04 - Track 17 long title long title.mp3",
+          "first_cluster": 873,
+          "clusters": 103,
+          "fragments": 1
+        },
+        {
+          "name": "05 - Track 14 long title long title.mp3",
+          "first_cluster": 976,
+          "clusters": 39,
+          "fragments": 1
+        },
+        {
+          "name": "06 - Track 20 long title long title.mp3",
+          "first_cluster": 1015,
+          "clusters": 15,
+          "fragments": 1
+        },
+        {
+          "name": "07 - Track 22 long title.mp3",
+          "first_cluster": 1030,
+          "clusters": 24,
+          "fragments": 1
+        },
+        {
+          "name": "08 - Track 02 long title long title.mp3",
+          "first_cluster": 1054,
+          "clusters": 71,
+          "fragments": 1
+        },
+        {
+          "name": "09 - Track 35 long title long title.mp3",
+          "first_cluster": 1125,
+          "clusters": 113,
+          "fragments": 1
+        },
+        {
+          "name": "10 - Track 11 long title long title.mp3",
+          "first_cluster": 1238,
+          "clusters": 92,
+          "fragments": 1
+        },
+        {
+          "name": "11 - Track 27.mp3",
+          "first_cluster": 1330,
+          "clusters": 116,
+          "fragments": 1
+        },
+        {
+          "name": "12 - Track 13 long title.mp3",
+          "first_cluster": 1446,
+          "clusters": 79,
+          "fragments": 1
+        },
+        {
+          "name": "13 - Track 36.mp3",
+          "first_cluster": 1525,
+          "clusters": 56,
+          "fragments": 1
+        },
+        {
+          "name": "14 - Track 03.mp3",
+          "first_cluster": 1581,
+          "clusters": 43,
+          "fragments": 1
+        },
+        {
+          "name": "15 - Track 24.mp3",
+          "first_cluster": 1624,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "16 - Track 31 long title.mp3",
+          "first_cluster": 1643,
+          "clusters": 38,
+          "fragments": 1
+        },
+        {
+          "name": "17 - Track 07 long title.mp3",
+          "first_cluster": 1681,
+          "clusters": 75,
+          "fragments": 1
+        },
+        {
+          "name": "18 - Track 19 long title.mp3",
+          "first_cluster": 1756,
+          "clusters": 86,
+          "fragments": 1
+        },
+        {
+          "name": "19 - Track 12.mp3",
+          "first_cluster": 1842,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "20 - Track 10 long title.mp3",
+          "first_cluster": 1853,
+          "clusters": 82,
+          "fragments": 1
+        },
+        {
+          "name": "21 - Track 30.mp3",
+          "first_cluster": 1935,
+          "clusters": 25,
+          "fragments": 1
+        },
+        {
+          "name": "22 - Track 38 long title long title.mp3",
+          "first_cluster": 1960,
+          "clusters": 72,
+          "fragments": 1
+        },
+        {
+          "name": "23 - Track 25 long title.mp3",
+          "first_cluster": 2032,
+          "clusters": 20,
+          "fragments": 1
+        },
+        {
+          "name": "24 - Track 16 long title.mp3",
+          "first_cluster": 2052,
+          "clusters": 36,
+          "fragments": 1
+        },
+        {
+          "name": "25 - Track 33.mp3",
+          "first_cluster": 2088,
+          "clusters": 93,
+          "fragments": 1
+        },
+        {
+          "name": "26 - Track 37 long title.mp3",
+          "first_cluster": 2181,
+          "clusters": 102,
+          "fragments": 1
+        },
+        {
+          "name": "27 - Track 34 long title.mp3",
+          "first_cluster": 2283,
+          "clusters": 31,
+          "fragments": 1
+        },
+        {
+          "name": "28 - Track 08 long title long title.mp3",
+          "first_cluster": 2314,
+          "clusters": 103,
+          "fragments": 1
+        },
+        {
+          "name": "29 - Track 28 long title.mp3",
+          "first_cluster": 2417,
+          "clusters": 18,
+          "fragments": 1
+        },
+        {
+          "name": "30 - Track 29 long title long title.mp3",
+          "first_cluster": 2435,
+          "clusters": 57,
+          "fragments": 1
+        },
+        {
+          "name": "31 - Track 32 long title long title.mp3",
+          "first_cluster": 2492,
+          "clusters": 84,
+          "fragments": 1
+        },
+        {
+          "name": "32 - Track 04 long title.mp3",
+          "first_cluster": 2576,
+          "clusters": 61,
+          "fragments": 1
+        },
+        {
+          "name": "33 - Track 05 long title long title.mp3",
+          "first_cluster": 2637,
+          "clusters": 76,
+          "fragments": 1
+        },
+        {
+          "name": "34 - Track 00.mp3",
+          "first_cluster": 2713,
+          "clusters": 62,
+          "fragments": 1
+        },
+        {
+          "name": "35 - Track 01 long title.mp3",
+          "first_cluster": 2775,
+          "clusters": 56,
+          "fragments": 1
+        },
+        {
+          "name": "36 - Track 39.mp3",
+          "first_cluster": 2831,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "37 - Track 26 long title long title.mp3",
+          "first_cluster": 2850,
+          "clusters": 28,
+          "fragments": 1
+        },
+        {
+          "name": "38 - Track 18.mp3",
+          "first_cluster": 2878,
+          "clusters": 86,
+          "fragments": 1
+        },
+        {
+          "name": "39 - Track 21.mp3",
+          "first_cluster": 2964,
+          "clusters": 75,
+          "fragments": 1
+        },
+        {
+          "name": "40 - Track 06.mp3",
+          "first_cluster": 3039,
+          "clusters": 51,
+          "fragments": 1
+        }
+      ]
+    },
+    "fat_copies_identical": true,
+    "data_mismatches": [],
+    "problems": []
+  }
+}
+>>
+<<WRITE
+{
+  "ok": true,
+  "error": null,
+  "result": {
+    "written": true,
+    "target_dir": "/Road Trip",
+    "names": [
+      "01 - Track 06.mp3",
+      "02 - Track 21.mp3",
+      "03 - Track 18.mp3",
+      "04 - Track 26 long title long title.mp3",
+      "05 - Track 39.mp3",
+      "06 - Track 01 long title.mp3",
+      "07 - Track 00.mp3",
+      "08 - Track 05 long title long title.mp3",
+      "09 - Track 04 long title.mp3",
+      "10 - Track 32 long title long title.mp3",
+      "11 - Track 29 long title long title.mp3",
+      "12 - Track 28 long title.mp3",
+      "13 - Track 08 long title long title.mp3",
+      "14 - Track 34 long title.mp3",
+      "15 - Track 37 long title.mp3",
+      "16 - Track 33.mp3",
+      "17 - Track 16 long title.mp3",
+      "18 - Track 25 long title.mp3",
+      "19 - Track 38 long title long title.mp3",
+      "20 - Track 30.mp3",
+      "21 - Track 10 long title.mp3",
+      "22 - Track 12.mp3",
+      "23 - Track 19 long title.mp3",
+      "24 - Track 07 long title.mp3",
+      "25 - Track 31 long title.mp3",
+      "26 - Track 24.mp3",
+      "27 - Track 03.mp3",
+      "28 - Track 36.mp3",
+      "29 - Track 13 long title.mp3",
+      "30 - Track 27.mp3",
+      "31 - Track 11 long title long title.mp3",
+      "32 - Track 35 long title long title.mp3",
+      "33 - Track 02 long title long title.mp3",
+      "34 - Track 22 long title.mp3",
+      "35 - Track 20 long title long title.mp3",
+      "36 - Track 14 long title long title.mp3",
+      "37 - Track 17 long title long title.mp3",
+      "38 - Track 15.mp3",
+      "39 - Track 23 long title long title.mp3",
+      "40 - Track 09.mp3"
+    ],
+    "sizes": [
+      25818,
+      38087,
+      43725,
+      14321,
+      9564,
+      28438,
+      31242,
+      38477,
+      31139,
+      42914,
+      29166,
+      8716,
+      52443,
+      15364,
+      51814,
+      47335,
+      18117,
+      9945,
+      36615,
+      12518,
+      41834,
+      5224,
+      43773,
+      37962,
+      19016,
+      9304,
+      21715,
+      28625,
+      40198,
+      58992,
+      46816,
+      57812,
+      36006,
+      11835,
+      7270,
+      19542,
+      52328,
+      28093,
+      35886,
+      42887
+    ],
+    "layout": {
+      "contiguous": true,
+      "ascending": true,
+      "dir_clusters": [
+        3090,
+        3091,
+        3092,
+        3093,
+        3094,
+        3095,
+        3096,
+        3097,
+        3098,
+        3099
+      ],
+      "files": [
+        {
+          "name": "01 - Track 06.mp3",
+          "first_cluster": 3100,
+          "clusters": 51,
+          "fragments": 1
+        },
+        {
+          "name": "02 - Track 21.mp3",
+          "first_cluster": 3151,
+          "clusters": 75,
+          "fragments": 1
+        },
+        {
+          "name": "03 - Track 18.mp3",
+          "first_cluster": 3226,
+          "clusters": 86,
+          "fragments": 1
+        },
+        {
+          "name": "04 - Track 26 long title long title.mp3",
+          "first_cluster": 3312,
+          "clusters": 28,
+          "fragments": 1
+        },
+        {
+          "name": "05 - Track 39.mp3",
+          "first_cluster": 3340,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "06 - Track 01 long title.mp3",
+          "first_cluster": 3359,
+          "clusters": 56,
+          "fragments": 1
+        },
+        {
+          "name": "07 - Track 00.mp3",
+          "first_cluster": 3415,
+          "clusters": 62,
+          "fragments": 1
+        },
+        {
+          "name": "08 - Track 05 long title long title.mp3",
+          "first_cluster": 3477,
+          "clusters": 76,
+          "fragments": 1
+        },
+        {
+          "name": "09 - Track 04 long title.mp3",
+          "first_cluster": 3553,
+          "clusters": 61,
+          "fragments": 1
+        },
+        {
+          "name": "10 - Track 32 long title long title.mp3",
+          "first_cluster": 3614,
+          "clusters": 84,
+          "fragments": 1
+        },
+        {
+          "name": "11 - Track 29 long title long title.mp3",
+          "first_cluster": 3698,
+          "clusters": 57,
+          "fragments": 1
+        },
+        {
+          "name": "12 - Track 28 long title.mp3",
+          "first_cluster": 3755,
+          "clusters": 18,
+          "fragments": 1
+        },
+        {
+          "name": "13 - Track 08 long title long title.mp3",
+          "first_cluster": 3773,
+          "clusters": 103,
+          "fragments": 1
+        },
+        {
+          "name": "14 - Track 34 long title.mp3",
+          "first_cluster": 3876,
+          "clusters": 31,
+          "fragments": 1
+        },
+        {
+          "name": "15 - Track 37 long title.mp3",
+          "first_cluster": 3907,
+          "clusters": 102,
+          "fragments": 1
+        },
+        {
+          "name": "16 - Track 33.mp3",
+          "first_cluster": 4009,
+          "clusters": 93,
+          "fragments": 1
+        },
+        {
+          "name": "17 - Track 16 long title.mp3",
+          "first_cluster": 4102,
+          "clusters": 36,
+          "fragments": 1
+        },
+        {
+          "name": "18 - Track 25 long title.mp3",
+          "first_cluster": 4138,
+          "clusters": 20,
+          "fragments": 1
+        },
+        {
+          "name": "19 - Track 38 long title long title.mp3",
+          "first_cluster": 4158,
+          "clusters": 72,
+          "fragments": 1
+        },
+        {
+          "name": "20 - Track 30.mp3",
+          "first_cluster": 4230,
+          "clusters": 25,
+          "fragments": 1
+        },
+        {
+          "name": "21 - Track 10 long title.mp3",
+          "first_cluster": 4255,
+          "clusters": 82,
+          "fragments": 1
+        },
+        {
+          "name": "22 - Track 12.mp3",
+          "first_cluster": 4337,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "23 - Track 19 long title.mp3",
+          "first_cluster": 4348,
+          "clusters": 86,
+          "fragments": 1
+        },
+        {
+          "name": "24 - Track 07 long title.mp3",
+          "first_cluster": 4434,
+          "clusters": 75,
+          "fragments": 1
+        },
+        {
+          "name": "25 - Track 31 long title.mp3",
+          "first_cluster": 4509,
+          "clusters": 38,
+          "fragments": 1
+        },
+        {
+          "name": "26 - Track 24.mp3",
+          "first_cluster": 4547,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "27 - Track 03.mp3",
+          "first_cluster": 4566,
+          "clusters": 43,
+          "fragments": 1
+        },
+        {
+          "name": "28 - Track 36.mp3",
+          "first_cluster": 4609,
+          "clusters": 56,
+          "fragments": 1
+        },
+        {
+          "name": "29 - Track 13 long title.mp3",
+          "first_cluster": 4665,
+          "clusters": 79,
+          "fragments": 1
+        },
+        {
+          "name": "30 - Track 27.mp3",
+          "first_cluster": 4744,
+          "clusters": 116,
+          "fragments": 1
+        },
+        {
+          "name": "31 - Track 11 long title long title.mp3",
+          "first_cluster": 4860,
+          "clusters": 92,
+          "fragments": 1
+        },
+        {
+          "name": "32 - Track 35 long title long title.mp3",
+          "first_cluster": 4952,
+          "clusters": 113,
+          "fragments": 1
+        },
+        {
+          "name": "33 - Track 02 long title long title.mp3",
+          "first_cluster": 5065,
+          "clusters": 71,
+          "fragments": 1
+        },
+        {
+          "name": "34 - Track 22 long title.mp3",
+          "first_cluster": 5136,
+          "clusters": 24,
+          "fragments": 1
+        },
+        {
+          "name": "35 - Track 20 long title long title.mp3",
+          "first_cluster": 5160,
+          "clusters": 15,
+          "fragments": 1
+        },
+        {
+          "name": "36 - Track 14 long title long title.mp3",
+          "first_cluster": 5175,
+          "clusters": 39,
+          "fragments": 1
+        },
+        {
+          "name": "37 - Track 17 long title long title.mp3",
+          "first_cluster": 5214,
+          "clusters": 103,
+          "fragments": 1
+        },
+        {
+          "name": "38 - Track 15.mp3",
+          "first_cluster": 5317,
+          "clusters": 55,
+          "fragments": 1
+        },
+        {
+          "name": "39 - Track 23 long title long title.mp3",
+          "first_cluster": 5372,
+          "clusters": 71,
+          "fragments": 1
+        },
+        {
+          "name": "40 - Track 09.mp3",
+          "first_cluster": 5443,
+          "clusters": 84,
+          "fragments": 1
+        }
+      ]
+    },
+    "needed_clusters": 2437,
+    "free_clusters_before": 126266,
+    "largest_free_run": 128371,
+    "deleted": [
+      "Road Trip"
+    ],
+    "backups": [
+      "/tmp/p2u-backup-78349a99-1793079178370262456-1-delete.bin",
+      "/tmp/p2u-backup-78349a99-1793079178425610043-2-write.bin"
+    ],
+    "bytes_written": 1230876,
+    "undo_note": null
+  },
+  "verification": {
+    "order_ok": true,
+    "layout_matches_plan": true,
+    "layout": {
+      "contiguous": true,
+      "ascending": true,
+      "dir_clusters": [
+        3090,
+        3091,
+        3092,
+        3093,
+        3094,
+        3095,
+        3096,
+        3097,
+        3098,
+        3099
+      ],
+      "files": [
+        {
+          "name": "01 - Track 06.mp3",
+          "first_cluster": 3100,
+          "clusters": 51,
+          "fragments": 1
+        },
+        {
+          "name": "02 - Track 21.mp3",
+          "first_cluster": 3151,
+          "clusters": 75,
+          "fragments": 1
+        },
+        {
+          "name": "03 - Track 18.mp3",
+          "first_cluster": 3226,
+          "clusters": 86,
+          "fragments": 1
+        },
+        {
+          "name": "04 - Track 26 long title long title.mp3",
+          "first_cluster": 3312,
+          "clusters": 28,
+          "fragments": 1
+        },
+        {
+          "name": "05 - Track 39.mp3",
+          "first_cluster": 3340,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "06 - Track 01 long title.mp3",
+          "first_cluster": 3359,
+          "clusters": 56,
+          "fragments": 1
+        },
+        {
+          "name": "07 - Track 00.mp3",
+          "first_cluster": 3415,
+          "clusters": 62,
+          "fragments": 1
+        },
+        {
+          "name": "08 - Track 05 long title long title.mp3",
+          "first_cluster": 3477,
+          "clusters": 76,
+          "fragments": 1
+        },
+        {
+          "name": "09 - Track 04 long title.mp3",
+          "first_cluster": 3553,
+          "clusters": 61,
+          "fragments": 1
+        },
+        {
+          "name": "10 - Track 32 long title long title.mp3",
+          "first_cluster": 3614,
+          "clusters": 84,
+          "fragments": 1
+        },
+        {
+          "name": "11 - Track 29 long title long title.mp3",
+          "first_cluster": 3698,
+          "clusters": 57,
+          "fragments": 1
+        },
+        {
+          "name": "12 - Track 28 long title.mp3",
+          "first_cluster": 3755,
+          "clusters": 18,
+          "fragments": 1
+        },
+        {
+          "name": "13 - Track 08 long title long title.mp3",
+          "first_cluster": 3773,
+          "clusters": 103,
+          "fragments": 1
+        },
+        {
+          "name": "14 - Track 34 long title.mp3",
+          "first_cluster": 3876,
+          "clusters": 31,
+          "fragments": 1
+        },
+        {
+          "name": "15 - Track 37 long title.mp3",
+          "first_cluster": 3907,
+          "clusters": 102,
+          "fragments": 1
+        },
+        {
+          "name": "16 - Track 33.mp3",
+          "first_cluster": 4009,
+          "clusters": 93,
+          "fragments": 1
+        },
+        {
+          "name": "17 - Track 16 long title.mp3",
+          "first_cluster": 4102,
+          "clusters": 36,
+          "fragments": 1
+        },
+        {
+          "name": "18 - Track 25 long title.mp3",
+          "first_cluster": 4138,
+          "clusters": 20,
+          "fragments": 1
+        },
+        {
+          "name": "19 - Track 38 long title long title.mp3",
+          "first_cluster": 4158,
+          "clusters": 72,
+          "fragments": 1
+        },
+        {
+          "name": "20 - Track 30.mp3",
+          "first_cluster": 4230,
+          "clusters": 25,
+          "fragments": 1
+        },
+        {
+          "name": "21 - Track 10 long title.mp3",
+          "first_cluster": 4255,
+          "clusters": 82,
+          "fragments": 1
+        },
+        {
+          "name": "22 - Track 12.mp3",
+          "first_cluster": 4337,
+          "clusters": 11,
+          "fragments": 1
+        },
+        {
+          "name": "23 - Track 19 long title.mp3",
+          "first_cluster": 4348,
+          "clusters": 86,
+          "fragments": 1
+        },
+        {
+          "name": "24 - Track 07 long title.mp3",
+          "first_cluster": 4434,
+          "clusters": 75,
+          "fragments": 1
+        },
+        {
+          "name": "25 - Track 31 long title.mp3",
+          "first_cluster": 4509,
+          "clusters": 38,
+          "fragments": 1
+        },
+        {
+          "name": "26 - Track 24.mp3",
+          "first_cluster": 4547,
+          "clusters": 19,
+          "fragments": 1
+        },
+        {
+          "name": "27 - Track 03.mp3",
+          "first_cluster": 4566,
+          "clusters": 43,
+          "fragments": 1
+        },
+        {
+          "name": "28 - Track 36.mp3",
+          "first_cluster": 4609,
+          "clusters": 56,
+          "fragments": 1
+        },
+        {
+          "name": "29 - Track 13 long title.mp3",
+          "first_cluster": 4665,
+          "clusters": 79,
+          "fragments": 1
+        },
+        {
+          "name": "30 - Track 27.mp3",
+          "first_cluster": 4744,
+          "clusters": 116,
+          "fragments": 1
+        },
+        {
+          "name": "31 - Track 11 long title long title.mp3",
+          "first_cluster": 4860,
+          "clusters": 92,
+          "fragments": 1
+        },
+        {
+          "name": "32 - Track 35 long title long title.mp3",
+          "first_cluster": 4952,
+          "clusters": 113,
+          "fragments": 1
+        },
+        {
+          "name": "33 - Track 02 long title long title.mp3",
+          "first_cluster": 5065,
+          "clusters": 71,
+          "fragments": 1
+        },
+        {
+          "name": "34 - Track 22 long title.mp3",
+          "first_cluster": 5136,
+          "clusters": 24,
+          "fragments": 1
+        },
+        {
+          "name": "35 - Track 20 long title long title.mp3",
+          "first_cluster": 5160,
+          "clusters": 15,
+          "fragments": 1
+        },
+        {
+          "name": "36 - Track 14 long title long title.mp3",
+          "first_cluster": 5175,
+          "clusters": 39,
+          "fragments": 1
+        },
+        {
+          "name": "37 - Track 17 long title long title.mp3",
+          "first_cluster": 5214,
+          "clusters": 103,
+          "fragments": 1
+        },
+        {
+          "name": "38 - Track 15.mp3",
+          "first_cluster": 5317,
+          "clusters": 55,
+          "fragments": 1
+        },
+        {
+          "name": "39 - Track 23 long title long title.mp3",
+          "first_cluster": 5372,
+          "clusters": 71,
+          "fragments": 1
+        },
+        {
+          "name": "40 - Track 09.mp3",
+          "first_cluster": 5443,
+          "clusters": 84,
+          "fragments": 1
+        }
+      ]
+    },
+    "fat_copies_identical": true,
+    "data_mismatches": [],
+    "problems": []
+  }
+}
+>>
+<<KERNEL_LIST
+{
+  "in_order": true,
+  "expected": 40,
+  "found": 40,
+  "missing": [],
+  "extra": [],
+  "junk": [],
+  "first_mismatch": null,
+  "actual": [
+    "01 - Track 06.mp3",
+    "02 - Track 21.mp3",
+    "03 - Track 18.mp3",
+    "04 - Track 26 long title long title.mp3",
+    "05 - Track 39.mp3",
+    "06 - Track 01 long title.mp3",
+    "07 - Track 00.mp3",
+    "08 - Track 05 long title long title.mp3",
+    "09 - Track 04 long title.mp3",
+    "10 - Track 32 long title long title.mp3",
+    "11 - Track 29 long title long title.mp3",
+    "12 - Track 28 long title.mp3",
+    "13 - Track 08 long title long title.mp3",
+    "14 - Track 34 long title.mp3",
+    "15 - Track 37 long title.mp3",
+    "16 - Track 33.mp3",
+    "17 - Track 16 long title.mp3",
+    "18 - Track 25 long title.mp3",
+    "19 - Track 38 long title long title.mp3",
+    "20 - Track 30.mp3",
+    "21 - Track 10 long title.mp3",
+    "22 - Track 12.mp3",
+    "23 - Track 19 long title.mp3",
+    "24 - Track 07 long title.mp3",
+    "25 - Track 31 long title.mp3",
+    "26 - Track 24.mp3",
+    "27 - Track 03.mp3",
+    "28 - Track 36.mp3",
+    "29 - Track 13 long title.mp3",
+    "30 - Track 27.mp3",
+    "31 - Track 11 long title long title.mp3",
+    "32 - Track 35 long title long title.mp3",
+    "33 - Track 02 long title long title.mp3",
+    "34 - Track 22 long title.mp3",
+    "35 - Track 20 long title long title.mp3",
+    "36 - Track 14 long title long title.mp3",
+    "37 - Track 17 long title long title.mp3",
+    "38 - Track 15.mp3",
+    "39 - Track 23 long title long title.mp3",
+    "40 - Track 09.mp3"
+  ]
+}
+>>
+CONTENT_BAD 0
+=== done
+[    6.876060] reboot: Power down

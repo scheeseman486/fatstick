@@ -16,6 +16,7 @@
 
 mod dir;
 mod reorder;
+pub mod write;
 
 pub use dir::{DirEntryGroup, DirListing, EntryKind};
 pub use reorder::{
@@ -131,6 +132,10 @@ pub struct Geometry {
     pub root_cluster: u32,
     /// Which FAT copy is authoritative (FAT32 may disable mirroring).
     pub active_fat: u32,
+    /// Whether every FAT copy is kept identical (false only when FAT32 disables mirroring).
+    pub fat_mirroring: bool,
+    /// FAT32 only: sector of the FSInfo structure (0 = none).
+    pub fs_info_sector: u32,
     pub volume_serial: u32,
     pub volume_label: String,
     pub oem_name: String,
@@ -141,12 +146,12 @@ impl Geometry {
         self.bytes_per_sector as u64 * self.sectors_per_cluster as u64
     }
 
-    fn cluster_offset(&self, cluster: u32) -> u64 {
+    pub(crate) fn cluster_offset(&self, cluster: u32) -> u64 {
         let sector = self.first_data_sector as u64 + (cluster as u64 - 2) * self.sectors_per_cluster as u64;
         self.partition_offset + sector * self.bytes_per_sector as u64
     }
 
-    fn max_cluster(&self) -> u32 {
+    pub(crate) fn max_cluster(&self) -> u32 {
         self.cluster_count + 1
     }
 
@@ -251,6 +256,9 @@ pub fn locate_volume<D: Device>(dev: &mut D, partition: Option<usize>) -> Result
     if partition.is_none() && looks_like_bpb(&s0) {
         return Ok(0);
     }
+    if is_exfat(&s0) {
+        return Err(exfat_error());
+    }
     if s0[510] != 0x55 || s0[511] != 0xAA {
         return Err(FatError::NotFat("no boot sector or partition table signature".into()));
     }
@@ -277,16 +285,24 @@ pub fn locate_volume<D: Device>(dev: &mut D, partition: Option<usize>) -> Result
     } else {
         for i in 0..4 {
             let e = &s0[446 + 16 * i..446 + 16 * (i + 1)];
-            if FAT_PARTITION_TYPES.contains(&e[4]) {
+            // 0x07 is exFAT (or NTFS): probed only to explain the refusal.
+            if FAT_PARTITION_TYPES.contains(&e[4]) || e[4] == 0x07 {
                 candidates.push(le32(e, 8) as u64 * 512);
             }
         }
     }
     let mut fat_parts = Vec::new();
+    let mut saw_exfat = false;
     for off in candidates {
-        if looks_like_bpb(&read_probe(dev, off)?) {
+        let probe = read_probe(dev, off)?;
+        if looks_like_bpb(&probe) {
             fat_parts.push(off);
+        } else if is_exfat(&probe) {
+            saw_exfat = true;
         }
+    }
+    if fat_parts.is_empty() && saw_exfat {
+        return Err(exfat_error());
     }
     match partition {
         Some(p) => fat_parts
@@ -300,7 +316,18 @@ pub fn locate_volume<D: Device>(dev: &mut D, partition: Option<usize>) -> Result
     }
 }
 
+fn is_exfat(s: &[u8]) -> bool {
+    s.len() >= 11 && &s[3..11] == b"EXFAT   "
+}
+
+fn exfat_error() -> FatError {
+    FatError::NotFat("this stick is formatted exFAT, which isn't supported yet; most simple players need FAT32 anyway".into())
+}
+
 fn parse_geometry(s: &[u8], partition_offset: u64) -> Result<Geometry> {
+    if is_exfat(s) {
+        return Err(exfat_error());
+    }
     if !looks_like_bpb(s) {
         return Err(FatError::NotFat("boot sector is not a FAT BPB".into()));
     }
@@ -332,12 +359,14 @@ fn parse_geometry(s: &[u8], partition_offset: u64) -> Result<Geometry> {
     } else {
         FatType::Fat32
     };
-    let (root_cluster, active_fat, serial_off, label_off) = if fat_type == FatType::Fat32 {
+    let (root_cluster, active_fat, mirroring, fs_info, serial_off, label_off) = if fat_type == FatType::Fat32 {
         let ext = le16(s, 40);
-        let active = if ext & 0x80 != 0 { ext & 0x0F } else { 0 };
-        (le32(s, 44), active, 67, 71)
+        let mirrored = ext & 0x80 == 0;
+        let active = if mirrored { 0 } else { ext & 0x0F };
+        let fsi = le16(s, 48);
+        (le32(s, 44), active, mirrored, if fsi == 0 || fsi == 0xFFFF { 0 } else { fsi }, 67, 71)
     } else {
-        (0, 0, 39, 43)
+        (0, 0, true, 0, 39, 43)
     };
     if fat_type == FatType::Fat32 && root_ent != 0 {
         return Err(FatError::NotFat("FAT32 with a fixed root directory".into()));
@@ -358,6 +387,8 @@ fn parse_geometry(s: &[u8], partition_offset: u64) -> Result<Geometry> {
         cluster_count,
         root_cluster,
         active_fat,
+        fat_mirroring: mirroring,
+        fs_info_sector: fs_info,
         volume_serial: le32(s, serial_off),
         volume_label: label,
         oem_name: String::from_utf8_lossy(&s[3..11]).trim_end().to_string(),
@@ -391,6 +422,10 @@ impl<D: Device> Volume<D> {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "unaligned raw I/O"));
         }
         Ok(())
+    }
+
+    pub(crate) fn sector_size(&self) -> u64 {
+        self.sector_bytes()
     }
 
     pub(crate) fn read_extent(&mut self, e: Extent, buf: &mut [u8]) -> io::Result<()> {
@@ -625,5 +660,55 @@ impl<D: Device> Volume<D> {
             None
         };
         Ok(Health { boot_sector_dirty, fat_clean_shutdown: clean, fat_hard_error: hard, fats_identical })
+    }
+}
+
+/// Test tool: a device that fails every write after the first `n`, to check
+/// that an interruption at any point leaves a consistent file system.
+pub struct FaultInjector<D: Device> {
+    inner: D,
+    remaining: Option<u64>,
+}
+
+impl<D: Device> FaultInjector<D> {
+    pub fn new(inner: D, fail_after_writes: Option<u64>) -> Self {
+        FaultInjector { inner, remaining: fail_after_writes }
+    }
+}
+
+impl<D: Device> Read for FaultInjector<D> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+impl<D: Device> Write for FaultInjector<D> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self.remaining {
+            Some(0) => Err(io::Error::other("injected fault: the stick was pulled")),
+            Some(ref mut n) => {
+                *n -= 1;
+                self.inner.write(buf)
+            }
+            None => self.inner.write(buf),
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl<D: Device> Seek for FaultInjector<D> {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
+
+impl<D: Device> Device for FaultInjector<D> {
+    fn sync_device(&mut self) -> io::Result<()> {
+        self.inner.sync_device()
+    }
+    fn invalidate_cache(&mut self) -> io::Result<()> {
+        self.inner.invalidate_cache()
     }
 }
