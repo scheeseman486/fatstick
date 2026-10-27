@@ -1,21 +1,24 @@
-//! Finding removable FAT volumes and getting raw read/write access to one
+//! Finding USB sticks and getting raw read/write access to a whole one
 //! through each OS's own privilege broker.
 //!
-//! | OS      | Unmount                         | Raw access                                    | Prompt (biometrics)                  |
-//! |---------|---------------------------------|-----------------------------------------------|--------------------------------------|
-//! | Linux   | udisks2 `Filesystem.Unmount`    | udisks2 `Block.OpenDevice` hands back an fd   | polkit agent (fingerprint via PAM)   |
-//! | macOS   | `diskutil unmount`              | `authopen -stdoutpipe` hands back an fd       | authd dialog                          |
-//! | Windows | `FSCTL_LOCK_VOLUME`/`DISMOUNT`  | elevated helper opens `\\.\E:`                | UAC (Windows Hello when configured)  |
+//! Writing erases the whole stick, so this works on whole disks, not volumes:
+//! every partition on the stick is unmounted first, and the disk is then
+//! opened exclusively.
 //!
-//! On Linux and macOS the GUI process stays unprivileged: the broker gives it
-//! a file descriptor for exactly one device. On Windows a raw volume handle
-//! needs an elevated process, so the GUI runs `p2u-helper` via UAC.
+//! | OS      | Unmount                                   | Raw access to the whole disk                    | Prompt (biometrics)                 |
+//! |---------|-------------------------------------------|-------------------------------------------------|-------------------------------------|
+//! | Linux   | udisks2 `Filesystem.Unmount` per partition| udisks2 `Block.OpenDevice` hands back an fd     | polkit agent (fingerprint via PAM)  |
+//! | macOS   | `diskutil unmountDisk`                    | `authopen -stdoutpipe` hands back an fd         | authd dialog                        |
+//! | Windows | lock + dismount every volume on the disk  | elevated helper opens `\\.\PhysicalDriveN`      | UAC (Windows Hello when configured) |
+//!
+//! Only removable USB/SD disks are listed or accepted, never the disk the
+//! system runs from.
 
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -37,7 +40,7 @@ pub enum DeviceError {
     Io(#[from] io::Error),
     #[error("the system's disk service is not available: {0}")]
     NoBroker(String),
-    #[error("authorization was cancelled or denied")]
+    #[error("authorization was cancelled or denied; nothing was written")]
     NotAuthorized,
     #[error("this step needs administrator rights; run it through the elevated helper")]
     NeedsElevation,
@@ -49,47 +52,82 @@ pub enum DeviceError {
 
 pub type Result<T> = std::result::Result<T, DeviceError>;
 
-/// A FAT volume on removable media.
-#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
-pub struct VolumeInfo {
-    /// Stable handle used by the UI: udisks object path, BSD name or drive letter.
-    pub id: String,
-    /// Device node: /dev/sdb1, /dev/disk4s1, \\.\E:
-    pub device: String,
+/// Something currently on a stick (shown before it is erased).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StickVolume {
     pub label: String,
-    /// "vfat", "msdos", "FAT32", ...
+    /// "vfat", "exfat", "ntfs", ... as the OS reports it; empty if unknown.
     pub fs_type: String,
     pub mount_point: Option<PathBuf>,
     pub size_bytes: u64,
-    pub removable: bool,
+}
+
+/// A removable USB or SD disk.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StickInfo {
+    /// Stable handle used by the UI: udisks object path, BSD name or PhysicalDriveN.
+    pub id: String,
+    /// Whole-disk node: /dev/sdb, /dev/disk4, \\.\PhysicalDrive3
+    pub device: String,
+    /// Vendor and model, e.g. "SanDisk Cruzer Blade".
+    pub name: String,
+    pub size_bytes: u64,
     /// "usb", "sdio", ... when the OS tells us.
     pub bus: String,
+    pub volumes: Vec<StickVolume>,
 }
 
-/// An open raw handle to the volume. Reads and writes must be sector aligned.
-pub struct RawVolume {
+/// An open raw handle to a whole stick. Reads and writes must be sector aligned.
+pub struct RawDisk {
     file: File,
+    size: u64,
+    sector: u32,
+    /// What to do after the job (power off, eject).
+    #[allow(dead_code)]
+    finish: Finish,
+    /// Windows: locked volume handles, held until the disk is closed.
     #[cfg(windows)]
-    locked: bool,
+    held_volumes: Vec<File>,
 }
 
-impl RawVolume {
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub(crate) struct Finish {
+    /// udisks object path of the drive (Linux), BSD name (macOS).
+    pub(crate) handle: String,
+}
+
+impl RawDisk {
     #[allow(dead_code)]
-    pub(crate) fn from_file(file: File) -> Self {
-        RawVolume {
+    pub(crate) fn new(file: File, size: u64, sector: u32, finish: Finish) -> Self {
+        RawDisk {
             file,
+            size,
+            sector,
+            finish,
             #[cfg(windows)]
-            locked: false,
+            held_volumes: Vec::new(),
         }
+    }
+
+    pub fn size_bytes(&self) -> u64 {
+        self.size
+    }
+
+    /// Hand the stick back so it can be unplugged without any OS writing to it
+    /// first: power it off (Linux), eject it (macOS, Windows). Consumes the
+    /// handle; the stick disappears from the system if this succeeds.
+    pub fn finish(self) -> Result<()> {
+        imp::finish(self)
     }
 }
 
-impl Read for RawVolume {
+impl Read for RawDisk {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.file.read(buf)
     }
 }
-impl Write for RawVolume {
+impl Write for RawDisk {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.file.write(buf)
     }
@@ -97,16 +135,16 @@ impl Write for RawVolume {
         self.file.flush()
     }
 }
-impl Seek for RawVolume {
+impl Seek for RawDisk {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         self.file.seek(pos)
     }
 }
 
-impl p2u_core::fat::Device for RawVolume {
+impl p2u_core::fat::Device for RawDisk {
     fn sync_device(&mut self) -> io::Result<()> {
         // macOS raw (/dev/rdisk*) nodes are uncached and reject F_FULLFSYNC;
-        // Linux block devices and Windows volume handles need the flush.
+        // Linux block devices and Windows disk handles need the flush.
         if cfg!(target_os = "macos") {
             Ok(())
         } else {
@@ -119,49 +157,31 @@ impl p2u_core::fat::Device for RawVolume {
         // verification read comes from the stick. No-op elsewhere.
         p2u_core::fat::drop_page_cache(&self.file)
     }
-}
 
-impl RawVolume {
-    /// Finish without letting the OS mount the volume again, so the verified
-    /// write is the last thing that touches the stick. Linux and macOS leave
-    /// an unmounted volume alone; Windows remounts on next access unless the
-    /// media is ejected while still locked.
-    pub fn eject(&mut self) -> Result<()> {
-        #[cfg(windows)]
-        windows::eject(&self.file)?;
-        Ok(())
+    fn disk_size(&mut self) -> io::Result<u64> {
+        Ok(self.size)
+    }
+
+    fn logical_sector_size(&mut self) -> io::Result<u32> {
+        Ok(self.sector)
     }
 }
 
-impl Drop for RawVolume {
-    fn drop(&mut self) {
-        #[cfg(windows)]
-        if self.locked {
-            windows::unlock(&self.file);
-        }
-    }
+/// Removable USB/SD disks currently attached, with what is on them.
+pub fn list_sticks() -> Result<Vec<StickInfo>> {
+    imp::list_sticks()
 }
 
-/// Removable FAT volumes currently attached.
-pub fn list_volumes() -> Result<Vec<VolumeInfo>> {
-    imp::list_volumes()
+/// Unmount everything on the stick and obtain raw read/write access to the
+/// whole disk through the OS broker. Shows the system authentication dialog.
+pub fn acquire(stick: &StickInfo) -> Result<RawDisk> {
+    imp::acquire(stick)
 }
 
-/// Unmount the volume and obtain raw read/write access through the OS broker.
-/// Shows the system authentication dialog when needed.
-pub fn acquire(vol: &VolumeInfo) -> Result<RawVolume> {
-    imp::acquire(vol)
-}
-
-/// Close raw access and mount the volume again. Returns the new mount point if known.
-pub fn release(vol: &VolumeInfo, raw: RawVolume) -> Result<Option<PathBuf>> {
-    drop(raw);
-    imp::remount(vol)
-}
-
-/// Open a device directly. Only for a process that is already root/admin
-/// (the elevated helper); checks the target is a removable, unmounted volume.
-pub fn open_direct(device: &str) -> Result<RawVolume> {
+/// Open a whole disk directly. Only for a process that is already root/admin
+/// (the elevated helper); checks the target is a removable USB/SD disk that
+/// does not hold the running system, and unmounts it.
+pub fn open_direct(device: &str) -> Result<RawDisk> {
     imp::open_direct(device)
 }
 
@@ -177,12 +197,6 @@ pub fn is_elevated() -> bool {
     imp::is_elevated()
 }
 
-/// Mount the volume again after its [`RawVolume`] has been dropped
-/// (for example after [`p2u_core::job::run_lock`] consumed it).
-pub fn remount_after(vol: &VolumeInfo) -> Result<Option<PathBuf>> {
-    imp::remount(vol)
-}
-
 /// `p2u-helper` next to the running executable.
 pub fn helper_path() -> Result<PathBuf> {
     let exe = std::env::current_exe()?;
@@ -191,9 +205,9 @@ pub fn helper_path() -> Result<PathBuf> {
     p.ok_or_else(|| DeviceError::Other(format!("{name} not found next to {}", exe.display())))
 }
 
-/// Run a job in the elevated helper and collect its outcome.
+/// Run a stick job in the elevated helper and collect its outcome.
 /// The job and result files live in a fresh private temp folder.
-pub fn run_job_via_helper(vol: &VolumeInfo, job: &p2u_core::job::HelperJob) -> Result<p2u_core::job::HelperOutcome> {
+pub fn write_via_helper(stick: &StickInfo, job: &p2u_core::job::StickJob) -> Result<p2u_core::job::StickOutcome> {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let dir = std::env::temp_dir().join(format!("p2u-{}-{nanos}", std::process::id()));
     #[cfg_attr(not(unix), allow(unused_mut))]
@@ -204,25 +218,34 @@ pub fn run_job_via_helper(vol: &VolumeInfo, job: &p2u_core::job::HelperJob) -> R
     let job_path = dir.join("job.json");
     let result_path = dir.join("result.json");
     std::fs::write(&job_path, serde_json::to_vec(job).map_err(|e| DeviceError::Other(e.to_string()))?)?;
-    let args = vec![vol.device.clone(), job_path.display().to_string(), result_path.display().to_string()];
+    let args = vec![stick.device.clone(), job_path.display().to_string(), result_path.display().to_string()];
     let code = run_helper_elevated(&helper_path()?, &args)?;
     let bytes = std::fs::read(&result_path)
         .map_err(|_| DeviceError::Other(format!("helper exited with code {code} and wrote no result")))?;
+    let _ = std::fs::remove_dir_all(&dir);
     serde_json::from_slice(&bytes).map_err(|e| DeviceError::Other(format!("helper result: {e}")))
 }
 
-/// Run a lock job in the elevated helper.
-pub fn lock_via_helper(vol: &VolumeInfo, job: &p2u_core::job::LockJob) -> Result<p2u_core::job::LockOutcome> {
-    match run_job_via_helper(vol, &p2u_core::job::HelperJob::Lock(job.clone()))? {
-        p2u_core::job::HelperOutcome::Lock(o) => Ok(o),
-        _ => Err(DeviceError::Other("helper answered a different job".into())),
+/// Human-readable size, e.g. "15.6 GB".
+pub fn human_size(bytes: u64) -> String {
+    let gb = bytes as f64 / 1e9;
+    if gb >= 1.0 {
+        format!("{gb:.1} GB")
+    } else {
+        format!("{:.0} MB", bytes as f64 / 1e6)
     }
 }
 
-/// Run a raw write job in the elevated helper.
-pub fn write_via_helper(vol: &VolumeInfo, job: &p2u_core::job::WriteJob) -> Result<p2u_core::job::WriteOutcome> {
-    match run_job_via_helper(vol, &p2u_core::job::HelperJob::Write(job.clone()))? {
-        p2u_core::job::HelperOutcome::Write(o) => Ok(o),
-        _ => Err(DeviceError::Other("helper answered a different job".into())),
+/// Mount points of file systems on a device node or any of its partitions
+/// (Linux; empty elsewhere). The CLI refuses to write to a mounted disk.
+pub fn mounted_on(device: &Path) -> Vec<PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        linux::mounted_on(device)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = device;
+        Vec::new()
     }
 }

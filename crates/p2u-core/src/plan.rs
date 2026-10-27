@@ -1,7 +1,7 @@
-//! Turning a playlist into a list of files to copy, with FAT-safe target names.
+//! Turning a playlist into a list of files to write, with FAT-safe target names.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use unicode_normalization::UnicodeNormalization;
@@ -11,7 +11,7 @@ use crate::playlist::{Playlist, Source};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanOptions {
-    /// Folder to create at the volume root; defaults to the playlist's name.
+    /// Folder at the top of the stick; defaults to the playlist's name.
     /// An empty string means the top level of the stick (no folder).
     pub folder_name: Option<String>,
     /// Prefix names with "001 - " so players that sort by name agree too.
@@ -38,11 +38,9 @@ pub struct PlanItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Plan {
     pub playlist_name: String,
-    /// Folder name created at the volume root; empty for the top level.
+    /// Folder at the top of the stick; empty for the top level.
     pub folder_name: String,
-    /// Where the folder will be created (volume mount point / folder).
-    pub dest_dir: PathBuf,
-    /// Path of the folder inside the volume, e.g. "/Road Trip" (used by the raw step).
+    /// Path of the folder on the stick, e.g. "/Road Trip".
     pub volume_path: String,
     pub items: Vec<PlanItem>,
     pub missing: Vec<String>,
@@ -99,8 +97,8 @@ fn fit_name(stem: &str, ext: &str, max: usize) -> String {
     format!("{stem}{suffix}")
 }
 
-/// Build the copy plan. `dest_root` is the volume's mount point (or drive root).
-pub fn make_plan(playlist: &Playlist, dest_root: &Path, opts: &PlanOptions) -> Plan {
+/// Build the plan: which files, under which names, in which order.
+pub fn make_plan(playlist: &Playlist, opts: &PlanOptions) -> Plan {
     let folder_name = match opts.folder_name.as_deref() {
         Some(f) if f.trim().is_empty() => String::new(),
         Some(f) => sanitize_component(f, opts.ascii_names),
@@ -156,7 +154,6 @@ pub fn make_plan(playlist: &Playlist, dest_root: &Path, opts: &PlanOptions) -> P
     }
     Plan {
         playlist_name: playlist.name.clone(),
-        dest_dir: if folder_name.is_empty() { dest_root.to_path_buf() } else { dest_root.join(&folder_name) },
         volume_path: format!("/{folder_name}"),
         folder_name,
         items,

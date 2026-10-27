@@ -1,8 +1,7 @@
-//! Core of Playlist2USB: read a playlist, copy it to a FAT volume in order, and
-//! (with raw device access) rewrite the directory so the on-disk entry order,
-//! which is what cheap players follow, matches the playlist exactly.
+//! Core of Playlist2USB: read a playlist, then erase a USB stick and write a
+//! fresh FAT32 file system holding the tracks in playlist order, both in FAT
+//! order (which is what cheap players follow) and in where the data sits.
 
-pub mod copy;
 pub mod fat;
 pub mod job;
 pub mod playlist;

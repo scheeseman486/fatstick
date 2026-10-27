@@ -1,5 +1,6 @@
-//! macOS: DiskArbitration (via `diskutil`) to unmount, and `authopen` to get a
-//! raw read/write descriptor for `/dev/rdiskNsM` without running as root.
+//! macOS: DiskArbitration (via `diskutil`) to unmount the whole disk, and
+//! `authopen` to get a raw read/write descriptor for `/dev/rdiskN` without
+//! running as root.
 //!
 //! `authopen` asks authd for the right `sys.openfile.readwrite.<path>` (admin
 //! group, cached 300 s) and passes the opened descriptor back over a Unix
@@ -14,12 +15,17 @@
 use std::fs::File;
 use std::io;
 use std::os::fd::{FromRawFd, OwnedFd};
-use std::os::unix::net::UnixStream;
 use std::os::unix::io::AsRawFd;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::{DeviceError, RawVolume, Result, VolumeInfo};
+use crate::{DeviceError, Finish, RawDisk, Result, StickInfo, StickVolume};
+
+/// _IOR('d', 24, uint32_t)
+const DKIOCGETBLOCKSIZE: libc::c_ulong = 0x4004_6418;
+/// _IOR('d', 25, uint64_t)
+const DKIOCGETBLOCKCOUNT: libc::c_ulong = 0x4008_6419;
 
 fn diskutil(args: &[&str]) -> Result<Vec<u8>> {
     let out = Command::new("/usr/sbin/diskutil").args(args).output()?;
@@ -44,39 +50,60 @@ fn s(d: &plist::Dictionary, k: &str) -> String {
     d.get(k).and_then(|v| v.as_string()).unwrap_or_default().to_string()
 }
 
-pub fn list_volumes() -> Result<Vec<VolumeInfo>> {
+fn u(d: &plist::Dictionary, k: &str) -> u64 {
+    d.get(k).and_then(|v| v.as_unsigned_integer()).unwrap_or(0)
+}
+
+fn b(d: &plist::Dictionary, k: &str) -> Option<bool> {
+    d.get(k).and_then(|v| v.as_boolean())
+}
+
+/// BSD name of the disk the system boots from (never offered).
+fn boot_disk() -> String {
+    diskutil(&["info", "-plist", "/"]).ok().and_then(|x| plist_of(&x).ok()).map(|d| s(&d, "ParentWholeDisk")).unwrap_or_default()
+}
+
+pub fn list_sticks() -> Result<Vec<StickInfo>> {
     let top = plist_of(&diskutil(&["list", "-plist", "external", "physical"])?)?;
-    let mut ids = Vec::new();
-    if let Some(disks) = top.get("AllDisksAndPartitions").and_then(|v| v.as_array()) {
-        for d in disks.iter().filter_map(|v| v.as_dictionary()) {
-            match d.get("Partitions").and_then(|v| v.as_array()) {
-                Some(parts) if !parts.is_empty() => {
-                    for p in parts.iter().filter_map(|v| v.as_dictionary()) {
-                        ids.push(s(p, "DeviceIdentifier"));
-                    }
-                }
-                // A "superfloppy" stick: the file system is on the whole disk.
-                _ => ids.push(s(d, "DeviceIdentifier")),
-            }
-        }
-    }
+    let boot = boot_disk();
     let mut out = Vec::new();
-    for id in ids.into_iter().filter(|i| !i.is_empty()) {
-        let Ok(info) = diskutil(&["info", "-plist", &id]).and_then(|b| plist_of(&b)) else { continue };
-        if s(&info, "FilesystemType") != "msdos" {
+    let Some(disks) = top.get("AllDisksAndPartitions").and_then(|v| v.as_array()) else { return Ok(out) };
+    for d in disks.iter().filter_map(|v| v.as_dictionary()) {
+        let id = s(d, "DeviceIdentifier");
+        if id.is_empty() || id == boot {
             continue;
         }
-        let mount = s(&info, "MountPoint");
-        out.push(VolumeInfo {
+        let Ok(info) = diskutil(&["info", "-plist", &id]).and_then(|x| plist_of(&x)) else { continue };
+        if b(&info, "Internal").unwrap_or(true) {
+            continue;
+        }
+        let mut volumes = Vec::new();
+        let parts = d.get("Partitions").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let entries: Vec<plist::Dictionary> = if parts.is_empty() {
+            vec![d.clone()] // a "superfloppy" stick: the file system is on the whole disk
+        } else {
+            parts.iter().filter_map(|v| v.as_dictionary().cloned()).collect()
+        };
+        for p in entries {
+            let mp = s(&p, "MountPoint");
+            let content = s(&p, "Content");
+            if p.get("Partitions").is_some() && content.is_empty() && mp.is_empty() {
+                continue;
+            }
+            volumes.push(StickVolume {
+                label: s(&p, "VolumeName"),
+                fs_type: content,
+                mount_point: if mp.is_empty() { None } else { Some(PathBuf::from(mp)) },
+                size_bytes: u(&p, "Size"),
+            });
+        }
+        out.push(StickInfo {
             id: id.clone(),
             device: format!("/dev/{id}"),
-            label: s(&info, "VolumeName"),
-            fs_type: s(&info, "FilesystemName"),
-            mount_point: if mount.is_empty() { None } else { Some(PathBuf::from(mount)) },
-            size_bytes: info.get("TotalSize").or_else(|| info.get("Size")).and_then(|v| v.as_unsigned_integer()).unwrap_or(0),
-            removable: info.get("Ejectable").and_then(|v| v.as_boolean()).unwrap_or(false)
-                || info.get("RemovableMedia").and_then(|v| v.as_boolean()).unwrap_or(false),
+            name: s(&info, "MediaName"),
+            size_bytes: u(&info, "TotalSize").max(u(&info, "Size")).max(u(d, "Size")),
             bus: s(&info, "BusProtocol").to_lowercase(),
+            volumes,
         });
     }
     Ok(out)
@@ -126,30 +153,55 @@ fn authopen(path: &str) -> Result<File> {
     Err(DeviceError::Other("authopen returned no descriptor".into()))
 }
 
-pub fn acquire(vol: &VolumeInfo) -> Result<RawVolume> {
-    if vol.mount_point.is_some() {
-        diskutil(&["unmount", &vol.device])?;
+fn raw_disk(f: File, bsd: &str) -> Result<RawDisk> {
+    let mut bs: u32 = 0;
+    let mut count: u64 = 0;
+    // SAFETY: each ioctl writes one integer of the stated width.
+    let ok = unsafe {
+        libc::ioctl(f.as_raw_fd(), DKIOCGETBLOCKSIZE, &mut bs) == 0
+            && libc::ioctl(f.as_raw_fd(), DKIOCGETBLOCKCOUNT, &mut count) == 0
+    };
+    if !ok || bs == 0 {
+        return Err(DeviceError::Other(format!("could not read the size of {bsd}: {}", io::Error::last_os_error())));
     }
-    Ok(RawVolume::from_file(authopen(&raw_node(&vol.device))?))
+    Ok(RawDisk::new(f, count * bs as u64, bs, Finish { handle: bsd.to_string() }))
 }
 
-pub fn remount(vol: &VolumeInfo) -> Result<Option<PathBuf>> {
-    diskutil(&["mount", &vol.device])?;
-    let info = plist_of(&diskutil(&["info", "-plist", &vol.device])?)?;
-    let mp = s(&info, "MountPoint");
-    Ok(if mp.is_empty() { None } else { Some(PathBuf::from(mp)) })
+pub fn acquire(stick: &StickInfo) -> Result<RawDisk> {
+    // Unmounts every volume on the disk; no authorization needed for the console user.
+    diskutil(&["unmountDisk", &stick.device])?;
+    let f = authopen(&raw_node(&stick.device))?;
+    raw_disk(f, &stick.id)
 }
 
-pub fn open_direct(device: &str) -> Result<RawVolume> {
+/// Close the disk and eject it, so macOS doesn't mount the new partition
+/// before it is unplugged.
+pub fn finish(disk: RawDisk) -> Result<()> {
+    let bsd = disk.finish.handle.clone();
+    drop(disk);
+    if bsd.is_empty() {
+        return Ok(());
+    }
+    diskutil(&["eject", &format!("/dev/{bsd}")])
+        .map(|_| ())
+        .map_err(|e| DeviceError::Other(format!("written and verified, but the stick could not be ejected ({e}); eject it before unplugging")))
+}
+
+pub fn open_direct(device: &str) -> Result<RawDisk> {
     let info = plist_of(&diskutil(&["info", "-plist", device])?)?;
-    if info.get("Internal").and_then(|v| v.as_boolean()).unwrap_or(true) {
+    if b(&info, "Internal").unwrap_or(true) {
         return Err(DeviceError::UnsafeTarget(device.into(), "internal disk".into()));
     }
-    if !s(&info, "MountPoint").is_empty() {
-        return Err(DeviceError::UnsafeTarget(device.into(), "still mounted".into()));
+    if !b(&info, "WholeDisk").unwrap_or(false) {
+        return Err(DeviceError::UnsafeTarget(device.into(), "this is a partition; the whole stick is needed".into()));
     }
+    let bsd = s(&info, "DeviceIdentifier");
+    if bsd == boot_disk() {
+        return Err(DeviceError::UnsafeTarget(device.into(), "the running system is on this disk".into()));
+    }
+    diskutil(&["unmountDisk", device])?;
     let f = std::fs::OpenOptions::new().read(true).write(true).open(raw_node(device))?;
-    Ok(RawVolume::from_file(f))
+    raw_disk(f, &bsd)
 }
 
 pub fn run_helper_elevated(_helper: &Path, _args: &[String]) -> Result<i32> {

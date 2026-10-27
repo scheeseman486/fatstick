@@ -18,11 +18,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: FAT tools for the end-to-end tests
-        run: sudo apt-get update && sudo apt-get install -y dosfstools mtools fatsort fdisk
+        run: sudo apt-get update && sudo apt-get install -y dosfstools mtools fatsort fdisk gdisk exfatprogs ntfs-3g e2fsprogs
       - run: cargo test --workspace
       - run: cargo build --workspace
-      - name: End-to-end tests on FAT12/16/32 images
-        run: python3 tests/e2e.py
+      - name: End-to-end tests on disk images with awkward prior layouts
+        run: python3 tests/stick_e2e.py
 
   linux-and-windows:
     needs: test

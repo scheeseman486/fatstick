@@ -1,7 +1,8 @@
-//! Windows: volume enumeration via the Win32 drive APIs, raw access via
-//! `\\.\E:` with FSCTL_LOCK_VOLUME + FSCTL_DISMOUNT_VOLUME, and elevation via
-//! ShellExecuteEx "runas" (UAC). With Windows Hello set up, the UAC credential
-//! prompt (and Windows 11 Administrator protection) accept it.
+//! Windows: disks found via `\\.\PhysicalDriveN` and storage queries, raw
+//! access by an elevated helper that locks and dismounts every volume on the
+//! stick first, and elevation via ShellExecuteEx "runas" (UAC). With Windows
+//! Hello set up, the UAC credential prompt (and Windows 11 Administrator
+//! protection) accept it.
 
 use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
@@ -11,14 +12,17 @@ use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0};
 use windows_sys::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
 use windows_sys::Win32::Storage::FileSystem::{
-    GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    BusTypeMmc, BusTypeSd, BusTypeUsb, FindFirstVolumeW, FindNextVolumeW, FindVolumeClose, GetVolumeInformationW,
+    GetVolumePathNamesForVolumeNameW, FILE_SHARE_READ, FILE_SHARE_WRITE, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
 };
 use windows_sys::Win32::System::Ioctl::{
-    FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME, IOCTL_STORAGE_EJECT_MEDIA, IOCTL_STORAGE_MEDIA_REMOVAL,
-    PREVENT_MEDIA_REMOVAL,
+    PropertyStandardQuery, StorageDeviceProperty, DISK_GEOMETRY_EX, FSCTL_DISMOUNT_VOLUME, FSCTL_LOCK_VOLUME,
+    IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_DISK_UPDATE_PROPERTIES, IOCTL_STORAGE_EJECT_MEDIA,
+    IOCTL_STORAGE_MEDIA_REMOVAL, IOCTL_STORAGE_QUERY_PROPERTY, PREVENT_MEDIA_REMOVAL, STORAGE_DEVICE_DESCRIPTOR,
+    STORAGE_PROPERTY_QUERY,
 };
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetExitCodeProcess, OpenProcessToken, WaitForSingleObject, INFINITE,
@@ -27,10 +31,10 @@ use windows_sys::Win32::System::IO::DeviceIoControl;
 use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
-use crate::{DeviceError, RawVolume, Result, VolumeInfo};
+use crate::{DeviceError, Finish, RawDisk, Result, StickInfo, StickVolume};
 
-const DRIVE_REMOVABLE: u32 = 2;
 const ERROR_CANCELLED: i32 = 1223;
+const MAX_DISKS: u32 = 32;
 
 fn wide(s: &OsStr) -> Vec<u16> {
     s.encode_wide().chain(std::iter::once(0)).collect()
@@ -41,152 +45,266 @@ fn from_wide(buf: &[u16]) -> String {
     String::from_utf16_lossy(&buf[..end])
 }
 
-pub fn list_volumes() -> Result<Vec<VolumeInfo>> {
+/// DeviceIoControl with optional input and an output buffer; returns bytes returned.
+fn ioctl(f: &File, code: u32, input: &[u8], out: &mut [u8]) -> Option<u32> {
+    let mut returned = 0u32;
+    // SAFETY: buffers are valid for the lengths passed.
+    let ok = unsafe {
+        DeviceIoControl(
+            f.as_raw_handle() as HANDLE,
+            code,
+            if input.is_empty() { null_mut() } else { input.as_ptr().cast() },
+            input.len() as u32,
+            if out.is_empty() { null_mut() } else { out.as_mut_ptr().cast() },
+            out.len() as u32,
+            &mut returned,
+            null_mut(),
+        )
+    };
+    (ok != 0).then_some(returned)
+}
+
+/// Open for queries only (no read/write access needs no elevation).
+fn open_query(path: &str) -> Option<File> {
+    OpenOptions::new().access_mode(0).share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE).open(path).ok()
+}
+
+fn open_rw(path: &str) -> std::io::Result<File> {
+    OpenOptions::new().read(true).write(true).share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE).open(path)
+}
+
+struct Descriptor {
+    bus: i32,
+    name: String,
+}
+
+fn descriptor(f: &File) -> Option<Descriptor> {
+    // SAFETY: zeroed is a valid STORAGE_PROPERTY_QUERY.
+    let mut q: STORAGE_PROPERTY_QUERY = unsafe { std::mem::zeroed() };
+    q.PropertyId = StorageDeviceProperty;
+    q.QueryType = PropertyStandardQuery;
+    // SAFETY: viewing a plain struct as bytes.
+    let input = unsafe {
+        std::slice::from_raw_parts((&q as *const STORAGE_PROPERTY_QUERY).cast::<u8>(), std::mem::size_of::<STORAGE_PROPERTY_QUERY>())
+    };
+    let mut out = vec![0u8; 1024];
+    let n = ioctl(f, IOCTL_STORAGE_QUERY_PROPERTY, input, &mut out)? as usize;
+    if n < std::mem::size_of::<STORAGE_DEVICE_DESCRIPTOR>() {
+        return None;
+    }
+    // SAFETY: the buffer holds a STORAGE_DEVICE_DESCRIPTOR.
+    let d: STORAGE_DEVICE_DESCRIPTOR = unsafe { std::ptr::read_unaligned(out.as_ptr().cast()) };
+    let text = |off: u32| -> String {
+        if off == 0 || off as usize >= n {
+            return String::new();
+        }
+        let s = &out[off as usize..n];
+        let end = s.iter().position(|&b| b == 0).unwrap_or(s.len());
+        String::from_utf8_lossy(&s[..end]).trim().to_string()
+    };
+    let name = format!("{} {}", text(d.VendorIdOffset), text(d.ProductIdOffset)).trim().to_string();
+    Some(Descriptor { bus: d.BusType, name })
+}
+
+/// (size in bytes, logical sector size)
+fn geometry(f: &File) -> Option<(u64, u32)> {
+    let mut out = vec![0u8; 256];
+    ioctl(f, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, &[], &mut out)?;
+    // SAFETY: the buffer holds a DISK_GEOMETRY_EX.
+    let g: DISK_GEOMETRY_EX = unsafe { std::ptr::read_unaligned(out.as_ptr().cast()) };
+    Some((g.DiskSize as u64, g.Geometry.BytesPerSector))
+}
+
+/// Disk numbers a volume (opened for query) lives on.
+fn volume_disks(f: &File) -> Vec<u32> {
+    let mut out = vec![0u8; 1024];
+    let Some(n) = ioctl(f, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, &[], &mut out) else { return vec![] };
+    if n < 8 {
+        return vec![];
+    }
+    let count = u32::from_le_bytes(out[0..4].try_into().unwrap()) as usize;
+    // DISK_EXTENT is 24 bytes (u32 + padding + i64 + i64), starting at offset 8.
+    (0..count)
+        .filter_map(|i| {
+            let o = 8 + i * 24;
+            (o + 4 <= n as usize).then(|| u32::from_le_bytes(out[o..o + 4].try_into().unwrap()))
+        })
+        .collect()
+}
+
+/// Disks holding the running Windows (never offered).
+fn system_disks() -> Vec<u32> {
+    let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+    open_query(&format!("\\\\.\\{drive}")).map(|f| volume_disks(&f)).unwrap_or_default()
+}
+
+/// Every volume GUID path (`\\?\Volume{...}\`) on the system.
+fn all_volumes() -> Vec<String> {
     let mut out = Vec::new();
-    // SAFETY: no arguments.
-    let mask = unsafe { GetLogicalDrives() };
-    for i in 0..26u32 {
-        if mask & (1 << i) == 0 {
+    let mut buf = [0u16; 261];
+    // SAFETY: buffer sized as passed.
+    let h = unsafe { FindFirstVolumeW(buf.as_mut_ptr(), buf.len() as u32) };
+    if h == INVALID_HANDLE_VALUE {
+        return out;
+    }
+    loop {
+        out.push(from_wide(&buf));
+        // SAFETY: h is a valid find handle; buffer sized as passed.
+        if unsafe { FindNextVolumeW(h, buf.as_mut_ptr(), buf.len() as u32) } == 0 {
+            break;
+        }
+    }
+    // SAFETY: closing our own handle.
+    unsafe { FindVolumeClose(h) };
+    out
+}
+
+/// Volume GUID paths on disk `n`.
+fn volumes_on(n: u32) -> Vec<String> {
+    all_volumes()
+        .into_iter()
+        .filter(|v| open_query(v.trim_end_matches('\\')).map(|f| volume_disks(&f).contains(&n)).unwrap_or(false))
+        .collect()
+}
+
+fn volume_info(v: &str) -> StickVolume {
+    let wv = wide(OsStr::new(v));
+    let mut label = [0u16; 261];
+    let mut fsname = [0u16; 261];
+    let (mut serial, mut maxlen, mut flags) = (0u32, 0u32, 0u32);
+    // SAFETY: buffers sized as passed.
+    unsafe {
+        GetVolumeInformationW(
+            wv.as_ptr(),
+            label.as_mut_ptr(),
+            label.len() as u32,
+            &mut serial,
+            &mut maxlen,
+            &mut flags,
+            fsname.as_mut_ptr(),
+            fsname.len() as u32,
+        )
+    };
+    let mut paths = [0u16; 1024];
+    let mut len = 0u32;
+    // SAFETY: buffer sized as passed.
+    let ok = unsafe { GetVolumePathNamesForVolumeNameW(wv.as_ptr(), paths.as_mut_ptr(), paths.len() as u32, &mut len) };
+    let mp = if ok != 0 { from_wide(&paths) } else { String::new() };
+    StickVolume {
+        label: from_wide(&label),
+        fs_type: from_wide(&fsname),
+        mount_point: if mp.is_empty() { None } else { Some(PathBuf::from(mp)) },
+        size_bytes: 0,
+    }
+}
+
+fn is_stick_bus(bus: i32) -> bool {
+    bus == BusTypeUsb || bus == BusTypeSd || bus == BusTypeMmc
+}
+
+pub fn list_sticks() -> Result<Vec<StickInfo>> {
+    let system = system_disks();
+    let mut out = Vec::new();
+    for n in 0..MAX_DISKS {
+        let path = format!("\\\\.\\PhysicalDrive{n}");
+        let Some(f) = open_query(&path) else { continue };
+        let Some(d) = descriptor(&f) else { continue };
+        if !is_stick_bus(d.bus) || system.contains(&n) {
             continue;
         }
-        let letter = (b'A' + i as u8) as char;
-        let root = format!("{letter}:\\");
-        let wroot = wide(OsStr::new(&root));
-        // SAFETY: wroot is NUL-terminated.
-        if unsafe { GetDriveTypeW(wroot.as_ptr()) } != DRIVE_REMOVABLE {
-            continue;
+        let Some((size, _)) = geometry(&f) else { continue };
+        if size == 0 {
+            continue; // card reader without a card
         }
-        let mut label = [0u16; 261];
-        let mut fsname = [0u16; 261];
-        let mut serial = 0u32;
-        let mut maxlen = 0u32;
-        let mut flags = 0u32;
-        // SAFETY: buffers sized as passed.
-        let ok = unsafe {
-            GetVolumeInformationW(
-                wroot.as_ptr(),
-                label.as_mut_ptr(),
-                label.len() as u32,
-                &mut serial,
-                &mut maxlen,
-                &mut flags,
-                fsname.as_mut_ptr(),
-                fsname.len() as u32,
-            )
-        };
-        if ok == 0 {
-            continue; // no media
-        }
-        let fs = from_wide(&fsname);
-        if !fs.starts_with("FAT") {
-            continue; // FAT, FAT32 (exFAT not supported yet)
-        }
-        let mut total = 0u64;
-        // SAFETY: out-pointers are valid.
-        unsafe { GetDiskFreeSpaceExW(wroot.as_ptr(), null_mut(), &mut total, null_mut()) };
-        out.push(VolumeInfo {
-            id: format!("{letter}:"),
-            device: format!("\\\\.\\{letter}:"),
-            label: from_wide(&label),
-            fs_type: fs,
-            mount_point: Some(PathBuf::from(root)),
-            size_bytes: total,
-            removable: true,
-            bus: String::new(),
+        out.push(StickInfo {
+            id: format!("PhysicalDrive{n}"),
+            device: path,
+            name: d.name,
+            size_bytes: size,
+            bus: if d.bus == BusTypeUsb { "usb".into() } else { "sd".into() },
+            volumes: volumes_on(n).iter().map(|v| volume_info(v)).collect(),
         });
     }
     Ok(out)
 }
 
-fn ioctl(f: &File, code: u32) -> bool {
-    let mut returned = 0u32;
-    // SAFETY: control codes without buffers.
-    unsafe {
-        DeviceIoControl(f.as_raw_handle() as HANDLE, code, null_mut(), 0, null_mut(), 0, &mut returned, null_mut()) != 0
-    }
+fn plain_ioctl(f: &File, code: u32) -> bool {
+    ioctl(f, code, &[], &mut []).is_some()
 }
 
-pub(crate) fn unlock(f: &File) {
-    ioctl(f, FSCTL_UNLOCK_VOLUME);
-}
-
-/// Microsoft's documented sequence for removable media, after lock + dismount:
-/// allow removal, then eject. USB sticks that are not "removable media" may
-/// refuse the eject; that is reported, and the volume stays dismounted until
-/// the handle closes.
-pub(crate) fn eject(f: &File) -> Result<()> {
-    let allow = PREVENT_MEDIA_REMOVAL { PreventMediaRemoval: false };
-    let mut returned = 0u32;
-    // SAFETY: input buffer is a valid PREVENT_MEDIA_REMOVAL.
-    unsafe {
-        DeviceIoControl(
-            f.as_raw_handle() as HANDLE,
-            IOCTL_STORAGE_MEDIA_REMOVAL,
-            (&allow as *const PREVENT_MEDIA_REMOVAL).cast(),
-            std::mem::size_of::<PREVENT_MEDIA_REMOVAL>() as u32,
-            null_mut(),
-            0,
-            &mut returned,
-            null_mut(),
-        );
+pub fn open_direct(device: &str) -> Result<RawDisk> {
+    let n: u32 = device
+        .trim_start_matches("\\\\.\\")
+        .strip_prefix("PhysicalDrive")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| DeviceError::UnsafeTarget(device.into(), "expected \\\\.\\PhysicalDriveN".into()))?;
+    let q = open_query(device).ok_or_else(|| DeviceError::Other(format!("{device} not found")))?;
+    let d = descriptor(&q).ok_or_else(|| DeviceError::Other(format!("{device}: no storage descriptor")))?;
+    if !is_stick_bus(d.bus) {
+        return Err(DeviceError::UnsafeTarget(device.into(), "not a USB or SD disk".into()));
     }
-    if ioctl(f, IOCTL_STORAGE_EJECT_MEDIA) {
-        Ok(())
-    } else {
-        Err(DeviceError::Other(format!("eject failed: {}", std::io::Error::last_os_error())))
+    if system_disks().contains(&n) {
+        return Err(DeviceError::UnsafeTarget(device.into(), "the running system is on this disk".into()));
     }
-}
-
-pub fn open_direct(device: &str) -> Result<RawVolume> {
-    // Only drive-letter volumes on removable media.
-    let letter = device.trim_start_matches("\\\\.\\").trim_end_matches(':');
-    if letter.len() != 1 {
-        return Err(DeviceError::UnsafeTarget(device.into(), "expected \\\\.\\X:".into()));
-    }
-    let root = wide(OsStr::new(&format!("{letter}:\\")));
-    // SAFETY: NUL-terminated.
-    if unsafe { GetDriveTypeW(root.as_ptr()) } != DRIVE_REMOVABLE {
-        return Err(DeviceError::UnsafeTarget(device.into(), "not a removable drive".into()));
-    }
-    // CreateFile on a volume needs admin rights and FILE_SHARE_WRITE.
-    let f = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
-        .open(device)?;
-    // Writes to a mounted volume's file-system sectors are blocked unless the
-    // volume is locked or dismounted. Lock fails while files are open: retry.
-    let mut locked = false;
-    for _ in 0..20 {
-        if ioctl(&f, FSCTL_LOCK_VOLUME) {
-            locked = true;
-            break;
+    drop(q);
+    // Writes to sectors of a mounted volume are blocked unless the volume is
+    // locked and dismounted. Lock fails while files are open: retry for a while.
+    let mut held = Vec::new();
+    for v in volumes_on(n) {
+        let vf = open_rw(v.trim_end_matches('\\'))?;
+        let mut locked = false;
+        for _ in 0..20 {
+            if plain_ioctl(&vf, FSCTL_LOCK_VOLUME) {
+                locked = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
         }
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        if !locked {
+            return Err(DeviceError::Other("the stick is in use (close Explorer windows and players using it)".into()));
+        }
+        if !plain_ioctl(&vf, FSCTL_DISMOUNT_VOLUME) {
+            return Err(DeviceError::Other("could not dismount a volume on the stick".into()));
+        }
+        held.push(vf);
     }
-    if !locked {
-        return Err(DeviceError::Other("the drive is in use (close Explorer windows and players using it)".into()));
-    }
-    if !ioctl(&f, FSCTL_DISMOUNT_VOLUME) {
-        unlock(&f);
-        return Err(DeviceError::Other("could not dismount the volume".into()));
-    }
-    let mut rv = RawVolume::from_file(f);
-    rv.locked = true;
-    Ok(rv)
+    let f = open_rw(device)?;
+    let (size, sector) = geometry(&f).ok_or_else(|| DeviceError::Other(format!("could not read the size of {device}")))?;
+    let mut disk = RawDisk::new(f, size, sector, Finish { handle: n.to_string() });
+    disk.held_volumes = held;
+    Ok(disk)
 }
 
-pub fn acquire(vol: &VolumeInfo) -> Result<RawVolume> {
+pub fn acquire(stick: &StickInfo) -> Result<RawDisk> {
     if is_elevated() {
-        open_direct(&vol.device)
+        open_direct(&stick.device)
     } else {
         Err(DeviceError::NeedsElevation)
     }
 }
 
-pub fn remount(_vol: &VolumeInfo) -> Result<Option<PathBuf>> {
-    // Closing the handle unlocks the volume; Windows mounts it again on next access.
-    Ok(None)
+/// Tell Windows the partition table changed, then eject: allow removal, then
+/// eject, Microsoft's documented sequence. Sticks that are not "removable
+/// media" may refuse the eject; that is reported.
+pub fn finish(disk: RawDisk) -> Result<()> {
+    let _ = disk.file.sync_all();
+    plain_ioctl(&disk.file, IOCTL_DISK_UPDATE_PROPERTIES);
+    let allow = PREVENT_MEDIA_REMOVAL { PreventMediaRemoval: false };
+    // SAFETY: viewing a plain struct as bytes.
+    let input = unsafe {
+        std::slice::from_raw_parts((&allow as *const PREVENT_MEDIA_REMOVAL).cast::<u8>(), std::mem::size_of::<PREVENT_MEDIA_REMOVAL>())
+    };
+    ioctl(&disk.file, IOCTL_STORAGE_MEDIA_REMOVAL, input, &mut []);
+    let ejected = plain_ioctl(&disk.file, IOCTL_STORAGE_EJECT_MEDIA);
+    let err = std::io::Error::last_os_error();
+    drop(disk);
+    if ejected {
+        Ok(())
+    } else {
+        Err(DeviceError::Other(format!(
+            "written and verified, but the stick could not be ejected ({err}); use \"Safely Remove\" before unplugging"
+        )))
+    }
 }
 
 fn quote(arg: &str) -> String {

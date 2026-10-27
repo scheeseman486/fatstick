@@ -1,41 +1,42 @@
-//! Minimal FAT12/16/32 access for one job: permuting the entries of a
-//! directory in place so that the raw on-disk order matches a playlist.
+//! FAT32 on a USB stick: building a fresh stick (see [`stick`]) and reading
+//! one back to check it.
 //!
-//! Design rules (they are what makes this safe on a real USB stick):
-//! * The FAT, the FSInfo sector and the data clusters of files are never
-//!   written. Only the bytes of directory clusters that the directory already
-//!   owns are rewritten, so no allocation can be corrupted.
-//! * Every read and write is whole sectors at sector-aligned offsets, as raw
-//!   devices on macOS (`/dev/rdiskN`) and Windows (`\\.\E:`) require.
-//! * A directory with inconsistencies (orphaned long-name entries, bad
-//!   checksums, broken cluster chains) is refused unless `force` is set.
+//! Only FAT32 is supported. The players this is for implement FAT32 and
+//! little else, and because every write erases the stick and lays down a new
+//! file system, there is never an existing layout to adapt to.
 //!
-//! The approach follows the one fatsort uses (walk the directory's cluster
-//! chain, group LFN entries with their short entry, write the groups back into
-//! the same clusters), implemented from the Microsoft FAT specification.
+//! Every read and write is whole sectors at sector-aligned offsets, as raw
+//! devices on macOS (`/dev/rdiskN`) and Windows (`\\.\PhysicalDriveN`) require.
 
 mod dir;
-mod reorder;
-pub mod write;
+pub mod entries;
+pub mod stick;
 
 pub use dir::{DirEntryGroup, DirListing, EntryKind};
-pub use reorder::{
-    check_order, is_junk_name, normalize_name, Backup, OrderCheck, PreparedReorder, ReorderOptions, ReorderReport,
-    UnmatchedPlacement,
-};
+pub use entries::{check_order, normalize_name, written_name, OrderCheck};
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
 use serde::Serialize;
 
-/// A block device or image the volume lives on.
+/// A whole disk (or disk image) the stick's file system lives on.
 pub trait Device: Read + Write + Seek {
     /// Push written data to the medium.
     fn sync_device(&mut self) -> io::Result<()>;
     /// Drop any OS cache of this device so the next read comes from the medium.
     fn invalidate_cache(&mut self) -> io::Result<()> {
         Ok(())
+    }
+    /// Size of the whole device in bytes.
+    fn disk_size(&mut self) -> io::Result<u64> {
+        let end = self.seek(SeekFrom::End(0))?;
+        self.seek(SeekFrom::Start(0))?;
+        Ok(end)
+    }
+    /// Logical sector size the device expects I/O in.
+    fn logical_sector_size(&mut self) -> io::Result<u32> {
+        Ok(512)
     }
 }
 
@@ -64,7 +65,7 @@ pub fn drop_page_cache(f: &std::fs::File) -> io::Result<()> {
     Ok(())
 }
 
-/// macOS raw disk nodes and Windows volume handles are not page-cached.
+/// macOS raw disk nodes and Windows physical drive handles are not page-cached.
 #[cfg(not(target_os = "linux"))]
 pub fn drop_page_cache(_f: &std::fs::File) -> io::Result<()> {
     Ok(())
@@ -83,39 +84,35 @@ impl<T: Device + ?Sized> Device for &mut T {
     fn invalidate_cache(&mut self) -> io::Result<()> {
         (**self).invalidate_cache()
     }
+    fn disk_size(&mut self) -> io::Result<u64> {
+        (**self).disk_size()
+    }
+    fn logical_sector_size(&mut self) -> io::Result<u32> {
+        (**self).logical_sector_size()
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum FatError {
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
-    #[error("no FAT file system found: {0}")]
+    #[error("no FAT32 file system found: {0}")]
     NotFat(String),
-    #[error("path not found on the volume: {0}")]
+    #[error("path not found on the stick: {0}")]
     NotFound(String),
-    #[error("not a directory: {0}")]
+    #[error("not a folder: {0}")]
     NotADirectory(String),
-    #[error("refusing to write: {0} (use force to override)")]
-    Unsafe(String),
+    #[error("{0}")]
+    Invalid(String),
     #[error("corrupt file system: {0}")]
     Corrupt(String),
-    #[error("verification after write failed: {0}")]
-    VerifyFailed(String),
 }
 
 pub type Result<T> = std::result::Result<T, FatError>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum FatType {
-    Fat12,
-    Fat16,
-    Fat32,
-}
-
-/// The parsed BIOS parameter block plus derived geometry.
+/// The parsed FAT32 boot sector plus derived geometry.
 #[derive(Debug, Clone, Serialize)]
 pub struct Geometry {
-    pub fat_type: FatType,
     /// Byte offset of the volume on the device (non-zero when a partition table was followed).
     pub partition_offset: u64,
     pub bytes_per_sector: u32,
@@ -123,19 +120,16 @@ pub struct Geometry {
     pub reserved_sectors: u32,
     pub num_fats: u32,
     pub fat_size_sectors: u32,
-    pub root_entry_count: u32,
-    pub root_dir_sectors: u32,
     pub total_sectors: u32,
     pub first_data_sector: u32,
     pub cluster_count: u32,
-    /// FAT32 only: first cluster of the root directory.
     pub root_cluster: u32,
     /// Which FAT copy is authoritative (FAT32 may disable mirroring).
     pub active_fat: u32,
-    /// Whether every FAT copy is kept identical (false only when FAT32 disables mirroring).
     pub fat_mirroring: bool,
-    /// FAT32 only: sector of the FSInfo structure (0 = none).
+    /// Sector of the FSInfo structure (0 = none).
     pub fs_info_sector: u32,
+    pub backup_boot_sector: u32,
     pub volume_serial: u32,
     pub volume_label: String,
     pub oem_name: String,
@@ -146,7 +140,7 @@ impl Geometry {
         self.bytes_per_sector as u64 * self.sectors_per_cluster as u64
     }
 
-    pub(crate) fn cluster_offset(&self, cluster: u32) -> u64 {
+    pub fn cluster_offset(&self, cluster: u32) -> u64 {
         let sector = self.first_data_sector as u64 + (cluster as u64 - 2) * self.sectors_per_cluster as u64;
         self.partition_offset + sector * self.bytes_per_sector as u64
     }
@@ -155,16 +149,14 @@ impl Geometry {
         self.cluster_count + 1
     }
 
-    fn eoc_min(&self) -> u32 {
-        match self.fat_type {
-            FatType::Fat12 => 0xFF8,
-            FatType::Fat16 => 0xFFF8,
-            FatType::Fat32 => 0x0FFF_FFF8,
-        }
+    /// Byte offset of FAT copy `k`.
+    pub fn fat_offset(&self, k: u32) -> u64 {
+        self.partition_offset
+            + (self.reserved_sectors as u64 + k as u64 * self.fat_size_sectors as u64) * self.bytes_per_sector as u64
     }
 }
 
-/// Health flags read from the boot sector and FAT[1].
+/// Mount-state and consistency flags read from the boot sector and FAT[1].
 #[derive(Debug, Clone, Serialize)]
 pub struct Health {
     /// Linux sets this bit in the boot sector while the volume is mounted.
@@ -179,7 +171,7 @@ pub struct Health {
 /// Where a directory's entries live.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum DirRef {
-    /// Fixed root directory region of FAT12/16, or the root cluster chain of FAT32.
+    /// The root directory's cluster chain.
     Root,
     /// A directory stored in a cluster chain starting at this cluster.
     Cluster(u32),
@@ -198,20 +190,14 @@ pub struct Volume<D: Device> {
     fat_cache: HashMap<u64, Vec<u8>>,
 }
 
-const FAT_PARTITION_TYPES: [u8; 6] = [0x01, 0x04, 0x06, 0x0B, 0x0C, 0x0E];
-// Microsoft basic data partition GUID in on-disk (mixed-endian) byte order.
-const GPT_BASIC_DATA: [u8; 16] = [
-    0xA2, 0xA0, 0xD0, 0xEB, 0xE5, 0xB9, 0x33, 0x44, 0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7,
-];
+/// MBR partition types that hold FAT32 (CHS and LBA addressing).
+const FAT32_PARTITION_TYPES: [u8; 2] = [0x0B, 0x0C];
 
-fn le16(b: &[u8], o: usize) -> u32 {
+pub(crate) fn le16(b: &[u8], o: usize) -> u32 {
     u16::from_le_bytes([b[o], b[o + 1]]) as u32
 }
-fn le32(b: &[u8], o: usize) -> u32 {
+pub(crate) fn le32(b: &[u8], o: usize) -> u32 {
     u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
-}
-fn le64(b: &[u8], o: usize) -> u64 {
-    u64::from_le_bytes(b[o..o + 8].try_into().unwrap())
 }
 
 fn looks_like_bpb(s: &[u8]) -> bool {
@@ -240,96 +226,40 @@ fn read_exact_at<D: Device>(dev: &mut D, offset: u64, buf: &mut [u8]) -> io::Res
     dev.read_exact(buf)
 }
 
-/// Read the first 4 KiB of the device. 4096 is a multiple of every legal sector
-/// size, so this is an aligned read on 512-byte and 4Kn devices alike.
+/// Read 4 KiB at `offset`. 4096 is a multiple of every legal sector size, so
+/// this is an aligned read on 512-byte and 4Kn devices alike.
 fn read_probe<D: Device>(dev: &mut D, offset: u64) -> io::Result<Vec<u8>> {
     let mut buf = vec![0u8; 4096];
     read_exact_at(dev, offset, &mut buf)?;
     Ok(buf)
 }
 
-/// Find the byte offset of the FAT volume on a device: either the device itself
-/// is the volume (a partition node, a "superfloppy" stick or an image made with
-/// mkfs.fat), or follow an MBR/GPT partition table to the requested FAT partition.
-pub fn locate_volume<D: Device>(dev: &mut D, partition: Option<usize>) -> Result<u64> {
+/// Find the byte offset of the FAT32 volume on a device: either the device
+/// itself is the volume (a partition node or a "superfloppy" image), or the
+/// first FAT32 partition of an MBR partition table.
+pub fn locate_volume<D: Device>(dev: &mut D) -> Result<u64> {
     let s0 = read_probe(dev, 0)?;
-    if partition.is_none() && looks_like_bpb(&s0) {
+    if looks_like_bpb(&s0) {
         return Ok(0);
     }
-    if is_exfat(&s0) {
-        return Err(exfat_error());
-    }
     if s0[510] != 0x55 || s0[511] != 0xAA {
-        return Err(FatError::NotFat("no boot sector or partition table signature".into()));
+        return Err(FatError::NotFat("no partition table or boot sector (the stick looks blank)".into()));
     }
-    let mut candidates: Vec<u64> = Vec::new();
-    let is_gpt = (0..4).any(|i| s0[446 + 16 * i + 4] == 0xEE);
-    if is_gpt {
-        let hdr = &s0[512..1024];
-        if &hdr[0..8] != b"EFI PART" {
-            return Err(FatError::NotFat("protective MBR without GPT header (non-512-byte LBA?)".into()));
-        }
-        let entries_lba = le64(hdr, 72);
-        let n = le32(hdr, 80) as u64;
-        let esz = le32(hdr, 84) as u64;
-        let bytes = n * esz;
-        let aligned = bytes.div_ceil(4096) * 4096;
-        let mut table = vec![0u8; aligned as usize];
-        read_exact_at(dev, entries_lba * 512, &mut table)?;
-        for i in 0..n as usize {
-            let e = &table[i * esz as usize..(i + 1) * esz as usize];
-            if e[0..16] == GPT_BASIC_DATA {
-                candidates.push(le64(e, 32) * 512);
-            }
-        }
-    } else {
-        for i in 0..4 {
-            let e = &s0[446 + 16 * i..446 + 16 * (i + 1)];
-            // 0x07 is exFAT (or NTFS): probed only to explain the refusal.
-            if FAT_PARTITION_TYPES.contains(&e[4]) || e[4] == 0x07 {
-                candidates.push(le32(e, 8) as u64 * 512);
+    for i in 0..4 {
+        let e = &s0[446 + 16 * i..446 + 16 * (i + 1)];
+        if FAT32_PARTITION_TYPES.contains(&e[4]) {
+            let off = le32(e, 8) as u64 * 512;
+            if looks_like_bpb(&read_probe(dev, off)?) {
+                return Ok(off);
             }
         }
     }
-    let mut fat_parts = Vec::new();
-    let mut saw_exfat = false;
-    for off in candidates {
-        let probe = read_probe(dev, off)?;
-        if looks_like_bpb(&probe) {
-            fat_parts.push(off);
-        } else if is_exfat(&probe) {
-            saw_exfat = true;
-        }
-    }
-    if fat_parts.is_empty() && saw_exfat {
-        return Err(exfat_error());
-    }
-    match partition {
-        Some(p) => fat_parts
-            .get(p.saturating_sub(1))
-            .copied()
-            .ok_or_else(|| FatError::NotFat(format!("FAT partition {p} not found ({} found)", fat_parts.len()))),
-        None => fat_parts
-            .first()
-            .copied()
-            .ok_or_else(|| FatError::NotFat("no FAT partition in the partition table".into())),
-    }
-}
-
-fn is_exfat(s: &[u8]) -> bool {
-    s.len() >= 11 && &s[3..11] == b"EXFAT   "
-}
-
-fn exfat_error() -> FatError {
-    FatError::NotFat("this stick is formatted exFAT, which isn't supported yet; most simple players need FAT32 anyway".into())
+    Err(FatError::NotFat("no FAT32 partition in the partition table".into()))
 }
 
 fn parse_geometry(s: &[u8], partition_offset: u64) -> Result<Geometry> {
-    if is_exfat(s) {
-        return Err(exfat_error());
-    }
     if !looks_like_bpb(s) {
-        return Err(FatError::NotFat("boot sector is not a FAT BPB".into()));
+        return Err(FatError::NotFat("boot sector is not a FAT boot sector".into()));
     }
     let bps = le16(s, 11);
     let spc = s[13] as u32;
@@ -338,67 +268,48 @@ fn parse_geometry(s: &[u8], partition_offset: u64) -> Result<Geometry> {
     let root_ent = le16(s, 17);
     let tot = if le16(s, 19) != 0 { le16(s, 19) } else { le32(s, 32) };
     let fatsz = if le16(s, 22) != 0 { le16(s, 22) } else { le32(s, 36) };
-    if fatsz == 0 {
-        return Err(FatError::NotFat("FAT size is zero".into()));
+    if le16(s, 22) != 0 || root_ent != 0 || fatsz == 0 {
+        return Err(FatError::NotFat("this is FAT12 or FAT16, not FAT32".into()));
     }
-    let root_dir_sectors = (root_ent * 32).div_ceil(bps);
-    let meta = rsvd + nfats * fatsz + root_dir_sectors;
+    let meta = rsvd + nfats * fatsz;
     if meta >= tot {
         return Err(FatError::NotFat("metadata larger than volume".into()));
     }
     let cluster_count = (tot - meta) / spc;
-    // The spec decides by cluster count alone, but a BPB with a zero 16-bit FAT
-    // size and no fixed root is laid out as FAT32 whatever its size; Linux and
-    // fatsort decide by layout too, and some formatters produce such volumes.
-    let fat_type = if le16(s, 22) == 0 && root_ent == 0 {
-        FatType::Fat32
-    } else if cluster_count < 4085 {
-        FatType::Fat12
-    } else if cluster_count < 65525 {
-        FatType::Fat16
-    } else {
-        FatType::Fat32
-    };
-    let (root_cluster, active_fat, mirroring, fs_info, serial_off, label_off) = if fat_type == FatType::Fat32 {
-        let ext = le16(s, 40);
-        let mirrored = ext & 0x80 == 0;
-        let active = if mirrored { 0 } else { ext & 0x0F };
-        let fsi = le16(s, 48);
-        (le32(s, 44), active, mirrored, if fsi == 0 || fsi == 0xFFFF { 0 } else { fsi }, 67, 71)
-    } else {
-        (0, 0, true, 0, 39, 43)
-    };
-    if fat_type == FatType::Fat32 && root_ent != 0 {
-        return Err(FatError::NotFat("FAT32 with a fixed root directory".into()));
+    if cluster_count < 65525 {
+        return Err(FatError::NotFat(format!("only {cluster_count} clusters; FAT32 needs at least 65525")));
     }
-    let label = String::from_utf8_lossy(&s[label_off..label_off + 11]).trim_end().to_string();
+    let ext = le16(s, 40);
+    let mirrored = ext & 0x80 == 0;
+    let active = if mirrored { 0 } else { ext & 0x0F };
+    let fsi = le16(s, 48);
+    let bk = le16(s, 50);
+    let label = String::from_utf8_lossy(&s[71..82]).trim_end().to_string();
     Ok(Geometry {
-        fat_type,
         partition_offset,
         bytes_per_sector: bps,
         sectors_per_cluster: spc,
         reserved_sectors: rsvd,
         num_fats: nfats,
         fat_size_sectors: fatsz,
-        root_entry_count: root_ent,
-        root_dir_sectors,
         total_sectors: tot,
         first_data_sector: meta,
         cluster_count,
-        root_cluster,
-        active_fat,
-        fat_mirroring: mirroring,
-        fs_info_sector: fs_info,
-        volume_serial: le32(s, serial_off),
+        root_cluster: le32(s, 44),
+        active_fat: active,
+        fat_mirroring: mirrored,
+        fs_info_sector: if fsi == 0 || fsi == 0xFFFF { 0 } else { fsi },
+        backup_boot_sector: if bk == 0xFFFF { 0 } else { bk },
+        volume_serial: le32(s, 67),
         volume_label: label,
         oem_name: String::from_utf8_lossy(&s[3..11]).trim_end().to_string(),
     })
 }
 
 impl<D: Device> Volume<D> {
-    /// Open the FAT volume found on `dev` (see [`locate_volume`]).
-    pub fn open(mut dev: D, partition: Option<usize>) -> Result<Self> {
-        let off = locate_volume(&mut dev, partition)?;
+    /// Open the FAT32 volume found on `dev` (see [`locate_volume`]).
+    pub fn open(mut dev: D) -> Result<Self> {
+        let off = locate_volume(&mut dev)?;
         let s = read_probe(&mut dev, off)?;
         let geo = parse_geometry(&s, off)?;
         Ok(Volume { dev, geo, fat_cache: HashMap::new() })
@@ -416,96 +327,46 @@ impl<D: Device> Volume<D> {
         self.geo.bytes_per_sector as u64
     }
 
-    fn check_aligned(&self, offset: u64, len: u64) -> io::Result<()> {
+    /// Read a sector-aligned range.
+    pub fn read_extent(&mut self, e: Extent, buf: &mut [u8]) -> io::Result<()> {
         let bps = self.sector_bytes();
-        if !offset.is_multiple_of(bps) || !len.is_multiple_of(bps) {
+        if !e.offset.is_multiple_of(bps) || !e.len.is_multiple_of(bps) {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "unaligned raw I/O"));
         }
-        Ok(())
-    }
-
-    pub(crate) fn sector_size(&self) -> u64 {
-        self.sector_bytes()
-    }
-
-    pub(crate) fn read_extent(&mut self, e: Extent, buf: &mut [u8]) -> io::Result<()> {
-        self.check_aligned(e.offset, e.len)?;
         read_exact_at(&mut self.dev, e.offset, buf)
-    }
-
-    pub(crate) fn write_extent(&mut self, e: Extent, buf: &[u8]) -> io::Result<()> {
-        self.check_aligned(e.offset, e.len)?;
-        self.dev.seek(SeekFrom::Start(e.offset))?;
-        self.dev.write_all(buf)
-    }
-
-    pub(crate) fn sync(&mut self) -> io::Result<()> {
-        self.dev.sync_device()
-    }
-
-    pub(crate) fn invalidate_cache(&mut self) -> io::Result<()> {
-        self.fat_cache.clear();
-        self.dev.invalidate_cache()
     }
 
     /// Forget cached FAT sectors and drop the OS cache of the device, so the
     /// next reads come from the medium.
     pub fn drop_caches(&mut self) -> Result<()> {
-        Ok(self.invalidate_cache()?)
+        self.fat_cache.clear();
+        Ok(self.dev.invalidate_cache()?)
     }
 
-    /// Read one sector of the active FAT (cached).
+    /// Read one sector of a FAT copy (cached).
     fn fat_sector(&mut self, fat_index: u32, sector: u64) -> io::Result<&[u8]> {
         let key = ((fat_index as u64) << 40) | sector;
         if !self.fat_cache.contains_key(&key) {
             let bps = self.sector_bytes();
-            let base = self.geo.partition_offset
-                + (self.geo.reserved_sectors as u64 + fat_index as u64 * self.geo.fat_size_sectors as u64) * bps;
             let mut buf = vec![0u8; bps as usize];
-            read_exact_at(&mut self.dev, base + sector * bps, &mut buf)?;
+            read_exact_at(&mut self.dev, self.geo.fat_offset(fat_index) + sector * bps, &mut buf)?;
             self.fat_cache.insert(key, buf);
         }
         Ok(self.fat_cache.get(&key).unwrap())
     }
 
-    fn fat_bytes(&mut self, fat_index: u32, byte_off: u64, n: usize) -> io::Result<[u8; 4]> {
-        let bps = self.sector_bytes();
-        let mut out = [0u8; 4];
-        for (i, slot) in out.iter_mut().enumerate().take(n) {
-            let b = byte_off + i as u64;
-            *slot = self.fat_sector(fat_index, b / bps)?[(b % bps) as usize];
-        }
-        Ok(out)
-    }
-
     /// Value of FAT entry `n` in the active FAT.
     pub fn fat_entry(&mut self, n: u32) -> io::Result<u32> {
-        self.fat_entry_in(self.geo.active_fat, n)
-    }
-
-    fn fat_entry_in(&mut self, fat_index: u32, n: u32) -> io::Result<u32> {
-        Ok(match self.geo.fat_type {
-            FatType::Fat32 => u32::from_le_bytes(self.fat_bytes(fat_index, n as u64 * 4, 4)?) & 0x0FFF_FFFF,
-            FatType::Fat16 => {
-                let b = self.fat_bytes(fat_index, n as u64 * 2, 2)?;
-                u16::from_le_bytes([b[0], b[1]]) as u32
-            }
-            FatType::Fat12 => {
-                let b = self.fat_bytes(fat_index, n as u64 + n as u64 / 2, 2)?;
-                let v = u16::from_le_bytes([b[0], b[1]]) as u32;
-                if n & 1 == 1 {
-                    v >> 4
-                } else {
-                    v & 0x0FFF
-                }
-            }
-        })
+        let bps = self.sector_bytes();
+        let b = n as u64 * 4;
+        let s = self.fat_sector(self.geo.active_fat, b / bps)?;
+        let o = (b % bps) as usize;
+        Ok(u32::from_le_bytes([s[o], s[o + 1], s[o + 2], s[o + 3]]) & 0x0FFF_FFFF)
     }
 
     /// Follow a cluster chain, detecting loops and out-of-range links.
     pub fn cluster_chain(&mut self, start: u32) -> Result<Vec<u32>> {
         let max = self.geo.max_cluster();
-        let eoc = self.geo.eoc_min();
         let mut chain = Vec::new();
         let mut seen = HashSet::new();
         let mut c = start;
@@ -518,10 +379,10 @@ impl<D: Device> Volume<D> {
             }
             chain.push(c);
             let next = self.fat_entry(c)?;
-            if next >= eoc {
+            if next >= 0x0FFF_FFF8 {
                 break;
             }
-            if next == eoc - 1 {
+            if next == 0x0FFF_FFF7 {
                 return Err(FatError::Corrupt(format!("bad-cluster mark in chain from {start}")));
             }
             c = next;
@@ -531,21 +392,10 @@ impl<D: Device> Volume<D> {
 
     /// Byte ranges holding a directory's entries, in order.
     pub fn dir_extents(&mut self, d: DirRef) -> Result<Vec<Extent>> {
-        match (d, self.geo.fat_type) {
-            (DirRef::Root, FatType::Fat12 | FatType::Fat16) => {
-                let bps = self.sector_bytes();
-                let start = self.geo.reserved_sectors as u64 + self.geo.num_fats as u64 * self.geo.fat_size_sectors as u64;
-                Ok(vec![Extent {
-                    offset: self.geo.partition_offset + start * bps,
-                    len: self.geo.root_dir_sectors as u64 * bps,
-                }])
-            }
-            (DirRef::Root, FatType::Fat32) => self.chain_extents(self.geo.root_cluster),
-            (DirRef::Cluster(c), _) => self.chain_extents(c),
-        }
-    }
-
-    fn chain_extents(&mut self, start: u32) -> Result<Vec<Extent>> {
+        let start = match d {
+            DirRef::Root => self.geo.root_cluster,
+            DirRef::Cluster(c) => c,
+        };
         let cb = self.geo.cluster_bytes();
         Ok(self
             .cluster_chain(start)?
@@ -554,7 +404,7 @@ impl<D: Device> Volume<D> {
             .collect())
     }
 
-    pub(crate) fn read_extents(&mut self, extents: &[Extent]) -> Result<Vec<u8>> {
+    pub fn read_extents(&mut self, extents: &[Extent]) -> Result<Vec<u8>> {
         let total: u64 = extents.iter().map(|e| e.len).sum();
         let mut buf = vec![0u8; total as usize];
         let mut pos = 0usize;
@@ -564,17 +414,6 @@ impl<D: Device> Volume<D> {
             pos = end;
         }
         Ok(buf)
-    }
-
-    pub(crate) fn write_extents(&mut self, extents: &[Extent], data: &[u8]) -> Result<()> {
-        let mut pos = 0usize;
-        for e in extents {
-            let end = pos + e.len as usize;
-            self.write_extent(*e, &data[pos..end])?;
-            pos = end;
-        }
-        self.sync()?;
-        Ok(())
     }
 
     /// Parse a directory into entry groups.
@@ -607,48 +446,36 @@ impl<D: Device> Volume<D> {
         Ok(cur)
     }
 
+    /// Read `len` bytes of FAT copy `k` starting at byte `off` within the FAT.
+    pub fn read_fat_bytes(&mut self, k: u32, off: u64, buf: &mut [u8]) -> io::Result<()> {
+        let base = self.geo.fat_offset(k);
+        read_exact_at(&mut self.dev, base + off, buf)
+    }
+
+    /// Read whole sectors at an absolute device offset.
+    pub fn read_raw(&mut self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
+        read_exact_at(&mut self.dev, offset, buf)
+    }
+
     /// Mount-state and consistency flags. `compare_fats` reads every FAT copy in full.
     pub fn health(&mut self, compare_fats: bool) -> Result<Health> {
         let s = read_probe(&mut self.dev, self.geo.partition_offset)?;
-        let state_off = if self.geo.fat_type == FatType::Fat32 { 0x41 } else { 0x25 };
-        let boot_sector_dirty = s[state_off] & 0x01 != 0;
+        let boot_sector_dirty = s[0x41] & 0x01 != 0;
         let fat1 = self.fat_entry(1)?;
-        let (clean, hard) = match self.geo.fat_type {
-            FatType::Fat32 => (fat1 & 0x0800_0000 != 0, fat1 & 0x0400_0000 == 0),
-            FatType::Fat16 => (fat1 & 0x8000 != 0, fat1 & 0x4000 == 0),
-            FatType::Fat12 => (true, false),
-        };
+        let (clean, hard) = (fat1 & 0x0800_0000 != 0, fat1 & 0x0400_0000 == 0);
         let fats_identical = if compare_fats && self.geo.num_fats > 1 {
-            let bps = self.sector_bytes();
-            let len = self.geo.fat_size_sectors as u64 * bps;
+            let len = self.geo.fat_size_sectors as u64 * self.sector_bytes();
             let chunk = 1u64 << 20;
             let mut same = true;
             'outer: for i in 1..self.geo.num_fats {
                 let mut off = 0;
                 while off < len {
                     let n = chunk.min(len - off);
-                    let base = |k: u32| {
-                        self.geo.partition_offset
-                            + (self.geo.reserved_sectors as u64 + k as u64 * self.geo.fat_size_sectors as u64) * bps
-                            + off
-                    };
-                    let (b0, bi) = (base(0), base(i));
                     let mut a = vec![0u8; n as usize];
                     let mut b = vec![0u8; n as usize];
-                    read_exact_at(&mut self.dev, b0, &mut a)?;
-                    read_exact_at(&mut self.dev, bi, &mut b)?;
-                    // FAT[0] and FAT[1] hold media/state flags that legitimately
-                    // differ between copies on some drivers; compare from entry 2.
-                    let skip = if off == 0 {
-                        match self.geo.fat_type {
-                            FatType::Fat32 => 8,
-                            FatType::Fat16 => 4,
-                            FatType::Fat12 => 3,
-                        }
-                    } else {
-                        0
-                    };
-                    if a[skip..] != b[skip..] {
+                    self.read_fat_bytes(0, off, &mut a)?;
+                    self.read_fat_bytes(i, off, &mut b)?;
+                    if a != b {
                         same = false;
                         break 'outer;
                     }
@@ -664,7 +491,7 @@ impl<D: Device> Volume<D> {
 }
 
 /// Test tool: a device that fails every write after the first `n`, to check
-/// that an interruption at any point leaves a consistent file system.
+/// what an interruption at any point leaves behind.
 pub struct FaultInjector<D: Device> {
     inner: D,
     remaining: Option<u64>,
@@ -710,5 +537,11 @@ impl<D: Device> Device for FaultInjector<D> {
     }
     fn invalidate_cache(&mut self) -> io::Result<()> {
         self.inner.invalidate_cache()
+    }
+    fn disk_size(&mut self) -> io::Result<u64> {
+        self.inner.disk_size()
+    }
+    fn logical_sector_size(&mut self) -> io::Result<u32> {
+        self.inner.logical_sector_size()
     }
 }

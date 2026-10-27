@@ -1,0 +1,425 @@
+{
+  "checks": [
+    {
+      "name": "64 MiB blank: p2u write ok, read back from the image (partition, boot sectors, FATs, tables, order, placement, every byte)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "64 MiB blank: cluster size from the FAT specification's table",
+      "ok": true,
+      "detail": "512 bytes"
+    },
+    {
+      "name": "64 MiB blank: sfdisk sees one FAT32 (LBA) partition from 1 MiB to the end",
+      "ok": true,
+      "detail": "[{\"node\": \"/tmp/p2u-stick-k5h06fqu/blank.img1\", \"start\": 2048, \"size\": 129024, \"type\": \"c\"}]"
+    },
+    {
+      "name": "64 MiB blank: blkid on the whole disk finds only the MBR",
+      "ok": true,
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-k5h06fqu/blank.img', 'PTUUID': '642cf708', 'PTTYPE': 'dos'} "
+    },
+    {
+      "name": "64 MiB blank: blkid on the partition finds exactly one FAT32 file system",
+      "ok": true,
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-k5h06fqu/blank.img', 'LABEL_FATBOOT': 'BLANK', 'LABEL': 'BLANK', 'UUID': 'C6D8-D8E7', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '512', 'BLOCK_SIZE': '512', 'FSSIZE': '66060288', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
+    },
+    {
+      "name": "64 MiB blank: wipefs finds no stale signature on the disk",
+      "ok": true,
+      "detail": "[{\"device\": \"blank.img\", \"offset\": \"0x1fe\", \"type\": \"dos\", \"uuid\": null, \"label\": null}]"
+    },
+    {
+      "name": "64 MiB blank: first MiB is zero apart from the MBR; last MiB is zero",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "64 MiB blank: fsck.fat -n finds nothing to fix",
+      "ok": true,
+      "detail": "/tmp/p2u-stick-k5h06fqu/blank.img.fs: 27 files, 9100/126976 clusters"
+    },
+    {
+      "name": "64 MiB blank: fatsort -l lists the folder in playlist order; the folder is alone at the top",
+      "ok": true,
+      "detail": "first ['01 - Blank 09.mp3', '02 - Blank 14 with a long title with a long title.mp3']"
+    },
+    {
+      "name": "64 MiB blank: mshowfat: one unbroken run per track, back to back in playlist order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "64 MiB blank: every track reads back byte-identical (mcopy)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "300 MiB of junk with stale signatures: p2u write ok, read back from the image (partition, boot sectors, FATs, tables, order, placement, every byte)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "300 MiB of junk with stale signatures: cluster size from the FAT specification's table",
+      "ok": true,
+      "detail": "4096 bytes"
+    },
+    {
+      "name": "300 MiB of junk with stale signatures: sfdisk sees one FAT32 (LBA) partition from 1 MiB to the end",
+      "ok": true,
+      "detail": "[{\"node\": \"/tmp/p2u-stick-k5h06fqu/junk.img1\", \"start\": 2048, \"size\": 612352, \"type\": \"c\"}]"
+    },
+    {
+      "name": "300 MiB of junk with stale signatures: blkid on the whole disk finds only the MBR",
+      "ok": true,
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-k5h06fqu/junk.img', 'PTUUID': '85abbdca', 'PTTYPE': 'dos'} "
+    },
+    {
+      "name": "300 MiB of junk with stale signatures: blkid on the partition finds exactly one FAT32 file system",
+      "ok": true,
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-k5h06fqu/junk.img', 'LABEL_FATBOOT': 'JUNK', 'LABEL': 'JUNK', 'UUID': '3D89-DA1F', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '4096', 'BLOCK_SIZE': '512', 'FSSIZE': '313524224', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
+    },
+    {
+      "name": "300 MiB of junk with stale signatures: wipefs finds no stale signature on the disk",
+      "ok": true,
+      "detail": "[{\"device\": \"junk.img\", \"offset\": \"0x1fe\", \"type\": \"dos\", \"uuid\": null, \"label\": null}]"
+    },
+    {
+      "name": "300 MiB of junk with stale signatures: first MiB is zero apart from the MBR; last MiB is zero",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "300 MiB of junk with stale signatures: fsck.fat -n finds nothing to fix",
+      "ok": true,
+      "detail": "/tmp/p2u-stick-k5h06fqu/junk.img.fs: 27 files, 1041/76288 clusters"
+    },
+    {
+      "name": "300 MiB of junk with stale signatures: fatsort -l lists the folder in playlist order; the folder is alone at the top",
+      "ok": true,
+      "detail": "first ['01 - Junk 06.mp3', '02 - Junk 21.mp3']"
+    },
+    {
+      "name": "300 MiB of junk with stale signatures: mshowfat: one unbroken run per track, back to back in playlist order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "300 MiB of junk with stale signatures: every track reads back byte-identical (mcopy)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "1 GiB used FAT32 stick: p2u write ok, read back from the image (partition, boot sectors, FATs, tables, order, placement, every byte)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "1 GiB used FAT32 stick: cluster size from the FAT specification's table",
+      "ok": true,
+      "detail": "4096 bytes"
+    },
+    {
+      "name": "1 GiB used FAT32 stick: sfdisk sees one FAT32 (LBA) partition from 1 MiB to the end",
+      "ok": true,
+      "detail": "[{\"node\": \"/tmp/p2u-stick-k5h06fqu/fat32_used.img1\", \"start\": 2048, \"size\": 2095104, \"type\": \"c\"}]"
+    },
+    {
+      "name": "1 GiB used FAT32 stick: blkid on the whole disk finds only the MBR",
+      "ok": true,
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-k5h06fqu/fat32_used.img', 'PTUUID': '642e5f81', 'PTTYPE': 'dos'} "
+    },
+    {
+      "name": "1 GiB used FAT32 stick: blkid on the partition finds exactly one FAT32 file system",
+      "ok": true,
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-k5h06fqu/fat32_used.img', 'LABEL_FATBOOT': 'FAT32_US', 'LABEL': 'FAT32_US', 'UUID': '6BC4-B5B3', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '4096', 'BLOCK_SIZE': '512', 'FSSIZE': '1072693248', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
+    },
+    {
+      "name": "1 GiB used FAT32 stick: wipefs finds no stale signature on the disk",
+      "ok": true,
+      "detail": "[{\"device\": \"fat32_used.img\", \"offset\": \"0x1fe\", \"type\": \"dos\", \"uuid\": null, \"label\": null}]"
+    },
+    {
+      "name": "1 GiB used FAT32 stick: first MiB is zero apart from the MBR; last MiB is zero",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "1 GiB used FAT32 stick: fsck.fat -n finds nothing to fix",
+      "ok": true,
+      "detail": "/tmp/p2u-stick-k5h06fqu/fat32_used.img.fs: 27 files, 1136/261120 clusters"
+    },
+    {
+      "name": "1 GiB used FAT32 stick: fatsort -l lists the folder in playlist order; the folder is alone at the top",
+      "ok": true,
+      "detail": "first ['01 - Fat32_us 21.mp3', '02 - Fat32_us 19 with a long title.mp3']"
+    },
+    {
+      "name": "1 GiB used FAT32 stick: mshowfat: one unbroken run per track, back to back in playlist order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "1 GiB used FAT32 stick: every track reads back byte-identical (mcopy)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "256 MiB superfloppy FAT16: p2u write ok, read back from the image (partition, boot sectors, FATs, tables, order, placement, every byte)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "256 MiB superfloppy FAT16: cluster size from the FAT specification's table",
+      "ok": true,
+      "detail": "512 bytes"
+    },
+    {
+      "name": "256 MiB superfloppy FAT16: sfdisk sees one FAT32 (LBA) partition from 1 MiB to the end",
+      "ok": true,
+      "detail": "[{\"node\": \"/tmp/p2u-stick-k5h06fqu/superfloppy_fat16.img1\", \"start\": 2048, \"size\": 522240, \"type\": \"c\"}]"
+    },
+    {
+      "name": "256 MiB superfloppy FAT16: blkid on the whole disk finds only the MBR",
+      "ok": true,
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-k5h06fqu/superfloppy_fat16.img', 'PTUUID': '7ab7476e', 'PTTYPE': 'dos'} "
+    },
+    {
+      "name": "256 MiB superfloppy FAT16: blkid on the partition finds exactly one FAT32 file system",
+      "ok": true,
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-k5h06fqu/superfloppy_fat16.img', 'LABEL_FATBOOT': 'PLAYLIST', 'LABEL': 'PLAYLIST', 'UUID': 'BBEC-1FA3', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '512', 'BLOCK_SIZE': '512', 'FSSIZE': '267386880', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
+    },
+    {
+      "name": "256 MiB superfloppy FAT16: wipefs finds no stale signature on the disk",
+      "ok": true,
+      "detail": "[{\"device\": \"superfloppy_fat16.img\", \"offset\": \"0x1fe\", \"type\": \"dos\", \"uuid\": null, \"label\": null}]"
+    },
+    {
+      "name": "256 MiB superfloppy FAT16: first MiB is zero apart from the MBR; last MiB is zero",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "256 MiB superfloppy FAT16: fsck.fat -n finds nothing to fix",
+      "ok": true,
+      "detail": "/tmp/p2u-stick-k5h06fqu/superfloppy_fat16.img.fs: 26 files, 8752/514048 clusters"
+    },
+    {
+      "name": "256 MiB superfloppy FAT16: fatsort -l lists the top level in playlist order, nothing else there",
+      "ok": true,
+      "detail": "first ['01 - Superflo 15.mp3', '02 - Superflo 00.mp3']"
+    },
+    {
+      "name": "256 MiB superfloppy FAT16: mshowfat: one unbroken run per track, back to back in playlist order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "256 MiB superfloppy FAT16: every track reads back byte-identical (mcopy)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "8 GiB GPT + exFAT: p2u write ok, read back from the image (partition, boot sectors, FATs, tables, order, placement, every byte)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "8 GiB GPT + exFAT: cluster size from the FAT specification's table",
+      "ok": true,
+      "detail": "4096 bytes"
+    },
+    {
+      "name": "8 GiB GPT + exFAT: sfdisk sees one FAT32 (LBA) partition from 1 MiB to the end",
+      "ok": true,
+      "detail": "[{\"node\": \"/tmp/p2u-stick-k5h06fqu/gpt_exfat.img1\", \"start\": 2048, \"size\": 16775168, \"type\": \"c\"}]"
+    },
+    {
+      "name": "8 GiB GPT + exFAT: blkid on the whole disk finds only the MBR",
+      "ok": true,
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-k5h06fqu/gpt_exfat.img', 'PTUUID': '7c5b27a3', 'PTTYPE': 'dos'} "
+    },
+    {
+      "name": "8 GiB GPT + exFAT: blkid on the partition finds exactly one FAT32 file system",
+      "ok": true,
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-k5h06fqu/gpt_exfat.img', 'LABEL_FATBOOT': 'GPT_EXFA', 'LABEL': 'GPT_EXFA', 'UUID': '5167-18E9', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '4096', 'BLOCK_SIZE': '512', 'FSSIZE': '8588886016', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
+    },
+    {
+      "name": "8 GiB GPT + exFAT: wipefs finds no stale signature on the disk",
+      "ok": true,
+      "detail": "[{\"device\": \"gpt_exfat.img\", \"offset\": \"0x1fe\", \"type\": \"dos\", \"uuid\": null, \"label\": null}]"
+    },
+    {
+      "name": "8 GiB GPT + exFAT: first MiB is zero apart from the MBR; last MiB is zero",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "8 GiB GPT + exFAT: fsck.fat -n finds nothing to fix",
+      "ok": true,
+      "detail": "/tmp/p2u-stick-k5h06fqu/gpt_exfat.img.fs: 27 files, 1103/2092032 clusters"
+    },
+    {
+      "name": "8 GiB GPT + exFAT: fatsort -l lists the folder in playlist order; the folder is alone at the top",
+      "ok": true,
+      "detail": "first ['01 - Gpt_exfa 14 with a long title with a long title.mp3', '02 - Gpt_exfa 20 with a long title with a long title.mp3']"
+    },
+    {
+      "name": "8 GiB GPT + exFAT: mshowfat: one unbroken run per track, back to back in playlist order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "8 GiB GPT + exFAT: every track reads back byte-identical (mcopy)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "16.5 GiB MBR with NTFS and ext4: p2u write ok, read back from the image (partition, boot sectors, FATs, tables, order, placement, every byte)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "16.5 GiB MBR with NTFS and ext4: cluster size from the FAT specification's table",
+      "ok": true,
+      "detail": "16384 bytes"
+    },
+    {
+      "name": "16.5 GiB MBR with NTFS and ext4: sfdisk sees one FAT32 (LBA) partition from 1 MiB to the end",
+      "ok": true,
+      "detail": "[{\"node\": \"/tmp/p2u-stick-k5h06fqu/mbr_ntfs_ext4.img1\", \"start\": 2048, \"size\": 34600960, \"type\": \"c\"}]"
+    },
+    {
+      "name": "16.5 GiB MBR with NTFS and ext4: blkid on the whole disk finds only the MBR",
+      "ok": true,
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-k5h06fqu/mbr_ntfs_ext4.img', 'PTUUID': '9811f756', 'PTTYPE': 'dos'} "
+    },
+    {
+      "name": "16.5 GiB MBR with NTFS and ext4: blkid on the partition finds exactly one FAT32 file system",
+      "ok": true,
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-k5h06fqu/mbr_ntfs_ext4.img', 'LABEL_FATBOOT': 'MBR_NTFS', 'LABEL': 'MBR_NTFS', 'UUID': '3D4E-893F', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '16384', 'BLOCK_SIZE': '512', 'FSSIZE': '17715691520', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
+    },
+    {
+      "name": "16.5 GiB MBR with NTFS and ext4: wipefs finds no stale signature on the disk",
+      "ok": true,
+      "detail": "[{\"device\": \"mbr_ntfs_ext4.img\", \"offset\": \"0x1fe\", \"type\": \"dos\", \"uuid\": null, \"label\": null}]"
+    },
+    {
+      "name": "16.5 GiB MBR with NTFS and ext4: first MiB is zero apart from the MBR; last MiB is zero",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "16.5 GiB MBR with NTFS and ext4: fsck.fat -n finds nothing to fix",
+      "ok": true,
+      "detail": "/tmp/p2u-stick-k5h06fqu/mbr_ntfs_ext4.img.fs: 27 files, 322/1080576 clusters"
+    },
+    {
+      "name": "16.5 GiB MBR with NTFS and ext4: fatsort -l lists the folder in playlist order; the folder is alone at the top",
+      "ok": true,
+      "detail": "first ['01 - Mbr_ntfs 08 with a long title with a long title.mp3', '02 - Mbr_ntfs 16 with a long title.mp3']"
+    },
+    {
+      "name": "16.5 GiB MBR with NTFS and ext4: mshowfat: one unbroken run per track, back to back in playlist order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "16.5 GiB MBR with NTFS and ext4: every track reads back byte-identical (mcopy)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "40 GiB whole-disk ext4: p2u write ok, read back from the image (partition, boot sectors, FATs, tables, order, placement, every byte)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "40 GiB whole-disk ext4: cluster size from the FAT specification's table",
+      "ok": true,
+      "detail": "32768 bytes"
+    },
+    {
+      "name": "40 GiB whole-disk ext4: sfdisk sees one FAT32 (LBA) partition from 1 MiB to the end",
+      "ok": true,
+      "detail": "[{\"node\": \"/tmp/p2u-stick-k5h06fqu/ext4_whole.img1\", \"start\": 2048, \"size\": 83884032, \"type\": \"c\"}]"
+    },
+    {
+      "name": "40 GiB whole-disk ext4: blkid on the whole disk finds only the MBR",
+      "ok": true,
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-k5h06fqu/ext4_whole.img', 'PTUUID': '0d36a17f', 'PTTYPE': 'dos'} "
+    },
+    {
+      "name": "40 GiB whole-disk ext4: blkid on the partition finds exactly one FAT32 file system",
+      "ok": true,
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-k5h06fqu/ext4_whole.img', 'LABEL_FATBOOT': 'PLAYLIST', 'LABEL': 'PLAYLIST', 'UUID': '4C57-559D', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '32768', 'BLOCK_SIZE': '512', 'FSSIZE': '42948624384', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
+    },
+    {
+      "name": "40 GiB whole-disk ext4: wipefs finds no stale signature on the disk",
+      "ok": true,
+      "detail": "[{\"device\": \"ext4_whole.img\", \"offset\": \"0x1fe\", \"type\": \"dos\", \"uuid\": null, \"label\": null}]"
+    },
+    {
+      "name": "40 GiB whole-disk ext4: first MiB is zero apart from the MBR; last MiB is zero",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "40 GiB whole-disk ext4: fsck.fat -n finds nothing to fix",
+      "ok": true,
+      "detail": "/tmp/p2u-stick-k5h06fqu/ext4_whole.img.fs: 26 files, 181/1310336 clusters"
+    },
+    {
+      "name": "40 GiB whole-disk ext4: fatsort -l lists the top level in playlist order, nothing else there",
+      "ok": true,
+      "detail": "first ['01 - Ext4_who 09.mp3', '02 - Ext4_who 19 with a long title.mp3']"
+    },
+    {
+      "name": "40 GiB whole-disk ext4: mshowfat: one unbroken run per track, back to back in playlist order",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "40 GiB whole-disk ext4: every track reads back byte-identical (mcopy)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "pull sweep: completes once no write fails (after 21 write points)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "pull sweep: after a pull at every one of 21 write points the stick reads as blank (no partition table, no file system)",
+      "ok": true,
+      "detail": "1x nothing written, 20x blank"
+    },
+    {
+      "name": "pull sweep: writing again after a pull gives a complete, verified stick",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "refusal: a 30 MiB stick is too small for FAT32, and nothing is written",
+      "ok": true,
+      "detail": "error: nothing was written: the stick is smaller than FAT32's minimum of about 35 MB"
+    },
+    {
+      "name": "refusal: a playlist that doesn't fit is refused before anything is written",
+      "ok": true,
+      "detail": "error: nothing was written: the playlist needs 83 MB but the stick holds 65 MB"
+    },
+    {
+      "name": "dry run writes nothing",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "without --yes and no terminal to ask on, nothing is written",
+      "ok": true,
+      "detail": "error: writing erases the whole stick; pass --yes to confirm"
+    }
+  ],
+  "simulated_pulls": 21
+}

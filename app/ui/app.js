@@ -10,8 +10,8 @@ const $ = (id) => document.getElementById(id);
 const state = {
   playlist: null, // { name, path, tracks: [...] }
   tracks: [],
-  volumes: [],
-  volumeId: null,
+  sticks: [],
+  stickId: null,
   busy: false,
 };
 
@@ -149,66 +149,91 @@ $("open").addEventListener("click", async () => {
   if (path) loadPlaylist(path);
 });
 
-// ---- volumes -------------------------------------------------------------------
-function renderVolumes(errorText) {
-  const box = $("volumes");
+// ---- sticks --------------------------------------------------------------------
+function describeContents(st) {
+  if (!st.volumes.length) return "Nothing recognisable on it";
+  return "On it now: " + st.volumes
+    .map((v) => `${v.label || "no label"} (${v.fs_type || "unknown"}${v.mount_point ? ", mounted" : ""})`)
+    .join(", ");
+}
+
+function renderSticks(errorText) {
+  const box = $("sticks");
   box.replaceChildren();
-  if (errorText || state.volumes.length === 0) {
+  if (errorText || state.sticks.length === 0) {
     const p = document.createElement("p");
-    p.className = "vol-msg";
-    p.textContent = errorText || "No FAT32 stick found. Plug one in, then select Refresh. (exFAT sticks aren't supported yet.)";
+    p.className = "stk-msg";
+    p.textContent = errorText || "No USB stick found. Plug one in, then select Refresh.";
     box.append(p);
   }
-  for (const v of state.volumes) {
+  for (const st of state.sticks) {
     const row = document.createElement("label");
-    row.className = "vol" + (v.id === state.volumeId ? " selected" : "");
+    row.className = "stk" + (st.id === state.stickId ? " selected" : "");
     const radio = document.createElement("input");
     radio.type = "radio";
-    radio.name = "vol";
-    radio.checked = v.id === state.volumeId;
+    radio.name = "stick";
+    radio.checked = st.id === state.stickId;
     radio.addEventListener("change", () => {
-      state.volumeId = v.id;
-      renderVolumes();
+      state.stickId = st.id;
+      renderSticks();
       updateButtons();
     });
     const name = document.createElement("span");
-    name.className = "v-name";
-    name.textContent = v.label || baseName(v.device) || "Untitled";
+    name.className = "s-name";
+    name.textContent = st.name || "USB stick";
     const meta = document.createElement("span");
-    meta.className = "v-meta";
-    meta.textContent = [fmtSize(v.size_bytes), v.fs_type, v.mount_point || "not mounted"].filter(Boolean).join(", ");
-    row.append(radio, name, meta);
+    meta.className = "s-meta";
+    meta.textContent = [fmtSize(st.size_bytes), st.device].filter(Boolean).join(", ");
+    const on = document.createElement("span");
+    on.className = "s-on";
+    on.textContent = describeContents(st);
+    row.append(radio, name, meta, on);
     box.append(row);
   }
 }
 
-async function refreshVolumes() {
+async function refreshSticks() {
   try {
-    state.volumes = await invoke("list_volumes");
-    if (!state.volumes.some((v) => v.id === state.volumeId)) {
-      state.volumeId = state.volumes.length === 1 ? state.volumes[0].id : null;
+    state.sticks = await invoke("list_sticks");
+    if (!state.sticks.some((s) => s.id === state.stickId)) {
+      state.stickId = state.sticks.length === 1 ? state.sticks[0].id : null;
     }
-    renderVolumes();
+    renderSticks();
   } catch (err) {
-    state.volumes = [];
-    state.volumeId = null;
-    renderVolumes(`Couldn't list drives: ${err}`);
+    state.sticks = [];
+    state.stickId = null;
+    renderSticks(`Couldn't list USB sticks: ${err}`);
   }
   updateButtons();
 }
-$("refresh").addEventListener("click", refreshVolumes);
+$("refresh").addEventListener("click", refreshSticks);
 
-function updateButtons() {
-  const vol = state.volumes.find((v) => v.id === state.volumeId);
-  const ready = !state.busy && state.tracks.some((t) => t.exists) && vol && vol.mount_point;
-  $("write").disabled = !ready;
-  $("lock").disabled = !ready;
-  $("open").disabled = state.busy;
+function selectedStick() {
+  return state.sticks.find((s) => s.id === state.stickId);
 }
 
-// ---- copy, lock, check --------------------------------------------------------------
+function updateButtons() {
+  const st = selectedStick();
+  const present = state.tracks.filter((t) => t.exists);
+  const need = present.reduce((a, t) => a + t.size, 0);
+  // Rough: FAT32 tables and cluster slack take a little more than the files.
+  const fits = !st || need * 1.01 + 8 * 1024 ** 2 <= st.size_bytes;
+  const fit = $("fit");
+  fit.textContent = st && present.length ? `${fmtSize(need) || "0 MB"} of ${fmtSize(st.size_bytes)}` : "";
+  fit.classList.toggle("error", !fits);
+  if (!fits) fit.textContent = `Too big: ${fmtSize(need)} won't fit on ${fmtSize(st.size_bytes)}`;
+  $("write").disabled = state.busy || !present.length || !st || !fits;
+  $("open").disabled = state.busy;
+  $("refresh").disabled = state.busy;
+}
+
+// ---- write and check ------------------------------------------------------------
 T.event.listen("write-progress", (e) => {
   const p = e.payload;
+  if (p.stage === "erase") {
+    lcd("ERASING", undefined, "Clearing the stick…");
+    return;
+  }
   const n = String(p.index + 1).padStart(2, "0");
   const word = p.stage === "verify" ? "CHECK" : "WRITE";
   const pct = p.bytes_total ? ` ${Math.round((100 * p.bytes_done) / p.bytes_total)}%` : "";
@@ -234,75 +259,42 @@ function request() {
   return {
     name: state.playlist.name,
     tracks: state.tracks.filter((t) => t.exists).map((t) => ({ path: t.path, title: t.title })),
-    volume_id: state.volumeId,
+    stick_id: state.stickId,
     folder: $("folder").value.trim(),
     number_prefix: $("numbered").checked,
     ascii_names: $("ascii").checked,
-    replace: $("replace").checked,
-    allow_fragmented: $("fragmented").checked,
     verify_data: true,
   };
 }
 
-// The order is only ever reported from the FAT-level read-back, never from
-// the OS's own listing.
-async function lockOrder(plan) {
-  lcd("LOCKING", undefined, "Waiting for your system's authorization…");
-  const res = await invoke("lock_order", {
-    req: {
-      volume_id: state.volumeId,
-      volume_path: plan.volume_path,
-      order: plan.items.map((i) => i.target_name),
-      sizes: plan.items.map((i) => i.size),
-    },
-  });
-  const o = res.outcome;
-  if (!o.ok) {
-    const why = o.error
-      || (o.size_mismatches.length ? `${o.size_mismatches.length} files on the stick have the wrong size; copy again.` : "")
-      || (o.check && o.check.missing.length ? `${o.check.missing.length} tracks are not on the stick.` : "")
-      || "The order read back from the stick does not match the playlist.";
-    throw new Error(why);
-  }
-  const c = o.check;
-  const extra = c.extra.length ? ` ${c.extra.length} other files in that folder come after them.` : "";
-  lcd("ORDER LOCKED", c.found, `Read back from the stick: ${c.found} tracks in playlist order, sizes match. Safe to unplug.${extra}`);
-  setStatus(o.backup_file ? `Undo backup saved: ${o.backup_file}` : "The stick already matched the playlist; nothing was rewritten.");
-  await refreshVolumes();
+async function confirmErase(st) {
+  const what = `${st.name || "USB stick"} (${fmtSize(st.size_bytes)}, ${st.device})`;
+  const msg = `Erase ${what} and write "${state.playlist.name}" to it?\n\n${describeContents(st)}.\n\nEverything on the stick will be deleted. This can't be undone.`;
+  return T.dialog.ask(msg, { title: "Erase the stick?", kind: "warning", okLabel: "Erase and write", cancelLabel: "Cancel" });
 }
 
-$("write").addEventListener("click", () =>
+$("write").addEventListener("click", async () => {
+  const st = selectedStick();
+  if (!st || !(await confirmErase(st))) return;
   run("Write failed", async () => {
     lcd("WAITING", undefined, "Waiting for your system's authorization…");
     const res = await invoke("write_playlist", { req: request() });
     const o = res.outcome;
-    const r = o.result;
     const v = o.verification;
     if (!o.ok) {
       const why = o.error
         || (v && v.problems.length ? v.problems[0] : "")
         || (v && v.data_mismatches.length ? `${v.data_mismatches.length} files read back differently.` : "")
         || "The check after writing failed.";
-      throw new Error(why);
+      throw new Error(o.erased ? `${why}` : `Nothing was written: ${why}`);
     }
-    const n = r.names.length;
-    const shape = r.layout.contiguous
-      ? "each file in one unbroken block, back to back"
-      : `in ascending order, ${r.layout.files.filter((f) => f.fragments > 1).length} files split`;
-    lcd("WRITTEN OK", n, `Read back from the stick: ${n} tracks in FAT order, ${shape}, every byte matches. Safe to unplug.`);
-    const notes = [];
-    if (r.deleted.length) notes.push(`Replaced ${r.deleted.length === 1 ? r.deleted[0] : r.deleted.length + " items"}.`);
-    if (r.undo_note) notes.push(r.undo_note);
-    if (r.backups.length) notes.push(`Undo backups: ${r.backups.join(", ")}`);
-    setStatus(notes.join(" "));
-    await refreshVolumes();
-  }));
-
-$("lock").addEventListener("click", () =>
-  run("Lock failed", async () => {
-    const plan = await invoke("plan_playlist", { req: request() });
-    await lockOrder(plan);
-  }));
+    const n = o.result.plan.files.length;
+    const done = res.ejected ? "The stick has been ejected: unplug it." : (o.error || "Eject the stick before unplugging it.");
+    lcd("WRITTEN OK", n, `Read back from the stick: ${n} tracks in FAT order, each in one unbroken block, every byte matches. ${done}`);
+    setStatus("");
+    await refreshSticks();
+  });
+});
 
 // ---- start -------------------------------------------------------------------------
 T.webviewWindow.getCurrentWebviewWindow().onDragDropEvent((e) => {
@@ -314,5 +306,5 @@ T.webviewWindow.getCurrentWebviewWindow().onDragDropEvent((e) => {
 });
 
 renderTracks();
-refreshVolumes();
+refreshSticks();
 invoke("startup_playlist").then((p) => p && loadPlaylist(p));

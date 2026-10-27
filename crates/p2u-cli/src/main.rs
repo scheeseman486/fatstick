@@ -1,32 +1,30 @@
 //! p2u: command-line front end for Playlist2USB.
 //!
-//! The order on the stick is always set and checked at FAT level. Copying
-//! through the OS only gets the bytes there; overwrites, deleted slots and
-//! top-level copies leave the OS's own order wrong (tests/kernel_vfat.py).
+//! Writing erases the whole stick: it gets one FAT32 partition, laid out here,
+//! with the playlist's tracks in FAT order and in one unbroken run of clusters
+//! each, back to back. Then everything is read back from the stick.
 //!
 //! Typical session:
-//!   p2u volumes                                        # find the stick
-//!   p2u copy trip.xspf --dest /media/me/STICK --lock   # copy, then FAT-level order + verify
-//! Or in two steps:
-//!   p2u copy trip.xspf --dest /media/me/STICK
-//!   p2u lock /org/freedesktop/UDisks2/block_devices/sdb1 --playlist trip.xspf
-//! Image files and unmounted devices you can open work with sort/verify/ls:
-//!   p2u sort stick.img --playlist trip.xspf
+//!   p2u sticks                                   # find the stick
+//!   p2u write <stick> --playlist trip.xspf       # erase, write, verify (one OS prompt)
+//! Disk images (and whole-disk device nodes you can open yourself) work too:
+//!   truncate -s 1G stick.img && p2u write stick.img --playlist trip.xspf --yes
+//!   p2u ls stick.img --dir "/Road Trip"
 
 use std::fs::OpenOptions;
+use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
-use p2u_core::copy::{execute_copy, readdir_order, CopyOptions};
-use p2u_core::fat::write::{WriteItem, WriteOptions, WriteProgress};
-use p2u_core::fat::{check_order, Backup, EntryKind, FaultInjector, ReorderOptions, UnmatchedPlacement, Volume};
-use p2u_core::job::{run_lock, run_write, verify_on_medium, LockJob, LockOutcome, WriteJob, WriteOutcome};
+use p2u_core::fat::stick::{plan_stick, StickOptions, WriteItem, WriteProgress};
+use p2u_core::fat::{check_order, normalize_name, Device, EntryKind, FaultInjector, Volume};
+use p2u_core::job::{run_stick, StickJob, StickOutcome};
 use p2u_core::plan::{make_plan, Plan, PlanOptions};
-use p2u_device::VolumeInfo;
+use p2u_device::{human_size, StickInfo};
 
 #[derive(Parser)]
-#[command(name = "p2u", version, about = "Copy playlists to FAT32 USB sticks in the order cheap players actually use")]
+#[command(name = "p2u", version, about = "Write playlists to USB sticks in the order cheap players actually use")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -34,10 +32,10 @@ struct Cli {
 
 #[derive(Args, Clone)]
 struct NamingArgs {
-    /// Folder name to create (default: playlist name)
+    /// Folder for the tracks (default: playlist name)
     #[arg(long, conflicts_with = "top_level")]
     folder: Option<String>,
-    /// Put the files at the top level of the stick instead of in a folder
+    /// Put the tracks at the top level of the stick instead of in a folder
     #[arg(long)]
     top_level: bool,
     /// Do not prefix file names with track numbers
@@ -60,43 +58,20 @@ struct OrderSource {
     /// Text file with one entry name per line
     #[arg(long, conflicts_with = "playlist")]
     order_file: Option<PathBuf>,
-    /// Derive names (and expected sizes) from a playlist, with the same naming options as `copy`
+    /// Derive names (and expected sizes) from a playlist, with the same naming options as `write`
     #[arg(long)]
     playlist: Option<PathBuf>,
     #[command(flatten)]
     naming: NamingArgs,
 }
 
-struct ResolvedOrder {
-    names: Vec<String>,
-    sizes: Option<Vec<u64>>,
-    dir: Option<String>,
-}
-
-impl OrderSource {
-    fn resolve(&self) -> Result<ResolvedOrder, String> {
-        if let Some(f) = &self.order_file {
-            let names = p2u_core::read_order_file(f).map_err(|e| e.to_string())?;
-            return Ok(ResolvedOrder { names, sizes: None, dir: None });
-        }
-        if let Some(pl) = &self.playlist {
-            let p = load_plan(pl, Path::new("/"), &self.naming)?;
-            return Ok(ResolvedOrder { names: p.target_names(), sizes: Some(p.expected_sizes()), dir: Some(p.volume_path) });
-        }
-        Err("give --order-file or --playlist".into())
-    }
-}
-
 #[derive(Subcommand)]
 enum Cmd {
-    /// List removable FAT volumes
-    Volumes,
-    /// Show what `copy` would do
+    /// List USB sticks and what is on them
+    Sticks,
+    /// Show which files would be written, under which names
     Plan {
         playlist: PathBuf,
-        /// Volume mount point (drive root)
-        #[arg(long)]
-        dest: PathBuf,
         #[command(flatten)]
         naming: NamingArgs,
         /// Also write the target names to this order file
@@ -105,309 +80,165 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Write a playlist straight into the FAT volume: FAT order and file placement are
-    /// chosen here, then the order, layout and every byte are verified from the stick
+    /// ERASE a stick and write the playlist onto a fresh FAT32 file system, then
+    /// read everything back: order, placement and every byte
     Write {
-        /// A volume id/device from `p2u volumes` (uses the OS prompt), or an
-        /// unmounted device or disk image you can already open
+        /// A stick from `p2u sticks` (uses the OS prompt), or a disk image or
+        /// whole-disk device node you can already open
         target: String,
         #[arg(long)]
         playlist: PathBuf,
         #[command(flatten)]
         naming: NamingArgs,
-        /// Replace an existing folder of that name (or same-named top-level files)
+        /// Volume label (default: the folder name)
         #[arg(long)]
-        replace: bool,
-        /// If no single free block is large enough, allow files to be split
-        /// (still in ascending cluster order). Default: refuse
+        label: Option<String>,
+        /// Don't ask before erasing
         #[arg(long)]
-        allow_fragmented: bool,
+        yes: bool,
+        /// Show the layout only; write nothing
+        #[arg(long)]
+        dry_run: bool,
         /// Skip comparing every byte with the source after writing
         #[arg(long)]
         no_verify_data: bool,
         #[arg(long)]
-        dry_run: bool,
-        #[arg(long)]
-        force: bool,
-        #[arg(long)]
-        partition: Option<usize>,
-        /// Keep undo backups here (default: current directory)
-        #[arg(long, default_value = ".")]
-        backup_dir: PathBuf,
-        #[arg(long)]
         json: bool,
     },
-    /// Copy a playlist through the OS to a mounted stick; with --lock, then set and verify the order at FAT level
-    Copy {
-        playlist: PathBuf,
-        /// Volume mount point (drive root)
-        #[arg(long)]
-        dest: PathBuf,
-        #[command(flatten)]
-        naming: NamingArgs,
-        /// Replace the folder (or same-named top-level files) if they exist
-        #[arg(long)]
-        replace: bool,
-        /// Space modification times 2 s apart in playlist order
-        #[arg(long)]
-        stamp_times: bool,
-        /// Also write an .m3u next to the tracks
-        #[arg(long)]
-        write_m3u: bool,
-        /// fsync after every file
-        #[arg(long)]
-        sync: bool,
-        /// After copying: unmount, reorder at FAT level, verify from the stick (one OS prompt)
-        #[arg(long)]
-        lock: bool,
-        /// Keep undo backups here (default: current directory)
-        #[arg(long, default_value = ".")]
-        backup_dir: PathBuf,
-    },
-    /// Show a volume's geometry and health flags
+    /// Show a stick's FAT32 geometry and health flags
     Inspect {
         device: PathBuf,
-        #[arg(long)]
-        partition: Option<usize>,
-        /// Also compare all FAT copies
+        /// Also compare the FAT copies
         #[arg(long)]
         compare_fats: bool,
     },
-    /// List a directory in raw on-disk order
+    /// List a folder in FAT order
     Ls {
         device: PathBuf,
         #[arg(long, default_value = "/")]
         dir: String,
         #[arg(long)]
-        partition: Option<usize>,
-        #[arg(long)]
         json: bool,
     },
-    /// Reorder a directory on an unmounted device or image you can already open
-    Sort {
-        device: PathBuf,
-        /// Folder inside the volume (default: from --playlist)
-        #[arg(long)]
-        dir: Option<String>,
-        #[command(flatten)]
-        order: OrderSource,
-        #[arg(long)]
-        partition: Option<usize>,
-        /// Put entries not in the order list first instead of last
-        #[arg(long)]
-        unmatched_first: bool,
-        #[arg(long)]
-        dry_run: bool,
-        #[arg(long)]
-        force: bool,
-        /// Where to keep the undo backup (default: current directory)
-        #[arg(long, default_value = ".")]
-        backup_dir: PathBuf,
-    },
-    /// Check a directory's raw order (and sizes, with --playlist) on a device or image
+    /// Check a folder's FAT order (and sizes, with --playlist) on a stick or image
     Verify {
         device: PathBuf,
         #[arg(long)]
         dir: Option<String>,
         #[command(flatten)]
         order: OrderSource,
-        #[arg(long)]
-        partition: Option<usize>,
-    },
-    /// What the OS lists for a mounted folder. Diagnostics only: not a guarantee of on-disk order
-    OsListing {
-        /// The copied folder on the mounted volume
-        path: PathBuf,
-        #[command(flatten)]
-        order: OrderSource,
-    },
-    /// Undo a sort or a write using its backup file(s); several are applied newest first
-    Restore {
-        device: PathBuf,
-        #[arg(required = true)]
-        backups: Vec<PathBuf>,
-    },
-    /// Unmount a removable volume, reorder at FAT level via the OS prompt, verify from the stick
-    Lock {
-        /// Volume id or device from `p2u volumes`
-        volume: String,
-        #[arg(long)]
-        dir: Option<String>,
-        #[command(flatten)]
-        order: OrderSource,
-        #[arg(long, default_value = ".")]
-        backup_dir: PathBuf,
-        /// Mount the volume again afterwards (default: leave it unmounted, safe to unplug)
-        #[arg(long)]
-        remount: bool,
     },
 }
 
-fn load_plan(playlist: &Path, dest: &Path, naming: &NamingArgs) -> Result<Plan, String> {
+fn load_plan(playlist: &Path, naming: &NamingArgs) -> Result<Plan, String> {
     let pl = p2u_core::playlist::load(playlist).map_err(|e| e.to_string())?;
     for w in &pl.warnings {
         eprintln!("warning: {w}");
     }
-    Ok(make_plan(&pl, dest, &naming.opts()))
+    Ok(make_plan(&pl, &naming.opts()))
 }
 
-fn open_rw(path: &Path) -> Result<std::fs::File, String> {
-    OpenOptions::new().read(true).write(true).open(path).map_err(|e| format!("{}: {e}", path.display()))
+fn open_ro(path: &Path) -> Result<std::fs::File, String> {
+    OpenOptions::new().read(true).open(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn print_json<T: serde::Serialize>(v: &T) {
     println!("{}", serde_json::to_string_pretty(v).unwrap());
 }
 
-fn human(bytes: u64) -> String {
-    let mb = bytes as f64 / 1_048_576.0;
-    if mb >= 1024.0 {
-        format!("{:.1} GiB", mb / 1024.0)
+fn describe(stick: &StickInfo) -> String {
+    let mut s = format!("{} {} ({})", stick.device, if stick.name.is_empty() { "USB stick" } else { &stick.name }, human_size(stick.size_bytes));
+    if stick.volumes.is_empty() {
+        s.push_str(", nothing recognisable on it");
+    }
+    for v in &stick.volumes {
+        let label = if v.label.is_empty() { "(no label)".to_string() } else { format!("{:?}", v.label) };
+        let mp = v.mount_point.as_ref().map(|m| format!(", mounted at {}", m.display())).unwrap_or_default();
+        s.push_str(&format!("\n    {label} {}{mp}", if v.fs_type.is_empty() { "unknown" } else { &v.fs_type }));
+    }
+    s
+}
+
+/// Ask for confirmation on the terminal; without one, require --yes.
+fn confirm_erase(what: &str) -> Result<(), String> {
+    if !std::io::stdin().is_terminal() {
+        return Err("writing erases the whole stick; pass --yes to confirm".into());
+    }
+    eprintln!("This ERASES EVERYTHING on:\n  {what}");
+    eprint!("Type \"erase\" to continue: ");
+    std::io::stderr().flush().ok();
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line).map_err(|e| e.to_string())?;
+    if line.trim() == "erase" {
+        Ok(())
     } else {
-        format!("{mb:.1} MiB")
+        Err("cancelled; nothing was written".into())
     }
 }
 
-fn find_volume(key: &str) -> Result<VolumeInfo, String> {
-    p2u_device::list_volumes()
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .find(|v| v.id == key || v.device == key)
-        .ok_or_else(|| format!("no removable FAT volume {key:?}; see `p2u volumes`"))
-}
-
-fn volume_mounted_at(dest: &Path) -> Result<VolumeInfo, String> {
-    let want = dest.canonicalize().map_err(|e| e.to_string())?;
-    p2u_device::list_volumes()
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .find(|v| v.mount_point.as_ref().and_then(|m| m.canonicalize().ok()).as_deref() == Some(want.as_path()))
-        .ok_or_else(|| format!("{} is not the mount point of a removable FAT volume", dest.display()))
-}
-
-/// Unmount, get raw access through the OS broker (or the elevated helper),
-/// run the lock job, and leave the volume unmounted unless asked to remount.
-fn lock_volume(vol: &VolumeInfo, mut job: LockJob, backup_dir: &Path, remount: bool) -> Result<LockOutcome, String> {
-    match p2u_device::acquire(vol) {
-        Ok(mut raw) => {
-            let out = run_lock(&mut raw, &job, Some(backup_dir));
-            let _ = raw.eject();
-            drop(raw);
-            if remount || !out.ok {
-                if let Ok(Some(m)) = p2u_device::remount_after(vol) {
-                    eprintln!("Mounted again at {}", m.display());
-                }
-            } else {
-                eprintln!("The stick is left unmounted: safe to unplug.");
-            }
-            Ok(out)
-        }
-        Err(p2u_device::DeviceError::NeedsElevation) | Err(p2u_device::DeviceError::NoBroker(_)) => {
-            job.eject = !remount;
-            p2u_device::lock_via_helper(vol, &job).map_err(|e| e.to_string())
-        }
-        Err(e) => {
-            let _ = p2u_device::remount_after(vol);
-            Err(e.to_string())
-        }
-    }
-}
-
-fn summarize(out: &LockOutcome) {
-    if out.ok {
-        if let Some(c) = &out.check {
-            eprintln!("Verified on the stick: {} of {} tracks in playlist order.", c.found, c.expected);
-            if !c.extra.is_empty() {
-                eprintln!("Note: {} other entries in the folder come after the playlist (players will play them too).", c.extra.len());
-            }
-        }
-    } else if let Some(e) = &out.error {
-        eprintln!("NOT locked: {e}");
-    } else {
-        if let Some(c) = &out.check {
-            if !c.in_order {
-                eprintln!("NOT in order: {} missing, first wrong position {:?}.", c.missing.len(), c.first_mismatch);
-            }
-        }
-        for m in &out.size_mismatches {
-            eprintln!("Size mismatch: {} is {} bytes on the stick, expected {}.", m.name, m.on_stick, m.expected);
-        }
-    }
-}
-
-fn summarize_write(out: &WriteOutcome) {
+fn summarize(out: &StickOutcome) {
     if let Some(e) = &out.error {
-        eprintln!("NOT written: {e}");
+        eprintln!("{}: {e}", if out.ok { "Note" } else { "FAILED" });
     }
     let Some(r) = &out.result else { return };
-    let mb = r.sizes.iter().sum::<u64>() as f64 / 1_000_000.0;
-    let l = &r.layout;
-    let first = l.files.first().map(|f| f.first_cluster).unwrap_or(0);
-    let last = l.files.iter().rev().find(|f| f.clusters > 0).map(|f| f.first_cluster + f.clusters - 1).unwrap_or(0);
-    let shape = if l.contiguous {
-        format!("one unbroken block, clusters {first}-{last}, files back to back in playlist order")
-    } else if l.ascending {
-        let split = l.files.iter().filter(|f| f.fragments > 1).count();
-        format!("ascending playlist order, {split} file(s) split across free blocks")
-    } else {
-        "NOT in ascending order".to_string()
-    };
+    let p = &r.plan;
+    let f = &p.format;
+    let mb = p.total_bytes as f64 / 1e6;
+    let last = p.files.iter().rev().find(|x| x.clusters > 0).map(|x| x.first_cluster + x.clusters - 1).unwrap_or(0);
     println!(
-        "{} {} files ({mb:.1} MB) to {}: {shape}.",
-        if r.written { "Wrote" } else { "Would write" },
-        r.names.len(),
-        r.target_dir
+        "Wrote {} tracks ({mb:.1} MB) to {} on a fresh FAT32 partition ({} clusters of {} bytes, label {:?}).",
+        p.files.len(),
+        p.target_dir(),
+        f.cluster_count,
+        f.cluster_bytes(),
+        f.label.trim_end()
     );
-    if !r.deleted.is_empty() {
-        println!("Replaced: {}", r.deleted.join(", "));
-    }
+    println!("Placement: clusters {}-{last}, each track in one unbroken run, back to back in playlist order.", 2 + p.root_clusters + p.folder_clusters);
     if let Some(v) = &out.verification {
         let tick = |b: bool| if b { "ok" } else { "FAILED" };
         println!(
-            "Verified from the stick: FAT order {}, layout {}, FAT copies {}, data {}.",
+            "Read back from the stick: partition table {}, boot sectors {}, FATs {}, folder tables {}, FAT order {}, placement {}, data {}.",
+            tick(v.partition_table_ok),
+            tick(v.boot_sectors_ok),
+            tick(v.fats_ok),
+            tick(v.tables_ok),
             tick(v.order_ok),
-            tick(v.layout_matches_plan),
-            tick(v.fat_copies_identical),
-            if v.data_mismatches.is_empty() { "ok".to_string() } else { format!("{} file(s) differ", v.data_mismatches.len()) }
+            tick(v.layout_ok),
+            if !v.data_checked {
+                "not checked".to_string()
+            } else if v.data_mismatches.is_empty() {
+                "every byte matches".to_string()
+            } else {
+                format!("{} file(s) differ", v.data_mismatches.len())
+            }
         );
         for p in &v.problems {
             println!("  problem: {p}");
         }
     }
-    for b in &r.backups {
-        println!("Undo backup: {}", b.display());
-    }
 }
 
 fn run(cli: Cli) -> Result<bool, String> {
     match cli.cmd {
-        Cmd::Volumes => {
-            let vols = p2u_device::list_volumes().map_err(|e| e.to_string())?;
-            if vols.is_empty() {
-                println!("No removable FAT volumes found.");
+        Cmd::Sticks => {
+            let sticks = p2u_device::list_sticks().map_err(|e| e.to_string())?;
+            if sticks.is_empty() {
+                println!("No USB sticks found.");
             }
-            for v in vols {
-                println!(
-                    "{}\n    device {}  label {:?}  {}  {}  mounted at {}",
-                    v.id,
-                    v.device,
-                    v.label,
-                    v.fs_type,
-                    human(v.size_bytes),
-                    v.mount_point.map(|m| m.display().to_string()).unwrap_or_else(|| "-".into())
-                );
+            for s in sticks {
+                println!("{}\n  {}", s.id, describe(&s));
             }
             Ok(true)
         }
-        Cmd::Plan { playlist, dest, naming, order_out, json } => {
-            let plan = load_plan(&playlist, &dest, &naming)?;
+        Cmd::Plan { playlist, naming, order_out, json } => {
+            let plan = load_plan(&playlist, &naming)?;
             if let Some(o) = order_out {
                 p2u_core::write_order_file(&o, &plan.target_names()).map_err(|e| e.to_string())?;
             }
             if json {
                 print_json(&plan);
             } else {
-                println!("Folder: {} ({} files, {})", plan.dest_dir.display(), plan.items.len(), human(plan.total_bytes));
+                println!("Folder: {} ({} files, {})", plan.volume_path, plan.items.len(), human_size(plan.total_bytes));
                 for i in &plan.items {
                     println!("  {}  <-  {}", i.target_name, i.source.display());
                 }
@@ -420,47 +251,91 @@ fn run(cli: Cli) -> Result<bool, String> {
             }
             Ok(plan.missing.is_empty())
         }
-        Cmd::Copy { playlist, dest, naming, replace, stamp_times, write_m3u, sync, lock, backup_dir } => {
-            let plan = load_plan(&playlist, &dest, &naming)?;
+        Cmd::Write { target, playlist, naming, label, yes, dry_run, no_verify_data, json } => {
+            let plan = load_plan(&playlist, &naming)?;
             for m in &plan.missing {
                 eprintln!("warning: missing, skipped: {m}");
             }
-            // Resolve the volume first so --lock fails before copying, not after.
-            let vol = if lock { Some(volume_mounted_at(&dest)?) } else { None };
-            let opts = CopyOptions { replace_existing: replace, stamp_times, write_m3u, sync_each_file: sync };
-            let report = execute_copy(&plan, &opts, None, |p| {
-                if p.bytes_done == 0 {
-                    eprintln!("[{}/{}] {}", p.index + 1, p.total, p.name);
-                }
-                true
-            })
-            .map_err(|e| e.to_string())?;
-            println!("Copied {} files ({}) to {}.", report.files_copied, human(report.bytes_copied), plan.volume_path);
-            let Some(vol) = vol else {
-                println!("The order on the stick is not set yet. Run:");
-                println!("  p2u lock <volume> --playlist {:?}{}", playlist, if plan.is_top_level() { " --top-level" } else { "" });
-                return Ok(true);
-            };
-            let job = LockJob {
-                dir_path: plan.volume_path.clone(),
-                order: plan.target_names(),
-                expected_sizes: Some(plan.expected_sizes()),
-                options: ReorderOptions::default(),
-                partition: None,
+            let job = StickJob {
+                items: plan.items.iter().map(|i| WriteItem { source: i.source.clone(), name: i.target_name.clone() }).collect(),
+                options: StickOptions { folder: plan.folder_name.clone(), label: label.unwrap_or_default() },
+                verify_data: !no_verify_data,
                 eject: true,
             };
-            let out = lock_volume(&vol, job, &backup_dir, false)?;
-            summarize(&out);
+            let mut prog = |p: &WriteProgress| {
+                if p.bytes_done == 0 && !json {
+                    match p.stage.as_str() {
+                        "erase" => eprintln!("[erase] clearing the stick"),
+                        s => eprintln!("[{s} {}/{}] {}", p.index + 1, p.total, p.name),
+                    }
+                }
+            };
+            let listed = p2u_device::list_sticks().ok().and_then(|v| v.into_iter().find(|s| s.id == target || s.device == target));
+            let out = match listed {
+                Some(stick) => {
+                    // Catch "doesn't fit" and bad names before the stick is touched.
+                    let st = plan_stick(stick.size_bytes, 512, &job.items, &job.options).map_err(|e| format!("nothing was written: {e}"))?;
+                    if dry_run {
+                        print_json(&st);
+                        return Ok(true);
+                    }
+                    if !yes {
+                        confirm_erase(&describe(&stick))?;
+                    }
+                    match p2u_device::acquire(&stick) {
+                        Ok(mut raw) => {
+                            let mut o = run_stick(&mut raw, &job, &mut prog);
+                            if o.ok {
+                                if let Err(e) = raw.finish() {
+                                    o.error = Some(e.to_string());
+                                } else if !json {
+                                    eprintln!("The stick has been ejected: unplug it.");
+                                }
+                            }
+                            o
+                        }
+                        Err(p2u_device::DeviceError::NeedsElevation) | Err(p2u_device::DeviceError::NoBroker(_)) => {
+                            p2u_device::write_via_helper(&stick, &job).map_err(|e| e.to_string())?
+                        }
+                        Err(e) => return Err(e.to_string()),
+                    }
+                }
+                None => {
+                    let path = Path::new(&target);
+                    let mounted = p2u_device::mounted_on(path);
+                    if !mounted.is_empty() {
+                        return Err(format!("{target} is mounted at {}; unmount it first", mounted[0].display()));
+                    }
+                    let mut f = OpenOptions::new().read(true).write(true).open(path).map_err(|e| format!("{target}: {e}"))?;
+                    let size = f.disk_size().map_err(|e| e.to_string())?;
+                    let st = plan_stick(size, 512, &job.items, &job.options).map_err(|e| format!("nothing was written: {e}"))?;
+                    if dry_run {
+                        print_json(&st);
+                        return Ok(true);
+                    }
+                    if !yes {
+                        confirm_erase(&format!("{target} ({})", human_size(size)))?;
+                    }
+                    // Test hook: simulate the stick being pulled after N writes.
+                    let fault = std::env::var("P2U_FAIL_AFTER_WRITES").ok().and_then(|v| v.parse().ok());
+                    run_stick(&mut FaultInjector::new(f, fault), &job, &mut prog)
+                }
+            };
+            if json {
+                print_json(&out);
+            } else {
+                summarize(&out);
+            }
             Ok(out.ok)
         }
-        Cmd::Inspect { device, partition, compare_fats } => {
-            let mut vol = Volume::open(open_rw(&device)?, partition).map_err(|e| e.to_string())?;
+        Cmd::Inspect { device, compare_fats } => {
+            let mut vol = Volume::open(open_ro(&device)?).map_err(|e| e.to_string())?;
             let h = vol.health(compare_fats).map_err(|e| e.to_string())?;
             print_json(&serde_json::json!({ "geometry": vol.geometry(), "health": h }));
             Ok(true)
         }
-        Cmd::Ls { device, dir, partition, json } => {
-            let mut vol = Volume::open(open_rw(&device)?, partition).map_err(|e| e.to_string())?;
+        Cmd::Ls { device, dir, json } => {
+            let mut vol = Volume::open(open_ro(&device)?).map_err(|e| e.to_string())?;
             let d = vol.find_dir(&dir).map_err(|e| e.to_string())?;
             let l = vol.list_dir(d).map_err(|e| e.to_string())?;
             if json {
@@ -487,124 +362,35 @@ fn run(cli: Cli) -> Result<bool, String> {
             }
             Ok(true)
         }
-        Cmd::Sort { device, dir, order, partition, unmatched_first, dry_run, force, backup_dir } => {
-            let r = order.resolve()?;
-            let dir = dir.or(r.dir).ok_or("give --dir")?;
-            let job = LockJob {
-                dir_path: dir,
-                order: r.names,
-                expected_sizes: r.sizes,
-                options: ReorderOptions {
-                    unmatched: if unmatched_first { UnmatchedPlacement::Before } else { UnmatchedPlacement::After },
-                    dry_run,
-                    force,
-                },
-                partition,
-                eject: false,
-            };
-            // Test hook: simulate the stick being pulled after N writes.
-            let fault = std::env::var("P2U_FAIL_AFTER_WRITES").ok().and_then(|v| v.parse().ok());
-            let out = run_lock(FaultInjector::new(open_rw(&device)?, fault), &job, Some(&backup_dir));
-            print_json(&out);
-            Ok(out.ok)
-        }
-        Cmd::Verify { device, dir, order, partition } => {
-            let r = order.resolve()?;
-            let dir = dir.or(r.dir).ok_or("give --dir")?;
-            let mut vol = Volume::open(open_rw(&device)?, partition).map_err(|e| e.to_string())?;
-            let d = vol.find_dir(&dir).map_err(|e| e.to_string())?;
-            let (check, sizes) = verify_on_medium(&mut vol, d, &r.names, r.sizes.as_deref()).map_err(|e| e.to_string())?;
-            let ok = check.in_order && sizes.is_empty();
-            print_json(&serde_json::json!({ "ok": ok, "check": check, "size_mismatches": sizes }));
-            Ok(ok)
-        }
-        Cmd::OsListing { path, order } => {
-            let r = order.resolve()?;
-            let c = check_order(&readdir_order(&path).map_err(|e| e.to_string())?, &r.names);
-            eprintln!("Diagnostics only: this is the OS's listing, not a guarantee of the order players see.");
-            print_json(&c);
-            Ok(c.in_order)
-        }
-        Cmd::Restore { device, mut backups } => {
-            // File names carry a timestamp and phase tag, so name order is creation order.
-            backups.sort();
-            backups.reverse();
-            let mut vol = Volume::open(open_rw(&device)?, None).map_err(|e| e.to_string())?;
-            for path in &backups {
-                let b = Backup::load(path).map_err(|e| e.to_string())?;
-                vol.restore(&b).map_err(|e| e.to_string())?;
-                println!("Restored from {}", path.display());
-            }
-            Ok(true)
-        }
-        Cmd::Write { target, playlist, naming, replace, allow_fragmented, no_verify_data, dry_run, force, partition, backup_dir, json } => {
-            let plan = load_plan(&playlist, Path::new("/"), &naming)?;
-            for m in &plan.missing {
-                eprintln!("warning: missing, skipped: {m}");
-            }
-            let job = WriteJob {
-                target_dir: plan.volume_path.clone(),
-                items: plan.items.iter().map(|i| WriteItem { source: i.source.clone(), name: i.target_name.clone() }).collect(),
-                options: WriteOptions { replace, allow_fragmented, force, dry_run },
-                verify_data: !no_verify_data,
-                partition,
-                eject: true,
-            };
-            let mut prog = |p: &WriteProgress| {
-                if p.bytes_done == 0 && !json {
-                    eprintln!("[{} {}/{}] {}", p.stage, p.index + 1, p.total, p.name);
-                }
-            };
-            let listed = p2u_device::list_volumes().ok().and_then(|v| v.into_iter().find(|v| v.id == target || v.device == target));
-            let out = match listed {
-                Some(vol) => match p2u_device::acquire(&vol) {
-                    Ok(mut raw) => {
-                        let o = run_write(&mut raw, &job, Some(&backup_dir), &mut prog);
-                        let _ = if o.ok { raw.eject() } else { Ok(()) };
-                        drop(raw);
-                        if !o.ok {
-                            let _ = p2u_device::remount_after(&vol);
-                        }
-                        o
-                    }
-                    Err(p2u_device::DeviceError::NeedsElevation) | Err(p2u_device::DeviceError::NoBroker(_)) => {
-                        p2u_device::write_via_helper(&vol, &job).map_err(|e| e.to_string())?
-                    }
-                    Err(e) => {
-                        let _ = p2u_device::remount_after(&vol);
-                        return Err(e.to_string());
-                    }
-                },
-                None => {
-                    let f = open_rw(Path::new(&target))?;
-                    // Test hook: simulate the stick being pulled after N writes.
-                    let fault = std::env::var("P2U_FAIL_AFTER_WRITES").ok().and_then(|v| v.parse().ok());
-                    run_write(FaultInjector::new(f, fault), &job, Some(&backup_dir), &mut prog)
-                }
-            };
-            if json {
-                print_json(&out);
+        Cmd::Verify { device, dir, order } => {
+            let (names, sizes, plan_dir) = if let Some(f) = &order.order_file {
+                (p2u_core::read_order_file(f).map_err(|e| e.to_string())?, None, None)
+            } else if let Some(pl) = &order.playlist {
+                let p = load_plan(pl, &order.naming)?;
+                (p.target_names(), Some(p.expected_sizes()), Some(p.volume_path))
             } else {
-                summarize_write(&out);
-            }
-            Ok(out.ok)
-        }
-        Cmd::Lock { volume, dir, order, backup_dir, remount } => {
-            let r = order.resolve()?;
-            let dir = dir.or(r.dir).ok_or("give --dir")?;
-            let vol = find_volume(&volume)?;
-            let job = LockJob {
-                dir_path: dir,
-                order: r.names,
-                expected_sizes: r.sizes,
-                options: ReorderOptions::default(),
-                partition: None,
-                eject: !remount,
+                return Err("give --order-file or --playlist".into());
             };
-            let out = lock_volume(&vol, job, &backup_dir, remount)?;
-            print_json(&out);
-            summarize(&out);
-            Ok(out.ok)
+            let dir = dir.or(plan_dir).ok_or("give --dir")?;
+            let mut vol = Volume::open(open_ro(&device)?).map_err(|e| e.to_string())?;
+            let d = vol.find_dir(&dir).map_err(|e| e.to_string())?;
+            let listing = vol.list_dir(d).map_err(|e| e.to_string())?;
+            let files: Vec<_> = listing.groups.iter().filter(|g| g.kind == EntryKind::File).collect();
+            let actual: Vec<String> = files.iter().map(|g| g.name().to_string()).collect();
+            let check = check_order(&actual, &names);
+            let mut wrong_sizes = Vec::new();
+            if let Some(sizes) = sizes {
+                for (n, s) in names.iter().zip(sizes) {
+                    if let Some(g) = files.iter().find(|g| normalize_name(g.name()) == normalize_name(n)) {
+                        if g.size as u64 != s {
+                            wrong_sizes.push(serde_json::json!({ "name": n, "expected": s, "on_stick": g.size }));
+                        }
+                    }
+                }
+            }
+            let ok = check.in_order && check.extra.is_empty() && wrong_sizes.is_empty();
+            print_json(&serde_json::json!({ "ok": ok, "check": check, "size_mismatches": wrong_sizes }));
+            Ok(ok)
         }
     }
 }

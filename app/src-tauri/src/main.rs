@@ -1,17 +1,17 @@
 // Playlist2USB desktop shell. The UI is plain HTML in ../ui; every operation
-// here is a thin wrapper over p2u-core (playlists, copy, FAT reorder) and
-// p2u-device (volumes, OS-brokered raw access).
+// here is a thin wrapper over p2u-core (playlists, the FAT32 stick writer) and
+// p2u-device (finding sticks, OS-brokered raw access).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
 
-use p2u_core::fat::write::{WriteItem, WriteOptions};
-use p2u_core::job::{run_lock, run_write, LockJob, LockOutcome, WriteJob, WriteOutcome};
+use p2u_core::fat::stick::{plan_stick, StickOptions, WriteItem};
+use p2u_core::job::{run_stick, StickJob, StickOutcome};
 use p2u_core::plan::{make_plan, Plan, PlanOptions};
 use p2u_core::playlist::{self, Playlist, PlaylistEntry, Source};
-use p2u_device::{DeviceError, VolumeInfo};
+use p2u_device::{DeviceError, StickInfo};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 #[derive(Serialize)]
 struct TrackView {
@@ -62,15 +62,15 @@ fn startup_playlist() -> Option<String> {
 }
 
 #[tauri::command]
-fn list_volumes() -> Result<Vec<VolumeInfo>, String> {
-    p2u_device::list_volumes().map_err(|e| e.to_string())
+fn list_sticks() -> Result<Vec<StickInfo>, String> {
+    p2u_device::list_sticks().map_err(|e| e.to_string())
 }
 
-fn find_volume(id: &str) -> Result<VolumeInfo, String> {
-    p2u_device::list_volumes()
+fn find_stick(id: &str) -> Result<StickInfo, String> {
+    p2u_device::list_sticks()
         .map_err(|e| e.to_string())?
         .into_iter()
-        .find(|v| v.id == id)
+        .find(|s| s.id == id)
         .ok_or_else(|| "The stick was removed or changed. Plug it in and pick it again.".to_string())
 }
 
@@ -81,19 +81,14 @@ struct TrackIn {
 }
 
 #[derive(Deserialize)]
-struct CopyRequest {
+struct WriteRequest {
     name: String,
     tracks: Vec<TrackIn>,
-    volume_id: String,
+    stick_id: String,
     /// Empty string = top level of the stick.
     folder: String,
     number_prefix: bool,
     ascii_names: bool,
-    #[serde(default)]
-    replace: bool,
-    /// Allow files to be split when no single free block is large enough.
-    #[serde(default)]
-    allow_fragmented: bool,
     /// Compare every byte on the stick with the source afterwards.
     #[serde(default = "yes")]
     verify_data: bool,
@@ -103,7 +98,7 @@ fn yes() -> bool {
     true
 }
 
-fn build_plan(req: &CopyRequest, mount: &std::path::Path) -> Plan {
+fn build_plan(req: &WriteRequest) -> Plan {
     let pl = Playlist {
         name: req.name.clone(),
         path: PathBuf::new(),
@@ -116,125 +111,55 @@ fn build_plan(req: &CopyRequest, mount: &std::path::Path) -> Plan {
     };
     make_plan(
         &pl,
-        mount,
         &PlanOptions { folder_name: Some(req.folder.clone()), number_prefix: req.number_prefix, ascii_names: req.ascii_names },
     )
 }
 
-/// The names and sizes the stick should hold, without copying ("Lock order only").
-#[tauri::command]
-fn plan_playlist(req: CopyRequest) -> Result<Plan, String> {
-    let vol = find_volume(&req.volume_id)?;
-    let mount = vol.mount_point.clone().unwrap_or_default();
-    Ok(build_plan(&req, &mount))
-}
-
 #[derive(Serialize)]
 struct WriteResponse {
-    outcome: WriteOutcome,
+    outcome: StickOutcome,
     plan: Plan,
     method: &'static str,
+    /// Set when the stick was ejected (powered off) after the check.
+    ejected: bool,
 }
 
-/// The main action: write the files straight into the FAT volume (order and
-/// placement chosen here), then read everything back from the stick.
+/// The one action: erase the stick, write a fresh FAT32 file system with the
+/// playlist in FAT order and in one unbroken block per file, read it all back.
 #[tauri::command]
-async fn write_playlist(app: AppHandle, req: CopyRequest) -> Result<WriteResponse, String> {
-    let vol = find_volume(&req.volume_id)?;
-    let backups = app.path().app_data_dir().map_err(|e| e.to_string())?.join("backups");
-    std::fs::create_dir_all(&backups).map_err(|e| e.to_string())?;
+async fn write_playlist(app: AppHandle, req: WriteRequest) -> Result<WriteResponse, String> {
+    let stick = find_stick(&req.stick_id)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let plan = build_plan(&req, std::path::Path::new("/"));
-        let job = WriteJob {
-            target_dir: plan.volume_path.clone(),
+        let plan = build_plan(&req);
+        let job = StickJob {
             items: plan.items.iter().map(|i| WriteItem { source: i.source.clone(), name: i.target_name.clone() }).collect(),
-            options: WriteOptions { replace: req.replace, allow_fragmented: req.allow_fragmented, force: false, dry_run: false },
+            options: StickOptions { folder: plan.folder_name.clone(), label: String::new() },
             verify_data: req.verify_data,
-            partition: None,
             eject: true,
         };
-        match p2u_device::acquire(&vol) {
+        // Catch "doesn't fit" and bad names before the stick is touched.
+        plan_stick(stick.size_bytes, 512, &job.items, &job.options).map_err(|e| format!("Nothing was written: {e}."))?;
+        match p2u_device::acquire(&stick) {
             Ok(mut raw) => {
-                let outcome = run_write(&mut raw, &job, Some(&backups), &mut |p| {
+                let mut outcome = run_stick(&mut raw, &job, &mut |p| {
                     let _ = app.emit("write-progress", p);
                 });
-                let _ = if outcome.ok { raw.eject() } else { Ok(()) };
-                drop(raw);
-                if !outcome.ok {
-                    let _ = p2u_device::remount_after(&vol);
+                let mut ejected = false;
+                if outcome.ok {
+                    match raw.finish() {
+                        Ok(()) => ejected = true,
+                        Err(e) => outcome.error = Some(e.to_string()),
+                    }
                 }
-                Ok(WriteResponse { outcome, plan, method: "system" })
+                Ok(WriteResponse { outcome, plan, method: "system", ejected })
             }
             Err(DeviceError::NeedsElevation) | Err(DeviceError::NoBroker(_)) => {
-                let outcome = p2u_device::write_via_helper(&vol, &job).map_err(|e| e.to_string())?;
-                Ok(WriteResponse { outcome, plan, method: "helper" })
+                let outcome = p2u_device::write_via_helper(&stick, &job).map_err(|e| e.to_string())?;
+                let ejected = outcome.ok && outcome.error.is_none();
+                Ok(WriteResponse { outcome, plan, method: "helper", ejected })
             }
-            Err(DeviceError::NotAuthorized) => {
-                let _ = p2u_device::remount_after(&vol);
-                Err("Authorization was cancelled. The stick was not changed.".into())
-            }
-            Err(e) => {
-                let _ = p2u_device::remount_after(&vol);
-                Err(e.to_string())
-            }
-        }
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[derive(Deserialize)]
-struct LockRequest {
-    volume_id: String,
-    volume_path: String,
-    order: Vec<String>,
-    /// Expected sizes, parallel to `order`.
-    sizes: Option<Vec<u64>>,
-}
-
-#[derive(Serialize)]
-struct LockResult {
-    outcome: LockOutcome,
-    mount_point: Option<String>,
-    method: &'static str,
-}
-
-#[tauri::command]
-async fn lock_order(app: AppHandle, req: LockRequest) -> Result<LockResult, String> {
-    let vol = find_volume(&req.volume_id)?;
-    let backups = app.path().app_data_dir().map_err(|e| e.to_string())?.join("backups");
-    std::fs::create_dir_all(&backups).map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let job = LockJob {
-            dir_path: req.volume_path,
-            order: req.order,
-            expected_sizes: req.sizes,
-            options: Default::default(),
-            partition: None,
-            eject: true,
-        };
-        match p2u_device::acquire(&vol) {
-            Ok(mut raw) => {
-                let outcome = run_lock(&mut raw, &job, Some(&backups));
-                // On success leave the stick unmounted so nothing writes to it
-                // after the verification; on failure mount it again.
-                let _ = if outcome.ok { raw.eject() } else { Ok(()) };
-                drop(raw);
-                let mp = if outcome.ok { None } else { p2u_device::remount_after(&vol).ok().flatten() };
-                Ok(LockResult { outcome, mount_point: mp.map(|m| m.display().to_string()), method: "system" })
-            }
-            Err(DeviceError::NeedsElevation) | Err(DeviceError::NoBroker(_)) => {
-                let outcome = p2u_device::lock_via_helper(&vol, &job).map_err(|e| e.to_string())?;
-                Ok(LockResult { outcome, mount_point: None, method: "helper" })
-            }
-            Err(DeviceError::NotAuthorized) => {
-                let _ = p2u_device::remount_after(&vol);
-                Err("Authorization was cancelled. The stick was not changed.".into())
-            }
-            Err(e) => {
-                let _ = p2u_device::remount_after(&vol);
-                Err(e.to_string())
-            }
+            Err(DeviceError::NotAuthorized) => Err("Authorization was cancelled. Nothing was written.".into()),
+            Err(e) => Err(format!("Nothing was written: {e}")),
         }
     })
     .await
@@ -244,14 +169,7 @@ async fn lock_order(app: AppHandle, req: LockRequest) -> Result<LockResult, Stri
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![
-            load_playlist,
-            startup_playlist,
-            list_volumes,
-            plan_playlist,
-            write_playlist,
-            lock_order
-        ])
+        .invoke_handler(tauri::generate_handler![load_playlist, startup_playlist, list_sticks, write_playlist])
         .run(tauri::generate_context!())
         .expect("error while running Playlist2USB");
 }

@@ -19,7 +19,7 @@
         <span class="lcd-unit seg">TRK</span>
       </div>
     </div>
-    <p class="lcd-sub" id="lcd-sub">Open a playlist, pick a stick, copy, then lock the order.</p>
+    <p class="lcd-sub" id="lcd-sub">Open a playlist, pick a stick, then erase and write.</p>
   </header>
 
   <main>
@@ -43,33 +43,35 @@
         <h2 id="stick-h">USB stick</h2>
         <button id="refresh" type="button" class="quiet">Refresh</button>
       </div>
-      <div id="volumes" class="volumes" role="radiogroup" aria-labelledby="stick-h"></div>
+      <div id="sticks" class="sticks" role="radiogroup" aria-labelledby="stick-h"></div>
 
       <label class="field">Folder on the stick
         <input id="folder" type="text" spellcheck="false" autocomplete="off" aria-describedby="folder-hint">
       </label>
-      <p id="folder-hint" class="field-hint">Leave empty to use the top level of the stick.</p>
+      <p id="folder-hint" class="field-hint">Leave empty to put the tracks at the top level of the stick.</p>
       <label class="check"><input id="numbered" type="checkbox" checked> Number the file names (01 - …)</label>
       <label class="check"><input id="ascii" type="checkbox"> Plain ASCII names for basic displays</label>
-      <label class="check"><input id="replace" type="checkbox"> Replace an earlier copy on the stick</label>
-      <label class="check"><input id="fragmented" type="checkbox"> Allow split files if free space is scattered</label>
 
-      <div class="actions">
-        <button id="write" type="button" class="primary" disabled>Write to stick</button>
-        <button id="lock" type="button" class="quiet" disabled>Fix order only</button>
+      <div class="erase-note" id="erase-note">
+        <h3>Writing erases the whole stick</h3>
+        <p>Everything on it is replaced by a fresh FAT32 file system holding only this playlist. Copy off anything you want to keep first.</p>
       </div>
-      <ol class="steps" aria-label="What Write to stick does">
+      <div class="actions">
+        <button id="write" type="button" class="primary" disabled>Erase and write</button>
+        <span id="fit" class="fit"></span>
+      </div>
+      <ol class="steps" aria-label="What Erase and write does">
         <li>
-          <h3>Write at FAT level</h3>
-          <p>The files go straight into the stick's file system: entries in playlist order, each file in one unbroken block, back to back. Your system asks for your password or fingerprint once.</p>
+          <h3>Erase and write</h3>
+          <p>One fresh FAT32 partition, laid out here: tracks in playlist order, each file in one unbroken block, back to back. Your system asks for your password or fingerprint once.</p>
         </li>
         <li>
           <h3>Read it all back</h3>
-          <p>The order, where every file sits and every byte are checked against your files.</p>
+          <p>The partition, every table and every byte are checked against your files.</p>
         </li>
         <li>
           <h3>Unplug</h3>
-          <p>The stick stays unmounted, so nothing changes it after the check.</p>
+          <p>The stick is ejected, so nothing changes it after the check.</p>
         </li>
       </ol>
       <p id="status" class="status" role="status"></p>

@@ -1,46 +1,50 @@
 [
   {
-    "stick": "fat32_used",
+    "stick": "gpt_exfat_1g",
     "write_ok": true,
     "self_verified": true,
-    "contiguous": true,
+    "kernel_found_one_partition": true,
     "kernel_lists_in_order": true,
     "kernel_reads_identical": true,
     "fsck_clean_after_kernel_use": true,
     "mshowfat_one_run_each_ascending": true,
+    "blkid_only_mbr": true,
     "error": null
   },
   {
-    "stick": "fat16_used",
+    "stick": "mbr_ntfs_ext4_2g",
     "write_ok": true,
     "self_verified": true,
-    "contiguous": true,
+    "kernel_found_one_partition": true,
     "kernel_lists_in_order": true,
     "kernel_reads_identical": true,
     "fsck_clean_after_kernel_use": true,
     "mshowfat_one_run_each_ascending": true,
+    "blkid_only_mbr": true,
     "error": null
   },
   {
-    "stick": "fat32_top",
+    "stick": "superfloppy_fat16_top",
     "write_ok": true,
     "self_verified": true,
-    "contiguous": true,
+    "kernel_found_one_partition": true,
     "kernel_lists_in_order": true,
     "kernel_reads_identical": true,
     "fsck_clean_after_kernel_use": true,
     "mshowfat_one_run_each_ascending": true,
+    "blkid_only_mbr": true,
     "error": null
   },
   {
-    "stick": "fat32_replace",
+    "stick": "used_fat32_junk_tail_512m",
     "write_ok": true,
     "self_verified": true,
-    "contiguous": true,
+    "kernel_found_one_partition": true,
     "kernel_lists_in_order": true,
     "kernel_reads_identical": true,
     "fsck_clean_after_kernel_use": true,
     "mshowfat_one_run_each_ascending": true,
+    "blkid_only_mbr": true,
     "error": null
   }
 ]

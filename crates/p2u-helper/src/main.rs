@@ -3,27 +3,24 @@
 //!
 //! Usage: p2u-helper <device> <job.json> <result.json>
 //!
-//! * `<device>`: `\\.\E:` on Windows, `/dev/sdX[N]` on Linux. Must be a
-//!   removable FAT volume; the helper unmounts (Linux) or locks (Windows) it.
-//! * `<job.json>`: a serialized `p2u_core::job::HelperJob` (reorder or raw write).
+//! * `<device>`: `\\.\PhysicalDriveN` on Windows, `/dev/sdX` on Linux: a whole
+//!   removable USB/SD disk. The helper checks that, refuses the disk the system
+//!   runs from, and unmounts (Linux) or locks and dismounts (Windows) every
+//!   volume on it.
+//! * `<job.json>`: a serialized `p2u_core::job::StickJob`.
 //! * `<result.json>`: created exclusively (fails if it exists); receives a
-//!   `HelperOutcome`. Undo backups are written next to it.
+//!   `StickOutcome`.
 //!
-//! A lock job only permutes the entries of one folder. A write job writes the
-//! playlist's files into free clusters, links them in every FAT copy and adds
-//! one folder entry, in the crash-safe order documented in p2u_core::fat::write.
+//! The job erases the stick and writes a fresh FAT32 file system holding the
+//! playlist, then reads it all back (see p2u_core::fat::stick).
 
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 
-use p2u_core::job::{create_exclusive, run_lock, run_write, HelperJob, HelperOutcome, LockOutcome};
+use p2u_core::job::{create_exclusive, run_stick, StickJob, StickOutcome};
 
 const MAX_JOB_BYTES: u64 = 4 << 20;
-
-fn fail(msg: String) -> HelperOutcome {
-    HelperOutcome::Lock(LockOutcome { ok: false, error: Some(msg), report: None, check: None, size_mismatches: vec![], backup_file: None })
-}
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -42,49 +39,32 @@ fn main() -> ExitCode {
         }
     };
 
-    let outcome = (|| -> HelperOutcome {
+    let outcome = (|| -> StickOutcome {
         match std::fs::metadata(job_path) {
             Ok(m) if m.is_file() && m.len() <= MAX_JOB_BYTES => {}
-            _ => return fail("job file missing or too large".into()),
+            _ => return StickOutcome::fail("job file missing or too large"),
         }
-        let job: HelperJob = match std::fs::read(job_path).ok().and_then(|b| serde_json::from_slice(&b).ok()) {
+        let job: StickJob = match std::fs::read(job_path).ok().and_then(|b| serde_json::from_slice(&b).ok()) {
             Some(j) => j,
-            None => return fail("job file is not a valid job".into()),
+            None => return StickOutcome::fail("job file is not a valid job"),
         };
         let mut raw = match p2u_device::open_direct(device) {
             Ok(r) => r,
-            Err(e) => return fail(e.to_string()),
+            Err(e) => return StickOutcome::fail(format!("nothing was written: {e}")),
         };
-        // Keep the OS from remounting (and writing to) the verified volume.
-        match job {
-            HelperJob::Lock(job) => {
-                let mut outcome = run_lock(&mut raw, &job, result_path.parent());
-                if outcome.ok && job.eject {
-                    if let Err(e) = raw.eject() {
-                        outcome.error = Some(format!("order verified; {e}"));
-                    }
-                }
-                HelperOutcome::Lock(outcome)
-            }
-            HelperJob::Write(job) => {
-                let mut outcome = run_write(&mut raw, &job, result_path.parent(), &mut |_| {});
-                if outcome.ok && job.eject {
-                    if let Err(e) = raw.eject() {
-                        outcome.error = Some(format!("written and verified; {e}"));
-                    }
-                }
-                HelperOutcome::Write(outcome)
+        let mut outcome = run_stick(&mut raw, &job, &mut |_| {});
+        // Keep the OS from mounting (and writing to) the verified stick.
+        if outcome.ok && job.eject {
+            if let Err(e) = raw.finish() {
+                outcome.error = Some(e.to_string());
             }
         }
+        outcome
     })();
 
-    let ok = match &outcome {
-        HelperOutcome::Lock(o) => o.ok,
-        HelperOutcome::Write(o) => o.ok,
-    };
     let _ = serde_json::to_writer_pretty(&mut result_file, &outcome);
     let _ = result_file.flush();
-    if ok {
+    if outcome.ok {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
