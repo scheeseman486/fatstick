@@ -10,7 +10,9 @@
 #   x86_64-unknown-linux-gnu   native, on Linux
 #   x86_64-pc-windows-gnu      cross, on Linux with mingw-w64 (also serves the
 #                              MSVC-built app: the files are copied under both names)
-#   universal-apple-darwin     on macOS: arm64 and x86_64, joined with lipo
+#   aarch64-apple-darwin       on macOS, Apple Silicon (what the app ships for now)
+#   x86_64-apple-darwin        on macOS, Intel
+#   universal-apple-darwin     on macOS: both, joined with lipo
 # Needs: curl, git, make, a C compiler, nasm (and mingw-w64 for Windows).
 # Writes app/src-tauri/binaries/{ffmpeg,ffprobe}-<target>[.exe], where Tauri
 # picks up sidecars.
@@ -82,14 +84,20 @@ case "$TARGET" in
       done
     done
     ;;
-  universal-apple-darwin|aarch64-apple-darwin|x86_64-apple-darwin)
-    build_one "$WORK/arm64" "--host=aarch64-apple-darwin" "-arch arm64" "--arch=arm64 --enable-cross-compile --target-os=darwin --enable-pthreads"
-    build_one "$WORK/x86_64" "--host=x86_64-apple-darwin" "-arch x86_64" "--arch=x86_64 --enable-cross-compile --target-os=darwin --enable-pthreads"
-    for t in ffmpeg ffprobe; do
-      lipo -create "$WORK/arm64/out/bin/$t" "$WORK/x86_64/out/bin/$t" -output "$OUT/$t-universal-apple-darwin"
-      cp "$WORK/arm64/out/bin/$t" "$OUT/$t-aarch64-apple-darwin"
-      cp "$WORK/x86_64/out/bin/$t" "$OUT/$t-x86_64-apple-darwin"
-    done
+  aarch64-apple-darwin|x86_64-apple-darwin|universal-apple-darwin)
+    if [ "$TARGET" != x86_64-apple-darwin ]; then
+      build_one "$WORK/arm64" "--host=aarch64-apple-darwin" "-arch arm64" "--arch=arm64 --enable-cross-compile --target-os=darwin --enable-pthreads"
+      for t in ffmpeg ffprobe; do cp "$WORK/arm64/out/bin/$t" "$OUT/$t-aarch64-apple-darwin"; done
+    fi
+    if [ "$TARGET" != aarch64-apple-darwin ]; then
+      build_one "$WORK/x86_64" "--host=x86_64-apple-darwin" "-arch x86_64" "--arch=x86_64 --enable-cross-compile --target-os=darwin --enable-pthreads"
+      for t in ffmpeg ffprobe; do cp "$WORK/x86_64/out/bin/$t" "$OUT/$t-x86_64-apple-darwin"; done
+    fi
+    if [ "$TARGET" = universal-apple-darwin ]; then
+      for t in ffmpeg ffprobe; do
+        lipo -create "$OUT/$t-aarch64-apple-darwin" "$OUT/$t-x86_64-apple-darwin" -output "$OUT/$t-universal-apple-darwin"
+      done
+    fi
     ;;
   *)
     echo "unknown target $TARGET" >&2

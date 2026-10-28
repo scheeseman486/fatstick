@@ -160,9 +160,11 @@ route: `npx @tauri-apps/cli@^2 build --runner cargo-xwin --target
 x86_64-pc-windows-msvc` (NSIS, LLVM and cargo-xwin installed; see the CI
 workflow).
 
-macOS: build on a Mac or the `macos` CI job: `packaging/ffmpeg/build-ffmpeg.sh
-universal-apple-darwin`, then `--target universal-apple-darwin`. The Apple SDK
-licence rules out building on Linux.
+macOS (Apple Silicon for now): build on a Mac or with the `macos` CI job:
+`packaging/ffmpeg/build-ffmpeg.sh aarch64-apple-darwin`, then `npx
+@tauri-apps/cli@^2 build --target aarch64-apple-darwin`. The app is ad-hoc
+signed, not notarized: the first time, open it from System Settings → Privacy
+& Security → Open Anyway. The Apple SDK licence rules out building on Linux.
 
 The window also runs in a browser on demo data, with the sync, player and
 file reading simulated:
