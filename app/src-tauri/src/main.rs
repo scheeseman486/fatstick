@@ -337,28 +337,34 @@ struct PlayArgs {
     pitch: f64,
     #[serde(default = "yes")]
     keep_formants: bool,
-    /// The entry's cuts and fades (seconds): it plays from its cut start to
-    /// its cut end, faded (unless the prepared file plays, which has them).
-    #[serde(default)]
-    cut_start: f64,
-    #[serde(default)]
-    cut_end: f64,
-    #[serde(default)]
-    fade_in: f64,
-    #[serde(default)]
-    fade_out: f64,
+    /// The entry's cuts, fades and added silences: it plays as the stick
+    /// will have it (unless the prepared file plays, which has them).
+    #[serde(flatten)]
+    edges: Edges,
 }
 
 fn yes() -> bool {
     true
 }
 
-fn shape_of(duration: f64, cut_start: f64, cut_end: f64, fade_in: f64, fade_out: f64) -> player::Shape {
+/// An entry's ends, in seconds: cut from the file, faded, and silence added.
+#[derive(Deserialize, Default, Clone, Copy)]
+#[serde(rename_all = "camelCase", default)]
+struct Edges {
+    cut_start: f64,
+    cut_end: f64,
+    fade_in: f64,
+    fade_out: f64,
+    pad_start: f64,
+    pad_end: f64,
+}
+
+fn shape_of(duration: f64, e: &Edges) -> player::Shape {
     let ok = |x: f64| if x.is_finite() && x > 0.0 { x } else { 0.0 };
-    let end = if ok(cut_end) > 0.0 && duration > 0.0 { (duration - ok(cut_end)).max(ok(cut_start)) } else { f64::INFINITY };
+    let end = if ok(e.cut_end) > 0.0 && duration > 0.0 { (duration - ok(e.cut_end)).max(ok(e.cut_start)) } else { f64::INFINITY };
     // A fade out needs to know where the end is: the file's length.
-    let end = if !end.is_finite() && ok(fade_out) > 0.0 && duration > 0.0 { duration } else { end };
-    player::Shape { start: ok(cut_start), end, fade_in: ok(fade_in), fade_out: ok(fade_out) }
+    let end = if !end.is_finite() && ok(e.fade_out) > 0.0 && duration > 0.0 { duration } else { end };
+    player::Shape { start: ok(e.cut_start), end, fade_in: ok(e.fade_in), fade_out: ok(e.fade_out), pad_start: ok(e.pad_start).min(3600.0), pad_end: ok(e.pad_end).min(3600.0) }
 }
 
 fn key_of(pitch: f64, keep_formants: bool) -> Option<fatstick_audio::stretch::Key> {
@@ -389,17 +395,39 @@ fn player_play(st: State<AppState>, args: PlayArgs) -> Res<Playing> {
             let d = fatstick_audio::mp3::scan(&p).ok().flatten().map(|i| i.duration).unwrap_or(dur);
             (p, 0.0, "cache", d, None, player::Shape::default())
         }
-        None => (path, args.gain_db, "source", dur, key_of(args.pitch, args.keep_formants), shape_of(dur, args.cut_start, args.cut_end, args.fade_in, args.fade_out)),
+        None => (path, args.gain_db, "source", dur, key_of(args.pitch, args.keep_formants), shape_of(dur, &args.edges)),
     };
     st.player.send(player::Cmd::Play { path, from: args.from, gain_db: gain, duration: dur, token: args.token, key, shape });
     Ok(Playing { from: from.into() })
 }
 
-/// The fade sliders, live: other cuts and fades for what's playing. The
-/// window passes the track's length (the player has the source's).
+/// The start and end, and fade sliders, live: other cuts, fades and silences
+/// for what's playing. The window passes the track's length.
 #[tauri::command]
-fn player_shape(st: State<AppState>, duration: f64, cut_start: f64, cut_end: f64, fade_in: f64, fade_out: f64) {
-    st.player.send(player::Cmd::Shape(shape_of(duration, cut_start, cut_end, fade_in, fade_out)));
+fn player_shape(st: State<AppState>, duration: f64, edges: Edges) {
+    st.player.send(player::Cmd::Shape(shape_of(duration, &edges)));
+}
+
+#[derive(Serialize)]
+struct Peaks {
+    /// Seconds per peak.
+    step: f64,
+    peaks: Vec<u8>,
+}
+
+/// A track's waveform for the start and end and fade dialogs: the peak of
+/// every 50 ms. Async: decoding a long file takes a moment.
+#[tauri::command]
+async fn track_peaks(st: State<'_, AppState>, track_id: String) -> Res<Peaks> {
+    let path = {
+        let lib = st.lib.lock().unwrap();
+        let t = lib.track(&track_id).map_err(err)?.ok_or("That track isn't in the library.")?;
+        PathBuf::from(t.path)
+    };
+    let tools = st.tools.clone().ok_or("ffmpeg isn't available.")?;
+    const STEP: f64 = 0.05;
+    let peaks = tauri::async_runtime::spawn_blocking(move || fatstick_audio::decode::peaks(&tools, &path, STEP)).await.map_err(err)?.map_err(err)?;
+    Ok(Peaks { step: STEP, peaks })
 }
 
 /// The key slider, live: another key for what's playing (0 for its own).
@@ -615,6 +643,7 @@ fn main() {
             player_pause,
             player_key,
             player_shape,
+            track_peaks,
             player_resume,
             player_seek,
             player_stop,

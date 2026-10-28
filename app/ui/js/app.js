@@ -82,7 +82,7 @@
     tracksVersion: 0,
     /** What plays: a playlist's entry (`entryId`, `playlistId`), or one
      * song from the library on its own (`trackId`), which plays once. */
-    player: { entryId: null, playlistId: null, trackId: null, token: null, playing: false, pos: 0, dur: 0, asOnStick: false, volume: 0.8, silent: false, error: null, from: "source" },
+    player: { entryId: null, playlistId: null, trackId: null, token: null, playing: false, pos: 0, dur: 0, asOnStick: false, volume: 0.8, silent: false, error: null, from: "source", repeat: "off" },
   };
   const hostTheme = document.documentElement.getAttribute("data-theme");
 
@@ -730,20 +730,30 @@
     fades: { label: "Fades", w: "5.6em" },
     name: { label: "Name on the stick", w: "minmax(9em, 2fr)" },
   };
+  /** The columns that fit the list's width: the title, number and time
+   * always, then the others the person wants, most useful first, while
+   * there's room for each at its narrowest. Shown in their usual order. */
+  const COL_ORDER = ["num", "title", "artist", "album", "time", "format", "stick", "gain", "edges", "fades", "key", "name"];
   function visibleCols(p) {
-    const w = S.listWidth;
-    const k = ["num", "title"];
-    if (w >= 420) k.push("artist");
-    if (w >= 760 && S.cols.album) k.push("album");
-    k.push("time");
-    if (w >= 600 && S.cols.format) k.push("format");
-    if (w >= 500 && S.cols.stick) k.push("stick");
-    if (w >= 660 && S.cols.gain && p.norm.on) k.push("gain");
-    if (w >= 560 && S.cols.edges && p.entries.some((e) => R.hasEdges(e))) k.push("edges");
-    if (w >= 560 && S.cols.fades && p.entries.some((e) => R.hasFades(e))) k.push("fades");
-    if (w >= 540 && S.cols.key && p.entries.some((e) => R.hasKey(e))) k.push("key");
-    if (w >= 700 && S.cols.name) k.push("name");
-    return k;
+    const em = 14;
+    const narrowest = (c) => parseFloat(COLS[c].w.match(/([\d.]+)em/)[1]) * em + 12; // and the gap
+    const on = new Set(["num", "title", "time"]);
+    let used = 36 + [...on].reduce((a, c) => a + narrowest(c), 0);
+    const wanted = [
+      ["artist", true],
+      ["stick", S.cols.stick],
+      ["edges", S.cols.edges && p.entries.some((e) => R.hasEdges(e))],
+      ["fades", S.cols.fades && p.entries.some((e) => R.hasFades(e))],
+      ["key", S.cols.key && p.entries.some((e) => R.hasKey(e))],
+      ["format", S.cols.format],
+      ["gain", S.cols.gain && p.norm.on],
+      ["name", S.cols.name],
+      ["album", S.cols.album],
+    ];
+    for (const [c, want] of wanted) {
+      if (want && used + narrowest(c) <= S.listWidth) { on.add(c); used += narrowest(c); }
+    }
+    return COL_ORDER.filter((c) => on.has(c));
   }
 
   function renderHead() {
@@ -873,64 +883,343 @@
     return [side(x.cutStart, x.padStart, "start"), side(x.cutEnd, x.padEnd, "end")].filter(Boolean).join("; ") || "As it is";
   }
 
-  /** Cut or pad the selected tracks at their start and end, on the stick. */
+  // ---- a track's ends: drawn, and heard through the main player --------------------------------
+  const secsText = (x) => String(Math.round(x * 10) / 10);
+  const SVG = "http://www.w3.org/2000/svg";
+  const sv = (tag, attrs) => {
+    const el = document.createElementNS(SVG, tag);
+    for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+    return el;
+  };
+  const peaksMemo = new Map();
+  /** A track's waveform (a peak every `step` seconds), read once a session; null if unreadable. */
+  function peaksOf(t) {
+    const k = `${t.id}:${t.size}:${t.duration}`;
+    if (!peaksMemo.has(k)) peaksMemo.set(k, api.trackPeaks(t.id).then((r) => ({ step: r.step, peaks: Uint8Array.from(r.peaks) })).catch(() => null));
+    return peaksMemo.get(k);
+  }
+  /**
+   * A strip showing some seconds of a track: its waveform, faint where it's
+   * cut or turned down and full where it plays (the `gain` of each moment),
+   * a playhead, and the caller's own marks in `layers`.
+   */
+  function waveStrip(t, cls) {
+    const W = 300;
+    const H = 72;
+    const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, class: `wave-svg ${cls || ""}`, preserveAspectRatio: "none", "aria-hidden": "true" });
+    const faint = sv("path", { class: "wave" });
+    const full = sv("path", { class: "wave-on" });
+    const layers = sv("g");
+    const head = sv("line", { class: "wave-head", y1: "0", y2: String(H) });
+    svg.append(faint, full, layers, head);
+    let pk = null;
+    let from = 0;
+    let to = 1;
+    let gain = null;
+    const x = (sec) => ((sec - from) / (to - from)) * W;
+    function render() {
+      if (!pk) return;
+      const cols = W / 2;
+      const mid = H / 2;
+      let a = "";
+      let b = "";
+      for (let i = 0; i < cols; i++) {
+        const t0 = from + (i / cols) * (to - from);
+        const t1 = from + ((i + 1) / cols) * (to - from);
+        let m = 0;
+        for (let j = Math.max(0, Math.floor(t0 / pk.step)), n = Math.min(pk.peaks.length, Math.ceil(t1 / pk.step)); j < n; j++) if (pk.peaks[j] > m) m = pk.peaks[j];
+        const v = Math.max(0.6, Math.sqrt(m / 255) * (mid - 3));
+        const g = gain ? Math.max(0, Math.min(1, gain((t0 + t1) / 2))) : 1;
+        const cx = ((i + 0.5) * 2).toFixed(1);
+        a += `M${cx},${(mid - v).toFixed(1)}V${(mid + v).toFixed(1)}`;
+        if (g > 0) b += `M${cx},${(mid - Math.max(0.6, v * g)).toFixed(1)}V${(mid + Math.max(0.6, v * g)).toFixed(1)}`;
+      }
+      faint.setAttribute("d", a);
+      full.setAttribute("d", b);
+    }
+    peaksOf(t).then((r) => { pk = r; svg.classList.toggle("no-wave", !r); render(); });
+    return {
+      svg, layers, W, H, x,
+      /** Seconds at a pointer position over the strip. */
+      secAt(clientX) {
+        const r = svg.getBoundingClientRect();
+        return from + ((clientX - r.left) / Math.max(1, r.width)) * (to - from);
+      },
+      draw(a, b, g) { from = a; to = Math.max(a + 0.1, b); gain = g || null; render(); },
+      head(t) {
+        const on = t != null && t >= from && t <= to;
+        head.style.display = on ? "" : "none";
+        if (on) { head.setAttribute("x1", x(t)); head.setAttribute("x2", x(t)); }
+      },
+    };
+  }
+  /** The live shape of an entry for the player: its cuts and silences (or x,
+   * being tried) and its fades (or f, being tried). */
+  function shapeArgs(e, f, x) {
+    const g = x || R.edges(e);
+    const k = f || R.fades(e);
+    return {
+      duration: track(e.trackId).duration || 0,
+      edges: { cutStart: g.cutStart, cutEnd: g.cutEnd, padStart: g.padStart, padEnd: g.padEnd, fadeIn: k.fadeIn, fadeOut: k.fadeOut },
+    };
+  }
+  /**
+   * A dialog's preview through the main player: whether one of its entries
+   * is playing, playing one with the dialog's changes (`changes(e)`: options
+   * for playEntry), and on Cancel putting back what was there.
+   */
+  function previewer(p, es, changes) {
+    const pp = S.player;
+    const playingHere = () => !!pp.entryId && pp.playlistId === p.id && es.some((e) => e.id === pp.entryId);
+    const current = () => p.entries.find((x) => x.id === pp.entryId);
+    const wasPlaying = playingHere();
+    let startedHere = false;
+    // A prepared file has the old settings in it: changes play the source.
+    let fromSource = wasPlaying && pp.from !== "cache";
+    return {
+      playingHere, current,
+      play(e, at) {
+        startedHere = startedHere || !wasPlaying;
+        fromSource = true;
+        playEntry(e.id, p.id, at, { source: true, ...changes(e) });
+      },
+      update(send) {
+        if (!playingHere()) return;
+        const e = current();
+        if (!fromSource) { fromSource = true; playEntry(e.id, p.id, sourcePos(e), { source: true, ...changes(e) }); } else send(e);
+      },
+      restore(send) {
+        if (startedHere && !wasPlaying) stopPlayback();
+        else if (playingHere() && fromSource) send(current());
+      },
+    };
+  }
+
+  /**
+   * The start and end of the selected tracks on the stick. Each end has the
+   * waveform of its first or last half minute with the cut marked (drag it,
+   * or use the slider), silence to add, and a button to hear it. Changes are
+   * heard as the track plays, the silences too; the player bar stays usable.
+   */
   function edgesDialog(ids) {
     const p = pl();
     const es = p.entries.filter((e) => ids.includes(e.id));
     if (!es.length) return;
-    const first = R.edges(es[0]);
+    const e0 = es[0];
+    const t0 = track(e0.trackId);
+    const dur = t0.duration || 60;
+    const first = R.edges(e0);
+    const KEYS = ["cutStart", "padStart", "cutEnd", "padEnd"];
     const same = (k) => es.every((e) => R.edges(e)[k] === first[k]);
-    const field = (k, label) => {
-      const i = h("input", { type: "number", class: "input secs", min: "0", max: "3600", step: "0.1", id: `edge-${k}`, value: same(k) ? String(first[k]) : "", placeholder: same(k) ? "" : "mixed", "aria-label": label });
-      return i;
+    const mixed = KEYS.some((k) => !same(k));
+    // What's being tried: seconds, or null where the tracks differ and it hasn't been touched.
+    const v = Object.fromEntries(KEYS.map((k) => [k, same(k) ? first[k] : null]));
+    const val = (k) => v[k] ?? first[k];
+    const tried = (e) => {
+      const x = { ...R.edges(e) };
+      for (const k of KEYS) if (v[k] != null) x[k] = v[k];
+      return x;
     };
-    const f = {
-      cutStart: field("cutStart", "Seconds to cut from the start"), padStart: field("padStart", "Seconds of silence before"),
-      cutEnd: field("cutEnd", "Seconds to cut from the end"), padEnd: field("padEnd", "Seconds of silence after"),
-    };
+    const pv = previewer(p, es, (e) => ({ edges: tried(e) }));
     const err = h("p", { class: "st-note err", role: "alert" });
     const shortest = Math.min(...es.map((e) => track(e.trackId).duration || 0));
-    const apply = () => {
-      const v = {};
-      for (const [k, input] of Object.entries(f)) {
-        if (input.value === "") continue; // "mixed", left as it is
+
+    function panel(which) {
+      const isStart = which === "start";
+      const ck = isStart ? "cutStart" : "cutEnd";
+      const pk = isStart ? "padStart" : "padEnd";
+      const other = isStart ? "cutEnd" : "cutStart";
+      let win = Math.min(dur, Math.max(30, val(ck) + 10));
+      const strip = waveStrip(t0, "edge-wave");
+      const cutRect = sv("rect", { class: "edge-cut", y: "0", height: String(strip.H) });
+      const fadeLine = sv("path", { class: "edge-fade" });
+      const handle = sv("line", { class: "edge-handle", y1: "0", y2: String(strip.H) });
+      strip.layers.append(cutRect, fadeLine, handle);
+      const gap = h("div", { class: "edge-gap", title: isStart ? "Silence before the track" : "Silence after the track" });
+      const axis = h("div", { class: "fade-axis" });
+      const sum = h("span", { class: "edge-sum" });
+      const range = (k, label) => h("input", { type: "range", min: "0", step: "0.1", id: `edge-${k}-range`, "aria-label": label });
+      const num = (k, label) => h("input", { type: "number", class: "input secs", min: "0", max: "3600", step: "0.1", id: `edge-${k}`, "aria-label": label });
+      const ctl = {
+        [ck]: { range: range(ck, isStart ? "Cut from the start, seconds" : "Cut from the end, seconds"), num: num(ck, isStart ? "Seconds to cut from the start" : "Seconds to cut from the end") },
+        [pk]: { range: range(pk, isStart ? "Silence before, seconds" : "Silence after, seconds"), num: num(pk, isStart ? "Seconds of silence before" : "Seconds of silence after") },
+      };
+      ctl[pk].range.max = "10";
+      ctl[pk].range.step = "0.5";
+      const hear = h("button", { type: "button", class: "btn small" }, icon("play"), isStart ? "Hear the start" : "Hear the end");
+
+      function show(k, src) {
+        const c = ctl[k];
+        if (k === ck) c.range.max = String(Math.round(win * 10) / 10);
+        c.range.classList.toggle("mixed", v[k] == null);
+        if (src !== c.range) c.range.value = String(val(k));
+        if (src !== c.num) { c.num.value = v[k] == null ? "" : secsText(v[k]); c.num.placeholder = v[k] == null ? "mixed" : ""; }
+      }
+      function set(k, n, src) {
+        n = Math.max(0, Math.min(3600, Math.round(n * 10) / 10));
+        // Leave at least a second of the track.
+        if (k === ck) n = Math.min(n, Math.max(0, Math.floor((dur - 1 - val(other)) * 10) / 10));
+        v[k] = n;
+        // A cut typed in beyond the picture widens it (dragging stays inside).
+        if (k === ck && src === ctl[ck].num && n > win - 2 && win < dur) win = Math.min(dur, n + 10);
+        err.textContent = "";
+        show(k, src);
+        draw();
+        live();
+      }
+      for (const k of [ck, pk]) {
+        const c = ctl[k];
+        c.range.addEventListener("input", () => set(k, Number(c.range.value), c.range));
+        c.range.addEventListener("change", audition);
+        c.num.addEventListener("input", () => { if (c.num.value !== "" && Number.isFinite(Number(c.num.value))) set(k, Number(c.num.value), c.num); });
+        c.num.addEventListener("change", audition);
+        c.num.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); apply(); } });
+        show(k);
+      }
+      // Drag the cut on the waveform.
+      let dragging = false;
+      const drag = (ev) => {
+        const sec = Math.max(isStart ? 0 : dur - win, Math.min(isStart ? win : dur, strip.secAt(ev.clientX)));
+        set(ck, isStart ? sec : dur - sec, null);
+      };
+      strip.svg.addEventListener("pointerdown", (ev) => { ev.preventDefault(); strip.svg.setPointerCapture(ev.pointerId); dragging = true; drag(ev); });
+      strip.svg.addEventListener("pointermove", (ev) => { if (dragging) drag(ev); });
+      const drop = () => { if (dragging) { dragging = false; audition(); } };
+      strip.svg.addEventListener("pointerup", drop);
+      strip.svg.addEventListener("pointercancel", drop);
+
+      /** After a change, if the track is playing near this end, hear the new one. */
+      function audition() {
+        if (!pv.playingHere()) return;
+        const e = pv.current();
+        const x = tried(e);
+        const end = (track(e.trackId).duration || dur) - x.cutEnd;
+        const at = sourcePos(e);
+        if (isStart && at < x.cutStart + 12) pv.play(e, x.cutStart);
+        else if (!isStart && at > end - 15) pv.play(e, Math.max(x.cutStart, end - 5));
+      }
+      hear.addEventListener("click", () => {
+        const e = pv.playingHere() ? pv.current() : e0;
+        const x = tried(e);
+        const end = (track(e.trackId).duration || dur) - x.cutEnd;
+        pv.play(e, isStart ? x.cutStart : Math.max(x.cutStart, end - 5));
+      });
+
+      function draw() {
+        const [a, b] = isStart ? [0, win] : [dur - win, dur];
+        const start = val("cutStart");
+        const end = dur - val("cutEnd");
+        const f = R.fades(e0);
+        // What plays: nothing where it's cut, and the entry's fades.
+        const gain = (t) => (t < start || t > end ? 0 : (f.fadeIn ? R.fadeCurve((t - start) / f.fadeIn) : 1) * (f.fadeOut ? R.fadeCurve((end - t) / f.fadeOut) : 1));
+        strip.draw(a, b, gain);
+        const at = isStart ? start : end;
+        const xp = strip.x(at);
+        cutRect.setAttribute("x", isStart ? "0" : String(xp));
+        cutRect.setAttribute("width", String(Math.max(0, isStart ? xp : strip.W - xp)));
+        handle.setAttribute("x1", String(xp));
+        handle.setAttribute("x2", String(xp));
+        const fs = isStart ? f.fadeIn : f.fadeOut;
+        if (fs) {
+          const pts = [];
+          for (let i = 0; i <= 24; i++) {
+            const t = isStart ? at + (i / 24) * fs : at - fs + (i / 24) * fs;
+            const g = isStart ? R.fadeCurve((t - at) / fs) : R.fadeCurve((at - t) / fs);
+            pts.push(`${strip.x(t).toFixed(1)},${(strip.H - 3 - g * (strip.H - 8)).toFixed(1)}`);
+          }
+          fadeLine.setAttribute("d", `M${pts.join(" L")}`);
+        } else fadeLine.setAttribute("d", "");
+        const pad = val(pk);
+        gap.classList.toggle("on", pad > 0);
+        fill(gap, h("strong", { text: pad > 0 ? `${secsText(pad)} s` : "–" }), h("small", { text: pad > 0 ? "silence" : "no silence" }));
+        fill(axis, h("span", { text: clock(a) }), h("span", { text: clock(b) }));
+        const cut = v[ck];
+        const words = [cut == null ? "cuts differ" : cut ? `${secsText(cut)} s cut` : "", v[pk] == null ? "silences differ" : v[pk] ? `${secsText(v[pk])} s of silence ${isStart ? "before" : "after"}` : ""].filter(Boolean);
+        sum.textContent = words.length ? words.join(", ") : "As it is";
+        strip.head(pv.playingHere() ? sourcePos(pv.current()) : null);
+      }
+      draw();
+      const el = h("section", { class: `fade-panel edge-panel ${which}` },
+        h("div", { class: "fade-top" }, h("h3", { text: isStart ? "Start" : "End" }), sum),
+        h("div", { class: "edge-strip" }, ...(isStart ? [gap, strip.svg] : [strip.svg, gap])),
+        h("div", { class: `edge-axis ${which}` }, axis),
+        h("div", { class: "edge-rows" },
+          h("label", { class: "lbl", for: `edge-${ck}`, text: "Cut" }), ctl[ck].range, ctl[ck].num, h("span", { class: "lbl", text: "s" }),
+          h("label", { class: "lbl", for: `edge-${pk}`, text: "Silence" }), ctl[pk].range, ctl[pk].num, h("span", { class: "lbl", text: "s" })),
+        hear);
+      return { el, draw, reset: () => { set(ck, 0); set(pk, 0); } };
+    }
+
+    let raf = 0;
+    function live() {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        pv.update((e) => api.playerShape(shapeArgs(e, null, tried(e))).catch(() => {}));
+      });
+    }
+    const ps = panel("start");
+    const pe = panel("end");
+    const status = h("p", { class: "st-note key-status" });
+    function tick() {
+      ps.draw();
+      pe.draw();
+      const t = pv.playingHere() ? track(pv.current().trackId) : null;
+      status.textContent = DEMO ? "The demo plays no sound; in the app, the cuts and silences change as it plays."
+        : t ? `${t.title || t.filename}, ${clock(S.player.pos)}. Drag a cut or move a slider and hear it change; the player below works as usual.`
+          : "Hear the start or the end, with the silence added; a change is heard as it plays.";
+    }
+    const ticker = setInterval(() => { if (document.contains(status)) tick(); }, 250);
+
+    let applied = false;
+    function apply() {
+      const out = {};
+      for (const k of KEYS) {
+        const input = $(`edge-${k}`);
+        if (input.value === "") continue; // differing, and left as each track has it
         const n = Number(input.value);
         if (!Number.isFinite(n) || n < 0 || n > 3600) { err.textContent = "Seconds from 0 to 3600."; input.focus(); return; }
-        v[k] = Math.round(n * 1000) / 1000;
+        out[k] = Math.round(n * 1000) / 1000;
       }
-      const cuts = (v.cutStart ?? first.cutStart) + (v.cutEnd ?? first.cutEnd);
+      const cuts = (out.cutStart ?? first.cutStart) + (out.cutEnd ?? first.cutEnd);
       if (shortest && cuts >= shortest - 0.5) { err.textContent = `That cuts away the whole of a ${clock(shortest)} track.`; return; }
+      applied = true;
       closeModal();
       edit(es.length === 1 ? "Change the start and end" : `Change the start and end of ${plural(es.length, "track")}`, () => {
         for (const e of es) {
           const live = p.entries.find((x) => x.id === e.id);
-          for (const [k, n] of Object.entries(v)) {
+          if (!live) continue;
+          for (const [k, n] of Object.entries(out)) {
             if (n) live[k] = n;
             else delete live[k];
           }
         }
       });
-    };
-    const reset = () => { for (const input of Object.values(f)) input.value = "0"; };
-    const t0 = track(es[0].trackId);
+    }
     modal({
       title: es.length === 1 ? `Start and end of ${t0.title || t0.filename}` : `Start and end of ${plural(es.length, "track")}`,
+      wide: true,
+      player: true,
       body: [
-        h("p", { text: "Cut audio away, or add silence, at either end of the track on the stick. The file itself isn't changed. A track that would be copied is encoded instead." }),
-        h("div", { class: "edges-form" },
-          h("span"), h("span", { class: "lbl", text: "Cut (s)" }), h("span", { class: "lbl", text: "Add silence (s)" }),
-          h("span", { class: "lbl", text: "Start" }), f.cutStart, f.padStart,
-          h("span", { class: "lbl", text: "End" }), f.cutEnd, f.padEnd),
+        h("p", { text: "Cut audio away, or add silence, at either end of the track on the stick. The file itself isn't changed; a track that would be copied is encoded instead." }),
+        h("div", { class: "fade-panels" }, ps.el, pe.el),
+        h("div", { class: "key-listen" }, status),
         err,
+        es.length > 1 ? h("p", { class: "st-note", text: `Apply gives all ${es.length} tracks what you set${mixed ? "; where they differ and you leave it, each keeps its own" : ""}. The pictures show the first.` }) : null,
       ],
       buttons: [
-        h("button", { type: "button", class: "btn left", text: "Back to as it is", onclick: reset }),
+        h("button", { type: "button", class: "btn left", text: "Back to as it is", onclick: () => { ps.reset(); pe.reset(); } }),
         h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal }),
         h("button", { type: "button", class: "btn primary", text: "Apply", onclick: apply }),
       ],
+      onClose: () => {
+        clearInterval(ticker);
+        cancelAnimationFrame(raf);
+        if (!applied) pv.restore((e) => api.playerShape(shapeArgs(e)).catch(() => {}));
+      },
     });
-    f.cutStart.focus();
-    for (const input of Object.values(f)) input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } });
+    tick();
+    $("edge-cutStart").focus();
   }
 
   // ---- key: the track higher or lower, at the same speed --------------------------------------
@@ -1098,30 +1387,19 @@
   }
 
   // ---- fades: in at the start, out at the end ------------------------------------------------
-  const secsText = (x) => String(Math.round(x * 10) / 10);
   function fadeTitle(e) {
     const f = R.fades(e);
     if (f.fadeIn && f.fadeOut) return `Fades in over ${secsText(f.fadeIn)} s and out over ${secsText(f.fadeOut)} s`;
     if (f.fadeIn) return `Fades in over ${secsText(f.fadeIn)} s`;
     return `Fades out over ${secsText(f.fadeOut)} s`;
   }
-  const SVG = "http://www.w3.org/2000/svg";
-  const sv = (tag, attrs) => {
-    const el = document.createElementNS(SVG, tag);
-    for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
-    return el;
-  };
-  /** The live shape of an entry for the player: its cuts, and these fades. */
-  function shapeArgs(e, f) {
-    const x = R.edges(e);
-    return { duration: track(e.trackId).duration || 0, cutStart: x.cutStart, cutEnd: x.cutEnd, fadeIn: f.fadeIn, fadeOut: f.fadeOut };
-  }
 
   /**
-   * Fades of the selected entries: one panel for each end, with the curve
-   * over its first or last half minute, a slider, and a button to hear it.
-   * Moving a slider changes what plays as it plays; the player bar stays
-   * usable, so seeking keeps the fades being tried.
+   * Fades of the selected entries: one panel for each end, with the
+   * waveform of its first or last half minute turned down by the fade, the
+   * curve, a slider, and a button to hear it. Moving a slider changes what
+   * plays as it plays; the player bar stays usable, so seeking keeps the
+   * fades being tried.
    */
   function fadeDialog(ids) {
     const p = pl();
@@ -1139,23 +1417,15 @@
     const len = end - start;
     const MAX = Math.max(1, Math.min(30, Math.floor(len)));
     const WIN = Math.min(30, len);
-    const pp = S.player;
-    const playingHere = () => !!pp.entryId && pp.playlistId === p.id && es.some((e) => e.id === pp.entryId);
-    const wasPlaying = playingHere();
-    let startedHere = false;
-    let fromSource = playingHere() && pp.from !== "cache";
-    let applied = false;
     const now = () => ({ fadeIn: fin, fadeOut: fout });
+    const pv = previewer(p, es, () => ({ shape: now() }));
+    let applied = false;
 
     function panel(which) {
       const isIn = which === "in";
-      const W = 300;
-      const H = 64;
-      const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, class: "fade-svg", preserveAspectRatio: "none", "aria-hidden": "true" });
-      const area = sv("path", { class: "fade-area" });
+      const strip = waveStrip(t0, "fade-wave");
       const line = sv("path", { class: "fade-line" });
-      const head = sv("line", { class: "fade-head", y1: "0", y2: String(H) });
-      svg.append(area, line, head);
+      strip.layers.append(line);
       const slider = h("input", { type: "range", min: "0", max: String(MAX), step: "0.5", value: String(isIn ? fin : fout), id: `fade-${which}`, "aria-label": isIn ? "Fade in, seconds" : "Fade out, seconds" });
       const num = h("input", { type: "number", class: "input secs", min: "0", max: String(MAX), step: "0.1", value: secsText(isIn ? fin : fout), "aria-label": isIn ? "Fade in, seconds" : "Fade out, seconds" });
       const hear = h("button", { type: "button", class: "btn small" }, icon("play"), isIn ? "Hear the start" : "Hear the end");
@@ -1173,31 +1443,26 @@
       slider.addEventListener("input", () => set(Number(slider.value), slider));
       num.addEventListener("input", () => { if (num.value !== "" && Number.isFinite(Number(num.value))) set(Number(num.value), num); });
       hear.addEventListener("click", () => {
-        startedHere = startedHere || !wasPlaying;
-        fromSource = true;
-        const at = isIn ? start : Math.max(start, end - fout - 3);
-        const e = playingHere() ? p.entries.find((x) => x.id === pp.entryId) : e0;
-        playEntry(e.id, p.id, at, { source: true, shape: now() });
+        const e = pv.playingHere() ? pv.current() : e0;
+        pv.play(e, isIn ? start : Math.max(start, end - fout - 3));
       });
       function draw() {
         const f = isIn ? fin : fout;
+        const g = (t) => (!f ? 1 : isIn ? R.fadeCurve((t - start) / f) : R.fadeCurve((end - t) / f));
+        strip.draw(from, from + WIN, g);
         const pts = [];
         for (let i = 0; i <= 60; i++) {
-          const t = (i / 60) * WIN;
-          const g = !f ? 1 : isIn ? R.fadeCurve(t / f) : R.fadeCurve((WIN - t) / f);
-          pts.push(`${((i / 60) * W).toFixed(1)},${(H - 4 - g * (H - 12)).toFixed(1)}`);
+          const t = from + (i / 60) * WIN;
+          pts.push(`${strip.x(t).toFixed(1)},${(strip.H - 3 - g(t) * (strip.H - 8)).toFixed(1)}`);
         }
         line.setAttribute("d", `M${pts.join(" L")}`);
-        area.setAttribute("d", `M0,${H} L${pts.join(" L")} L${W},${H} Z`);
-        const t = playingHere() ? sourcePos(p.entries.find((x) => x.id === pp.entryId)) - from : -1;
-        head.style.display = t >= 0 && t <= WIN ? "" : "none";
-        if (t >= 0 && t <= WIN) { head.setAttribute("x1", String((t / WIN) * W)); head.setAttribute("x2", String((t / WIN) * W)); }
+        strip.head(pv.playingHere() ? sourcePos(pv.current()) : null);
       }
       draw();
       const el = h("section", { class: `fade-panel ${which}` },
         h("div", { class: "fade-top" }, h("h3", { text: isIn ? "Fade in" : "Fade out" }), h("span", { class: "fade-val" }, num, "s")),
-        svg, axis, slider, hear);
-      return { el, draw };
+        strip.svg, axis, slider, hear);
+      return { el, draw, set };
     }
 
     let raf = 0;
@@ -1205,12 +1470,7 @@
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
-        if (!playingHere()) return;
-        const e = p.entries.find((x) => x.id === pp.entryId);
-        if (!fromSource) {
-          fromSource = true;
-          playEntry(e.id, p.id, sourcePos(e), { source: true, shape: now() });
-        } else api.playerShape(shapeArgs(e, now())).catch(() => {});
+        pv.update((e) => api.playerShape(shapeArgs(e, now())).catch(() => {}));
       });
     }
     const pin = panel("in");
@@ -1219,9 +1479,9 @@
     function tick() {
       pin.draw();
       pout.draw();
-      const t = playingHere() ? track(p.entries.find((e) => e.id === pp.entryId).trackId) : null;
+      const t = pv.playingHere() ? track(pv.current().trackId) : null;
       status.textContent = DEMO ? "The demo plays no sound; in the app, the fades change as it plays."
-        : t ? `${t.title || t.filename}, ${clock(pp.pos)}. Move a slider and hear it change; the player below works as usual.`
+        : t ? `${t.title || t.filename}, ${clock(S.player.pos)}. Move a slider and hear it change; the player below works as usual.`
           : "Hear the start or the end; moving a slider changes it as it plays.";
     }
     const ticker = setInterval(() => { if (document.contains(status)) tick(); }, 250);
@@ -1246,22 +1506,17 @@
         h("p", { text: "Fade the track in at its start and out at its end, after any cut. Only the stick's copy changes; the file itself isn't touched." }),
         h("div", { class: "fade-panels" }, pin.el, pout.el),
         h("div", { class: "key-listen" }, status),
-        mixed || es.length > 1 ? h("p", { class: "st-note", text: `Apply gives all ${es.length} tracks these fades${mixed ? " (they differ now)" : ""}; the curves show the first.` }) : null,
+        mixed || es.length > 1 ? h("p", { class: "st-note", text: `Apply gives all ${es.length} tracks these fades${mixed ? " (they differ now)" : ""}; the pictures show the first.` }) : null,
       ],
       buttons: [
-        h("button", { type: "button", class: "btn left", text: "No fades", onclick: () => { fin = 0; fout = 0; for (const w of ["in", "out"]) { $(`fade-${w}`).value = "0"; } for (const n of document.querySelectorAll(".fade-val input")) n.value = "0"; pin.draw(); pout.draw(); live(); } }),
+        h("button", { type: "button", class: "btn left", text: "No fades", onclick: () => { pin.set(0); pout.set(0); } }),
         h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal }),
         h("button", { type: "button", class: "btn primary", text: "Apply", onclick: apply }),
       ],
       onClose: () => {
         clearInterval(ticker);
         cancelAnimationFrame(raf);
-        if (applied) return;
-        if (startedHere && !wasPlaying) stopPlayback();
-        else if (playingHere() && fromSource) {
-          const e = p.entries.find((x) => x.id === pp.entryId);
-          api.playerShape(shapeArgs(e, R.fades(e))).catch(() => {});
-        }
+        if (!applied) pv.restore((e) => api.playerShape(shapeArgs(e)).catch(() => {}));
       },
     });
     tick();
@@ -1680,6 +1935,20 @@
   }
 
   // ---- rendering: player and display --------------------------------------------------------
+  // What happens when a playlist track ends, in the order the button steps through.
+  const REPEAT = {
+    off: { label: "Play & stop", says: "plays to the end of the playlist, then stops", next: "one", icon: "repeat" },
+    one: { label: "Repeat one song", says: "plays this song again and again", next: "all", icon: "repeatOne" },
+    all: { label: "Repeat playlist", says: "goes back to the first track after the last", next: "off", icon: "repeat" },
+  };
+  function stepRepeat() {
+    const pp = S.player;
+    pp.repeat = REPEAT[pp.repeat].next;
+    saveSetting("repeat", pp.repeat);
+    renderPlayer();
+    renderDisplay();
+    toast(`${REPEAT[pp.repeat].label}: ${REPEAT[pp.repeat].says}.`);
+  }
   function renderPlayer() {
     const pp = S.player;
     const p = pp.entryId ? pl(pp.playlistId) : null;
@@ -1705,7 +1974,13 @@
       h("div", { class: "pad" },
         h("button", { type: "button", class: "pbtn", "aria-label": "Previous", title: "Previous", disabled: !t, onclick: prevTrack }, icon("prev")),
         playBtn,
-        h("button", { type: "button", class: "pbtn", "aria-label": "Next", title: one ? "A song from the library plays on its own" : "Next", disabled: !t || one, onclick: () => nextTrack(false) }, icon("next"))),
+        h("button", { type: "button", class: "pbtn", "aria-label": "Next", title: one ? "A song from the library plays on its own" : "Next", disabled: !t || one, onclick: () => nextTrack(false) }, icon("next")),
+        h("button", {
+          type: "button", class: `pbtn repeat${pp.repeat !== "off" ? " on" : ""}`, id: "repeat",
+          "aria-label": `Repeat: ${REPEAT[pp.repeat].label}`, "aria-pressed": String(pp.repeat !== "off"),
+          title: one ? "A song from the library plays once" : `${REPEAT[pp.repeat].label}: ${REPEAT[pp.repeat].says}. Click for ${REPEAT[REPEAT[pp.repeat].next].label.toLowerCase()} (R).`,
+          disabled: one, onclick: stepRepeat,
+        }, icon(REPEAT[pp.repeat].icon))),
       h("div", { class: "np" }, h("div", { class: "np-t", text: t ? t.title || t.filename : "Nothing playing" }), h("div", { class: "np-s", text: sub })),
       h("div", { class: "seek" }, h("span", { id: "t-pos", text: t ? clock(pp.pos) : "0:00" }), seek, h("span", { id: "t-dur", text: t ? clock(pp.dur) : "0:00" })),
       h("label", { class: `aos${one ? " off" : ""}` }, aos, h("span", { text: "As on the stick" }), h("small", { text: one ? "Songs from the library play as they are." : aosCaption(e) })),
@@ -1775,6 +2050,7 @@
       const w = Math.max(2, String(p.entries.length).length);
       main = `${pp.playing ? "PLAY" : "PAUSE"} ${pad2(i + 1, w)}-${pad2(p.entries.length, w)}`;
       time = clock(pp.pos);
+      unit = pp.repeat === "one" ? "RPT1" : pp.repeat === "all" ? "RPT" : "";
       sub = `${t.title || t.filename}${t.artist ? `, ${t.artist}` : ""}`;
     } else {
       const p = pl() || { name: "", entries: [] };
@@ -2408,12 +2684,13 @@
     const t = track(e.trackId);
     if (!t.exists) { toast(`${t.title || t.filename} can't play: the file isn't where the playlist says. Use Locate to find it.`); return; }
     const k = opts.key || R.key(e);
-    const x = R.edges(e);
+    const x = opts.edges || R.edges(e);
     const f = opts.shape || R.fades(e);
-    // From its cut start to its cut end, faded and in its key, as on the stick.
+    // As on the stick: the silence before it (from its start), its cut start
+    // to its cut end, faded and in its key, then the silence after it.
     const args = {
       trackId: t.id, token: entryId, from, gainDb: 0, recipe: null, pitch: k.pitch, keepFormants: k.keepFormants,
-      cutStart: x.cutStart, cutEnd: x.cutEnd, fadeIn: f.fadeIn, fadeOut: f.fadeOut,
+      cutStart: x.cutStart, cutEnd: x.cutEnd, padStart: x.padStart, padEnd: x.padEnd, fadeIn: f.fadeIn, fadeOut: f.fadeOut,
     };
     if (S.player.asOnStick && !opts.source) {
       const it = stickItem(plId, entryId);
@@ -2438,7 +2715,12 @@
     const pp = S.player;
     if (!pp.token || ev.token !== pp.token) return;
     // A song from the library is one and done; a playlist goes on.
-    if (ev.state === "ended") { if (pp.trackId) stopPlayback(); else nextTrack(true); return; }
+    if (ev.state === "ended") {
+      if (pp.trackId) stopPlayback();
+      else if (pp.repeat === "one") playEntry(pp.entryId, pp.playlistId);
+      else nextTrack(true);
+      return;
+    }
     if (ev.state === "error") { toast(ev.error || "Playback stopped."); stopPlayback(); return; }
     if (ev.state === "stopped") return;
     pp.pos = ev.pos;
@@ -2470,6 +2752,11 @@
     const i = p.entries.findIndex((e) => e.id === pp.entryId);
     for (let k = i + 1; k < p.entries.length; k++) {
       if (track(p.entries[k].trackId).exists) return playEntry(p.entries[k].id, p.id);
+    }
+    // Past the last track: round again, or stop.
+    if (pp.repeat === "all") {
+      const first = p.entries.find((e) => track(e.trackId).exists);
+      if (first) return playEntry(first.id, p.id);
     }
     if (auto) stopPlayback();
   }
@@ -2945,6 +3232,7 @@
     if (mod && k === "y") { e.preventDefault(); redo(); return; }
     if (mod && k === "o") { e.preventDefault(); addFiles(false); return; }
     if (e.key === " " && !e.target.closest("button")) { e.preventDefault(); togglePlay(); return; }
+    if (k === "r" && !mod && !e.altKey && !S.player.trackId) { e.preventDefault(); stepRepeat(); return; }
     if (S.view !== "playlist") return;
     const inList = document.activeElement === $("list") || document.activeElement === document.body;
     if (!inList) return;
@@ -3118,6 +3406,7 @@
     applyTheme();
     try { Object.assign(S.cols, JSON.parse(st.columns || "{}")); } catch { /* keep the defaults */ }
     if (st.volume) S.player.volume = Number(st.volume) || 0.8;
+    if (REPEAT[st.repeat]) S.player.repeat = st.repeat;
     for (const t of d.tracks) putTrack({ ...t });
     S.playlists = clone(d.playlists);
     S.profiles = clone(d.profiles);
@@ -3148,7 +3437,7 @@
     persist();
     scheduleWork();
     // For the app's self-test (tests/app_e2e.py) and for poking around in the inspector.
-    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, seekTo, refreshSticks, holder, selectSet, openLayout, layoutData, setView, lib, toggleTags, ready: true };
+    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, edgesDialog, seekTo, refreshSticks, holder, selectSet, openLayout, layoutData, setView, lib, toggleTags, ready: true };
     if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Fatstick to get it back.");
     if (!DEMO) {
       stickPoll = setInterval(() => { if (!(S.sync && S.sync.running)) refreshSticks(true); }, 3000);

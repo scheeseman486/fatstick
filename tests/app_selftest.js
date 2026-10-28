@@ -194,6 +194,23 @@
     check("the fades change while it plays, and a seek keeps it playing", !!on && !S.player.error && S.player.entryId === p.entries[3].id, `position ${S.player.pos}`);
     [...document.querySelectorAll("#modal .btn")].find((b) => b.textContent === "Cancel").click();
     check("Cancel leaves the entry's fades", p.entries[3].fadeIn === 2 && p.entries[3].fadeOut === 3 && !document.body.classList.contains("modal-player"));
+    // The start and end dialog: its waveform comes from the file, and the
+    // silence being tried is heard before the track (the position waits at
+    // the cut start while it plays).
+    A.edgesDialog([p.entries[0].id]);
+    const wave = await until(() => (document.querySelector(".edge-panel.start .wave").getAttribute("d") || "").length > 100 && document.querySelector(".edge-panel.start .wave"), 15000);
+    check("the start and end dialog draws the track's waveform", !!wave);
+    const padIn = document.getElementById("edge-padStart");
+    padIn.value = "1.5";
+    padIn.dispatchEvent(new Event("input", { bubbles: true }));
+    [...document.querySelectorAll("#modal .btn")].find((b) => b.textContent === "Hear the start").click();
+    await until(() => S.player.entryId === p.entries[0].id && S.player.playing, 10000);
+    await sleep(900);
+    const waited = S.player.pos;
+    const went = await until(() => S.player.pos > 2.4, 10000);
+    check("hearing the start plays the silence being tried, then the track from its cut", Math.abs(waited - 2) < 0.15 && !!went, `at 0.9 s: ${waited}; then ${S.player.pos}`);
+    [...document.querySelectorAll("#modal .btn")].find((b) => b.textContent === "Cancel").click();
+    check("Cancel leaves the entry's start and end", !p.entries[0].padStart && p.entries[0].cutStart === 2 && !S.player.entryId);
     A.stopPlayback();
   } catch (e) {
     check("no exception", false, String((e && e.stack) || e));

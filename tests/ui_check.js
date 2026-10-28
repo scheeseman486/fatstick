@@ -225,8 +225,26 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   // 1.5 s of silence at its end. It's encoded rather than copied.
   await p.locator('#list .row').nth(1).click();
   await p.keyboard.press('e');
+  check('E opens the start and end, with a panel for each end', /^Start and end of /.test(await p.locator('#modal-title').textContent()) && (await p.locator('.edge-panel').count()) === 2);
+  check('the player bar stays usable while it is open', await p.evaluate(() => document.body.classList.contains('modal-player')));
+  // Dragging on the waveform sets the cut there.
+  const waveBox = await p.locator('.edge-panel.start .wave-svg').boundingBox();
+  await p.mouse.move(waveBox.x + waveBox.width * 0.2, waveBox.y + waveBox.height / 2);
+  await p.mouse.down();
+  await p.mouse.move(waveBox.x + waveBox.width * 0.1, waveBox.y + waveBox.height / 2, { steps: 4 });
+  await p.mouse.up();
+  const dragged = Number(await p.locator('#edge-cutStart').inputValue());
+  check('dragging on the waveform moves the cut', dragged > 2 && dragged < 4.5, String(dragged));
+  check('the waveform is drawn, faint where it is cut', ((await p.locator('.edge-panel.start .wave').getAttribute('d')) || '').length > 100 && ((await p.locator('.edge-panel.start .wave-on').getAttribute('d')) || '').length > 100);
   await p.locator('#edge-cutStart').fill('2');
   await p.locator('#edge-padEnd').fill('1.5');
+  check('the silence shows beside the end', /1.5 s/.test(await p.locator('.edge-panel.end .edge-gap').textContent()) && /1.5 s of silence after/.test(await p.locator('.edge-panel.end .edge-sum').textContent()));
+  await p.getByRole('button', { name: 'Hear the end' }).click();
+  await p.waitForTimeout(100);
+  const heardEnd = await p.evaluate(() => ({ pos: Fatstick.app.S.player.pos, dur: Fatstick.app.S.player.dur, row: Fatstick.app.S.player.entryId === Fatstick.app.pl().entries[1].id }));
+  check('"Hear the end" plays the last seconds of it', heardEnd.row && Math.abs(heardEnd.pos - (heardEnd.dur - 5)) < 0.6, JSON.stringify(heardEnd));
+  await p.screenshot({ path: `${out}/edges.png` });
+  await p.evaluate(() => Fatstick.app.stopPlayback());
   await p.getByRole('button', { name: 'Apply' }).click();
   const edgeCell = await p.locator('#list .row').nth(1).locator('.c-edges').textContent();
   check('the start / end column shows the cut and the silence', edgeCell === '−2 / +1.5 s', edgeCell);
@@ -530,6 +548,35 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.locator('#modal .btn.primary').click();
     check('"No fades" takes them off', !(await p.evaluate((id) => { const e = Fatstick.app.pl().entries.find((x) => x.id === id); return e.fadeIn || e.fadeOut; }, fid)) && (await p.locator('.c-fades').count()) === 0);
     await p.keyboard.press('Control+z');
+    await p.evaluate(() => Fatstick.app.stopPlayback());
+  }
+
+  // 29. Repeat: play & stop, repeat one song, repeat playlist, from the player bar.
+  {
+    await p.locator('[data-pl="p-road"]').click();
+    const mode = () => p.locator('#repeat').getAttribute('aria-label');
+    check('repeat starts as play & stop', (await mode()) === 'Repeat: Play & stop' && (await p.locator('#repeat').getAttribute('aria-pressed')) === 'false');
+    const ends = async () => {
+      await p.evaluate(() => { const A = Fatstick.app; A.seekTo(A.S.player.dur - 0.3); });
+      await p.waitForTimeout(900);
+      return p.evaluate(() => ({ id: Fatstick.app.S.player.entryId, pos: Fatstick.app.S.player.pos }));
+    };
+    const ids = await p.evaluate(() => Fatstick.app.pl().entries.filter((e) => Fatstick.app.track(e.trackId).exists).map((e) => e.id));
+    await p.evaluate((id) => Fatstick.app.playEntry(id), ids[ids.length - 1]);
+    check('play & stop: the last track ends, and that is all', !(await ends()).id);
+    await p.locator('#repeat').click();
+    check('one click: repeat one song', (await mode()) === 'Repeat: Repeat one song');
+    await p.evaluate((id) => Fatstick.app.playEntry(id), ids[2]);
+    const again = await ends();
+    check('repeat one song plays it again from its start', again.id === ids[2] && again.pos < 2, JSON.stringify(again));
+    check('the display says so while it plays', /RPT1/.test(await p.locator('#disp-unit').textContent()));
+    await p.locator('#repeat').click();
+    check('two clicks: repeat playlist', (await mode()) === 'Repeat: Repeat playlist' && (await p.locator('#repeat').getAttribute('aria-pressed')) === 'true');
+    await p.evaluate((id) => Fatstick.app.playEntry(id), ids[ids.length - 1]);
+    check('repeat playlist goes from the last track back to the first', (await ends()).id === ids[0]);
+    await p.screenshot({ path: `${out}/repeat.png` });
+    await p.keyboard.press('r');
+    check('R steps it round to play & stop', (await mode()) === 'Repeat: Play & stop');
     await p.evaluate(() => Fatstick.app.stopPlayback());
   }
 

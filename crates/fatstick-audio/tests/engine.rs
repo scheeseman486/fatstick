@@ -411,3 +411,16 @@ fn render_fades_in_and_out() {
     assert!(!plain.recipe(&src).contains("fade"));
     assert!(render::fade_curve(0.0) == 0.0 && (render::fade_curve(0.5) - 0.5).abs() < 1e-12 && render::fade_curve(1.0) == 1.0);
 }
+
+#[test]
+fn peaks_draw_the_loud_and_the_quiet() {
+    let Some(t) = tools() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let f = dir.path().join("half.flac");
+    // A second of silence, then a second at half scale.
+    ff(&["-f", "lavfi", "-i", "aevalsrc=if(lt(t\\,1)\\,0\\,0.5*sin(2*PI*440*t))|if(lt(t\\,1)\\,0\\,0.5*sin(2*PI*440*t)):s=44100:d=2", "-c:a", "flac", &f.display().to_string()]);
+    let p = fatstick_audio::decode::peaks(&t, &f, 0.05).unwrap();
+    assert!((39..=41).contains(&p.len()), "one per 50 ms: {}", p.len());
+    assert!(p[..19].iter().all(|&x| x == 0), "silent first: {:?}", &p[..19]);
+    assert!(p[21..].iter().all(|&x| (120..=135).contains(&x)), "then half scale: {:?}", &p[21..]);
+}

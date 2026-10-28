@@ -55,6 +55,7 @@
       pause: () => invoke("player_pause"),
       playerKey: (pitch, keepFormants) => invoke("player_key", { pitch, keepFormants }),
       playerShape: (x) => invoke("player_shape", x),
+      trackPeaks: (trackId) => invoke("track_peaks", { trackId }),
       resume: () => invoke("player_resume"),
       seek: (pos) => invoke("player_seek", { pos }),
       stop: () => invoke("player_stop"),
@@ -286,6 +287,28 @@
       },
       async playerKey() {},
       async playerShape() {},
+      /** A made-up waveform for the demo: a quiet start, a body that moves
+       * with the bars, and a fade at the end. The same for a track each time. */
+      async trackPeaks(id) {
+        const t = tracks.get(id);
+        const step = 0.05;
+        const n = Math.max(1, Math.round((t ? t.duration : 180) / step));
+        let seed = [...String(id)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+        const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+        const intro = 1.5 + rnd() * 6;
+        const outro = 3 + rnd() * 8;
+        const peaks = [];
+        let swell = 0.7;
+        for (let i = 0; i < n; i++) {
+          const sec = i * step;
+          if (i % 40 === 0) swell = 0.45 + rnd() * 0.5;
+          const beat = 0.4 + 0.6 * Math.abs(Math.sin(sec * Math.PI * 2)) ** 3;
+          const shape = Math.min(1, sec / intro) * Math.min(1, Math.max(0, (n * step - sec) / outro));
+          const lead = sec < 0.4 ? 0 : 1;
+          peaks.push(Math.round(255 * Math.min(1, lead * shape * swell * beat * (0.7 + rnd() * 0.3))));
+        }
+        return { step, peaks };
+      },
       async pause() { P.playing = false; if (P.audio) P.audio.pause(); pev("paused"); },
       async resume() { P.playing = true; if (P.audio) P.audio.play().catch(() => {}); pev("playing"); },
       async seek(pos) { P.pos = pos; if (P.audio) P.audio.currentTime = pos; pev(P.playing ? "playing" : "paused"); },

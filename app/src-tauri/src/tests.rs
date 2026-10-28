@@ -330,7 +330,7 @@ fn player_plays_seeks_and_ends() {
     assert!((1.7..3.5).contains(&took), "real time: {took}");
     assert!(max_pos > 1.5);
     // Seeking near the end ends sooner.
-    p.send(crate::player::Cmd::Play { path: f.clone(), from: 0.0, gain_db: -6.0, duration: 2.0, token: "e2".into(), key: Some(fatstick_audio::stretch::Key { semitones: 3.0, keep_formants: true }), shape: crate::player::Shape { start: 0.0, end: 1.5, fade_in: 0.5, fade_out: 0.5 } });
+    p.send(crate::player::Cmd::Play { path: f.clone(), from: 0.0, gain_db: -6.0, duration: 2.0, token: "e2".into(), key: Some(fatstick_audio::stretch::Key { semitones: 3.0, keep_formants: true }), shape: crate::player::Shape { start: 0.0, end: 1.5, fade_in: 0.5, fade_out: 0.5, ..Default::default() } });
     std::thread::sleep(std::time::Duration::from_millis(200));
     p.send(crate::player::Cmd::Seek(1.6));
     let start = std::time::Instant::now();
@@ -342,7 +342,7 @@ fn player_plays_seeks_and_ends() {
     }
     assert!(start.elapsed().as_secs_f64() < 1.2);
     // A cut start: playing and seeking start there, not before it.
-    p.send(crate::player::Cmd::Play { path: f, from: 0.0, gain_db: 0.0, duration: 2.0, token: "e3".into(), key: None, shape: crate::player::Shape { start: 1.0, ..Default::default() } });
+    p.send(crate::player::Cmd::Play { path: f.clone(), from: 0.0, gain_db: 0.0, duration: 2.0, token: "e3".into(), key: None, shape: crate::player::Shape { start: 1.0, ..Default::default() } });
     let first = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
     assert!(first.token == "e3" && first.pos >= 1.0, "{} {}", first.token, first.pos);
     p.send(crate::player::Cmd::Seek(0.2));
@@ -353,6 +353,17 @@ fn player_plays_seeks_and_ends() {
         }
     };
     assert!(seeked.state != "ended" && (1.0..1.2).contains(&seeked.pos), "{} {}", seeked.state, seeked.pos);
+    // Silence added before and after: heard, so the 1.5 s from the cut start take 2.5 s.
+    p.send(crate::player::Cmd::Play { path: f.clone(), from: 0.0, gain_db: 0.0, duration: 2.0, token: "e4".into(), key: None, shape: crate::player::Shape { start: 0.5, pad_start: 0.6, pad_end: 0.4, ..Default::default() } });
+    let start = std::time::Instant::now();
+    loop {
+        let e = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        if e.token == "e4" && e.state == "ended" {
+            break;
+        }
+    }
+    let took = start.elapsed().as_secs_f64();
+    assert!((2.3..3.6).contains(&took), "with the silences: {took}");
     p.send(crate::player::Cmd::Stop);
 }
 

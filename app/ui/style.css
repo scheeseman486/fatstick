@@ -336,10 +336,34 @@ body.modal-player .player { position: relative; z-index: 60; }
 .fade-top h3 { margin: 0; font-size: 14px; font-weight: 600; }
 .fade-val { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--ink-2); }
 .fade-val .input.secs { width: 4.6em; min-width: 0; height: 26px; }
-.fade-svg { width: 100%; height: 64px; display: block; border-radius: 3px; background: var(--sheet); }
-.fade-area { fill: var(--accent-soft); }
-.fade-line { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
-.fade-head { stroke: var(--ink); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+/* A waveform strip: faint where the track is cut or turned down, full where it plays. */
+.wave-svg { width: 100%; height: 72px; display: block; border-radius: 3px; background: var(--sheet); }
+.wave { fill: none; stroke: var(--ink-3); stroke-opacity: 0.35; stroke-width: 1.3; vector-effect: non-scaling-stroke; }
+.wave-on { fill: none; stroke: var(--accent); stroke-width: 1.3; vector-effect: non-scaling-stroke; }
+.wave-head { stroke: var(--ink); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.fade-line { fill: none; stroke: var(--accent-strong); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+/* The start and end: the cut on the waveform (drag it), and the silence added beside it. */
+.edge-strip { display: flex; gap: 6px; align-items: stretch; }
+.edge-strip .wave-svg { flex: 1 1 0; min-width: 0; width: 0; cursor: ew-resize; touch-action: none; }
+.fade-panel { min-width: 0; }
+.edge-cut { fill: var(--ink-3); fill-opacity: 0.14; }
+.edge-handle { stroke: var(--warn); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.edge-fade { fill: none; stroke: var(--accent-strong); stroke-width: 1.2; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.edge-gap {
+  flex: 0 0 54px; display: grid; place-content: center; gap: 1px; text-align: center;
+  border: 1px dashed var(--rule); border-radius: 3px; color: var(--ink-3); font-size: 11px;
+}
+.edge-gap strong { font-size: 12.5px; font-weight: 600; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.edge-gap.on { border-style: solid; border-color: var(--rule); background: repeating-linear-gradient(135deg, var(--sheet) 0 5px, var(--pane) 5px 10px); color: var(--ink-2); }
+.edge-gap.on strong { color: var(--ink); }
+.edge-axis.start .fade-axis { margin-left: 60px; }
+.edge-axis.end .fade-axis { margin-right: 60px; }
+.edge-sum { min-width: 0; font-size: 12.5px; color: var(--ink-2); text-align: right; }
+.edge-rows { display: grid; grid-template-columns: max-content minmax(0, 1fr) 4.8em max-content; gap: 4px 10px; align-items: center; }
+.edge-rows .lbl { font-size: 13px; color: var(--ink-2); }
+.edge-rows .input.secs { min-width: 0; height: 26px; }
+.edge-rows input[type="range"] { width: 100%; margin: 0; }
+.edge-rows input[type="range"].mixed { opacity: 0.45; }
 .fade-axis { display: flex; justify-content: space-between; margin-top: -2px; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .fade-panel input[type="range"] { width: 100%; margin: 2px 0; }
 .fade-panel .btn { justify-self: start; }
@@ -366,8 +390,6 @@ body.modal-player .player { position: relative; z-index: 60; }
 .key-listen { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 12px; border-radius: var(--r-s); background: var(--pane); }
 .key-listen .btn { min-width: 6.5em; }
 .key-status { margin: 0; flex: 1 1 220px; }
-.edges-form { display: grid; grid-template-columns: max-content minmax(0, 9em) minmax(0, 9em); gap: 8px 14px; align-items: center; }
-.edges-form .lbl { font-size: 13px; color: var(--ink-2); }
 .input.secs { width: 100%; min-width: 4.5em; }
 .folders .gap-meta { display: flex; align-items: center; gap: 6px; }
 .folders .gap-meta .input.secs { width: 5.5em; height: 24px; padding: 0 6px; }
@@ -526,6 +548,9 @@ html.framed .player { padding-inline: 2px; }
 .pbtn.play { width: 40px; height: 40px; background: var(--chassis-ink); color: var(--chassis); }
 .pbtn.play:hover:not(:disabled) { background: var(--chassis-ink); opacity: 0.9; }
 .pbtn .ic { width: 18px; height: 18px; }
+/* Repeat: dim when it plays and stops, lit like the display when it repeats. */
+.pbtn.repeat { color: var(--chassis-ink-2); margin-left: 4px; }
+.pbtn.repeat.on { color: var(--disp-bg); background: var(--chassis-2); }
 .np { min-width: 0; }
 .np-t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .np-s { font-size: 12.5px; color: var(--chassis-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

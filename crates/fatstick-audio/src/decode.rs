@@ -2,6 +2,7 @@
 //! stereo PCM at the output device's rate, from any position, with an
 //! optional gain (to hear a track as the next sync will write it).
 
+use std::io::Read;
 use std::path::Path;
 use std::process::{Child, ChildStdout, Stdio};
 
@@ -37,4 +38,37 @@ impl Drop for PcmStream {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+/// How loud a whole file is, for drawing it: the peak of each `step` seconds
+/// (both channels), from 0 to 255. Decoded at a low rate; it's a picture,
+/// not a measurement.
+pub fn peaks(tools: &Tools, path: &Path, step: f64) -> Result<Vec<u8>> {
+    const RATE: u32 = 11025;
+    let per = ((step * RATE as f64).round() as usize).max(1) * 2;
+    let mut pcm = PcmStream::start(tools, path, 0.0, RATE, 0.0)?;
+    let mut raw = vec![0u8; 1 << 16];
+    let (mut carry, mut out) = (Vec::<u8>::new(), Vec::new());
+    let (mut peak, mut n) = (0f32, 0usize);
+    loop {
+        let got = pcm.out.read(&mut raw)?;
+        if got == 0 {
+            break;
+        }
+        carry.extend_from_slice(&raw[..got]);
+        let whole = carry.len() / 4 * 4;
+        for b in carry[..whole].chunks_exact(4) {
+            peak = peak.max(f32::from_le_bytes(b.try_into().unwrap()).abs());
+            n += 1;
+            if n == per {
+                out.push((peak.min(1.0) * 255.0).round() as u8);
+                (peak, n) = (0.0, 0);
+            }
+        }
+        carry.drain(..whole);
+    }
+    if n > 0 {
+        out.push((peak.min(1.0) * 255.0).round() as u8);
+    }
+    Ok(out)
 }
