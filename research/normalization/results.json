@@ -1,0 +1,198 @@
+{
+ "fixed_gain": [
+  {
+   "file": "cbr320",
+   "I_before": -23.4,
+   "truepeak_before": -14.8,
+   "mp3rgain_dI": 3.0,
+   "mp3rgain_pcm_md5": "c1ce235f5755a78c1685382148d001c2",
+   "mp3rgain_decode_errors": "",
+   "mp3rgain_undo_pcm_identical": true,
+   "mp3rgain_undo_file_identical": true,
+   "mp3rgain_undo_frames_identical": true,
+   "mp3gain_dI": 3.0,
+   "mp3gain_pcm_md5": "c1ce235f5755a78c1685382148d001c2",
+   "mp3gain_decode_errors": "",
+   "mp3gain_undo_pcm_identical": true,
+   "mp3gain_undo_file_identical": false,
+   "mp3gain_undo_frames_identical": true,
+   "tools_agree_pcm": true,
+   "amplitude_ratio": 1.41421,
+   "expected_ratio": 1.41421
+  },
+  {
+   "file": "cbr256",
+   "I_before": -23.4,
+   "truepeak_before": -14.8,
+   "mp3rgain_dI": 3.0,
+   "mp3rgain_pcm_md5": "0b8c588987bca345f384613bc9da9491",
+   "mp3rgain_decode_errors": "",
+   "mp3rgain_undo_pcm_identical": true,
+   "mp3rgain_undo_file_identical": true,
+   "mp3rgain_undo_frames_identical": true,
+   "mp3gain_dI": 3.0,
+   "mp3gain_pcm_md5": "0b8c588987bca345f384613bc9da9491",
+   "mp3gain_decode_errors": "",
+   "mp3gain_undo_pcm_identical": true,
+   "mp3gain_undo_file_identical": false,
+   "mp3gain_undo_frames_identical": true,
+   "tools_agree_pcm": true,
+   "amplitude_ratio": 1.41421,
+   "expected_ratio": 1.41421
+  },
+  {
+   "file": "vbr_v0",
+   "I_before": -23.4,
+   "truepeak_before": -14.8,
+   "mp3rgain_dI": 3.0,
+   "mp3rgain_pcm_md5": "004a62b2b10ac62cff228595347be899",
+   "mp3rgain_decode_errors": "",
+   "mp3rgain_undo_pcm_identical": true,
+   "mp3rgain_undo_file_identical": false,
+   "mp3rgain_undo_frames_identical": false,
+   "mp3gain_dI": 3.0,
+   "mp3gain_pcm_md5": "004a62b2b10ac62cff228595347be899",
+   "mp3gain_decode_errors": "",
+   "mp3gain_undo_pcm_identical": true,
+   "mp3gain_undo_file_identical": false,
+   "mp3gain_undo_frames_identical": false,
+   "tools_agree_pcm": true,
+   "amplitude_ratio": 1.41421,
+   "expected_ratio": 1.41421
+  },
+  {
+   "file": "loud320",
+   "I_before": -14.3,
+   "truepeak_before": -5.6,
+   "mp3rgain_dI": 3.0,
+   "mp3rgain_pcm_md5": "5cb600d425dd958aaa1f9050bd5bf02e",
+   "mp3rgain_decode_errors": "",
+   "mp3rgain_undo_pcm_identical": true,
+   "mp3rgain_undo_file_identical": true,
+   "mp3rgain_undo_frames_identical": true,
+   "mp3gain_dI": 3.0,
+   "mp3gain_pcm_md5": "5cb600d425dd958aaa1f9050bd5bf02e",
+   "mp3gain_decode_errors": "",
+   "mp3gain_undo_pcm_identical": true,
+   "mp3gain_undo_file_identical": false,
+   "mp3gain_undo_frames_identical": true,
+   "tools_agree_pcm": true,
+   "amplitude_ratio": 1.41421,
+   "expected_ratio": 1.41421
+  },
+  {
+   "file": "quiet320",
+   "I_before": -37.4,
+   "truepeak_before": -28.8,
+   "mp3rgain_dI": 3.0,
+   "mp3rgain_pcm_md5": "ed127d8f9871972526129181f0f717e9",
+   "mp3rgain_decode_errors": "",
+   "mp3rgain_undo_pcm_identical": true,
+   "mp3rgain_undo_file_identical": true,
+   "mp3rgain_undo_frames_identical": true,
+   "mp3gain_dI": 3.0,
+   "mp3gain_pcm_md5": "ed127d8f9871972526129181f0f717e9",
+   "mp3gain_decode_errors": "",
+   "mp3gain_undo_pcm_identical": true,
+   "mp3gain_undo_file_identical": false,
+   "mp3gain_undo_frames_identical": true,
+   "tools_agree_pcm": true,
+   "amplitude_ratio": 1.41421,
+   "expected_ratio": 1.41421
+  },
+  {
+   "file": "mpeg2_mono",
+   "I_before": -27.7,
+   "truepeak_before": -15.9,
+   "mp3rgain_dI": 3.1,
+   "mp3rgain_pcm_md5": "348c23447d43ddd1a044f18966d595a2",
+   "mp3rgain_decode_errors": "",
+   "mp3rgain_undo_pcm_identical": true,
+   "mp3rgain_undo_file_identical": true,
+   "mp3rgain_undo_frames_identical": true,
+   "mp3gain_dI": 3.1,
+   "mp3gain_pcm_md5": "348c23447d43ddd1a044f18966d595a2",
+   "mp3gain_decode_errors": "",
+   "mp3gain_undo_pcm_identical": true,
+   "mp3gain_undo_file_identical": false,
+   "mp3gain_undo_frames_identical": true,
+   "tools_agree_pcm": true,
+   "amplitude_ratio": 1.41421,
+   "expected_ratio": 1.41421
+  }
+ ],
+ "rg2_track": [
+  {
+   "file": "cbr320",
+   "I_before": -23.4,
+   "I_after": -17.4,
+   "truepeak_after": -8.8,
+   "steps_dB": 6.0,
+   "off_target_dB": 0.6,
+   "rc": 0,
+   "out": [
+    "      Loudness: -23.4 LUFS, Gain: +5.4 dB (4 steps), Peak: 0.1818",
+    "  v cbr320.rg2.mp3 (2298 frames, +6.0 dB)"
+   ]
+  },
+  {
+   "file": "loud320",
+   "I_before": -14.3,
+   "I_after": -17.3,
+   "truepeak_after": -8.6,
+   "steps_dB": -3.0,
+   "off_target_dB": 0.7,
+   "rc": 0,
+   "out": [
+    "      Loudness: -14.3 LUFS, Gain: -3.7 dB (-2 steps), Peak: 0.5233",
+    "  v loud320.rg2.mp3 (2298 frames, -3.0 dB)"
+   ]
+  },
+  {
+   "file": "quiet320",
+   "I_before": -37.4,
+   "I_after": -17.9,
+   "truepeak_after": -9.2,
+   "steps_dB": 19.5,
+   "off_target_dB": 0.1,
+   "rc": 0,
+   "out": [
+    "      Loudness: -37.4 LUFS, Gain: +19.4 dB (13 steps), Peak: 0.0362",
+    "  v quiet320.rg2.mp3 (2298 frames, +19.6 dB)"
+   ]
+  },
+  {
+   "file": "vbr_v0",
+   "I_before": -23.4,
+   "I_after": -17.4,
+   "truepeak_after": -8.8,
+   "steps_dB": 6.0,
+   "off_target_dB": 0.6,
+   "rc": 0,
+   "out": [
+    "      Loudness: -23.4 LUFS, Gain: +5.4 dB (4 steps), Peak: 0.1822",
+    "  v vbr_v0.rg2.mp3 (2298 frames, +6.0 dB)"
+   ]
+  },
+  {
+   "file": "mpeg2_mono",
+   "I_before": -27.7,
+   "I_after": -18.6,
+   "truepeak_after": -6.9,
+   "steps_dB": 9.1,
+   "off_target_dB": -0.6,
+   "rc": 0,
+   "out": [
+    "      Loudness: -27.7 LUFS, Gain: +9.7 dB (6 steps), Peak: 0.1594",
+    "  v mpeg2_mono.rg2.mp3 (2299 frames, +9.0 dB)"
+   ]
+  }
+ ],
+ "reencode_path": {
+  "I_source": -23.4,
+  "gain_applied": 5.4,
+  "I_after_encode": -18.0,
+  "off_target_dB": 0.0,
+  "truepeak": -9.4
+ }
+}
