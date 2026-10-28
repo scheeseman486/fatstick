@@ -26,7 +26,9 @@ GPL version 3 or later.
   folders yourself; the library is for finding and tagging them. Browse by
   your labels, genres, artists, albums and decades, or by what's missing (no
   genre, no labels, file not found); filter by typing; sort by any column;
-  and drag tracks onto a playlist on the left. Built for big folders on
+  and drag tracks onto a playlist on the left. Double-click a track (or
+  press Enter) to hear it on its own: it plays once and the player stops.
+  Shift+Enter or the right-click menu adds it to the open playlist. Built for big folders on
   network drives: the scan reads each file's tags and stream facts (a few
   hundred KB), not every MP3 frame, and fills the library as it goes. A track
   is read in full in the background once it's in a playlist, as how it goes
@@ -46,7 +48,8 @@ GPL version 3 or later.
   sidebar into a search panel. Type a title, an artist, an album, a genre,
   a label, a year or part of a file name: whole-word matches come first,
   then a divider and close ones (a word's start, part of a word, a letter or
-  two off). Drag songs into the playlist, or double-click to add one.
+  two off). Double-click a song to hear it, as in the library; drag songs
+  into the playlist to add them.
 - **Tags in the playlist.** Click a track (or press T) to see its tags under
   it; click again to hide them. "Edit tags…" opens the tag editor there.
 

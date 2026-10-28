@@ -80,7 +80,9 @@
     libProgress: null,
     /** Bumped whenever a track changes, so search indexes know to rebuild. */
     tracksVersion: 0,
-    player: { entryId: null, playlistId: null, playing: false, pos: 0, dur: 0, asOnStick: false, volume: 0.8, silent: false, error: null, from: "source" },
+    /** What plays: a playlist's entry (`entryId`, `playlistId`), or one
+     * song from the library on its own (`trackId`), which plays once. */
+    player: { entryId: null, playlistId: null, trackId: null, token: null, playing: false, pos: 0, dur: 0, asOnStick: false, volume: 0.8, silent: false, error: null, from: "source" },
   };
   const hostTheme = document.documentElement.getAttribute("data-theme");
 
@@ -107,7 +109,7 @@
     lib.refresh();
   }
   const lib = P.librarySetup({
-    S, api, DEMO, track, pl, collator, insertTracks, newPlaylist, putTracks, renderSide, renderDisplay, saveSetting, setView, startTrackDrag,
+    S, api, DEMO, track, pl, collator, insertTracks, newPlaylist, putTracks, renderSide, renderDisplay, saveSetting, setView, startTrackDrag, playTrack,
   });
   /** What a USB stick holds, going by the note its last sync left on it (or,
    * for a stick the OS hasn't mounted, the volume serial that sync recorded):
@@ -1317,12 +1319,13 @@
     const pp = S.player;
     const p = pp.entryId ? pl(pp.playlistId) : null;
     const e = p ? p.entries.find((x) => x.id === pp.entryId) : null;
-    const t = e ? track(e.trackId) : null;
+    const t = e ? track(e.trackId) : pp.trackId ? track(pp.trackId) : null;
+    const one = !!pp.trackId;
     const idx = p && e ? p.entries.indexOf(e) : -1;
     const playBtn = h("button", { type: "button", class: "pbtn play", "aria-label": pp.playing ? "Pause" : "Play", title: pp.playing ? "Pause (Space)" : "Play (Space)", onclick: togglePlay }, icon(pp.playing ? "pause" : "play"));
     const seek = h("input", { type: "range", min: "0", max: String(Math.max(1, Math.round(pp.dur || 1))), step: "1", value: String(Math.round(pp.pos)), "aria-label": "Position", disabled: !t, id: "seek" });
     seek.addEventListener("input", () => seekTo(Number(seek.value)));
-    const aos = h("input", { type: "checkbox", checked: pp.asOnStick, id: "aos" });
+    const aos = h("input", { type: "checkbox", checked: pp.asOnStick, id: "aos", disabled: one });
     aos.addEventListener("change", () => {
       pp.asOnStick = aos.checked;
       if (pp.entryId) playEntry(pp.entryId, pp.playlistId, pp.pos);
@@ -1331,15 +1334,16 @@
     const vol = h("input", { type: "range", min: "0", max: "1", step: "0.01", value: String(pp.volume), "aria-label": "Volume", id: "vol" });
     vol.addEventListener("input", () => { pp.volume = Number(vol.value); api.volume(pp.volume).catch(() => {}); saveSetting("volume", String(pp.volume)); });
     let sub = "Double-click a track, or press Enter, to hear it.";
-    if (t) sub = `${t.artist || "No artist tag"}. ${p.name}, ${idx + 1} of ${p.entries.length}.${pp.silent ? " Demo track, no sound." : ""}`;
+    if (t && one) sub = `${t.artist || "No artist tag"}. From the library, on its own.${pp.silent ? " Demo track, no sound." : ""}`;
+    else if (t) sub = `${t.artist || "No artist tag"}. ${p.name}, ${idx + 1} of ${p.entries.length}.${pp.silent ? " Demo track, no sound." : ""}`;
     fill($("player"), 
       h("div", { class: "pad" },
         h("button", { type: "button", class: "pbtn", "aria-label": "Previous", title: "Previous", disabled: !t, onclick: prevTrack }, icon("prev")),
         playBtn,
-        h("button", { type: "button", class: "pbtn", "aria-label": "Next", title: "Next", disabled: !t, onclick: () => nextTrack(false) }, icon("next"))),
+        h("button", { type: "button", class: "pbtn", "aria-label": "Next", title: one ? "A song from the library plays on its own" : "Next", disabled: !t || one, onclick: () => nextTrack(false) }, icon("next"))),
       h("div", { class: "np" }, h("div", { class: "np-t", text: t ? t.title || t.filename : "Nothing playing" }), h("div", { class: "np-s", text: sub })),
       h("div", { class: "seek" }, h("span", { id: "t-pos", text: t ? clock(pp.pos) : "0:00" }), seek, h("span", { id: "t-dur", text: t ? clock(pp.dur) : "0:00" })),
-      h("label", { class: "aos" }, aos, h("span", { text: "As on the stick" }), h("small", { text: aosCaption(e) })),
+      h("label", { class: `aos${one ? " off" : ""}` }, aos, h("span", { text: "As on the stick" }), h("small", { text: one ? "Songs from the library play as they are." : aosCaption(e) })),
       h("div", { class: "vol" }, icon("volume"), vol),
     );
   }
@@ -1387,6 +1391,11 @@
       count = String(Math.floor(S.sync.pct));
       unit = "%";
       sub = S.sync.msg;
+    } else if (pp.trackId) {
+      const t = track(pp.trackId);
+      main = `${pp.playing ? "PLAY" : "PAUSE"} ${t.title || t.filename}`;
+      time = clock(pp.pos);
+      sub = `${t.title || t.filename}${t.artist ? `, ${t.artist}` : ""}. From the library.`;
     } else if (S.view === "library" && !pp.entryId) {
       ({ main, count, unit, time, sub } = lib.display());
     } else if (S.scan) {
@@ -2003,10 +2012,28 @@
   }
   function stopPlayback() {
     api.stop().catch(() => {});
-    Object.assign(S.player, { entryId: null, playlistId: null, playing: false, pos: 0, dur: 0, silent: false, error: null });
+    Object.assign(S.player, { entryId: null, playlistId: null, trackId: null, token: null, playing: false, pos: 0, dur: 0, silent: false, error: null });
     renderPlayer();
     markPlaying();
     renderDisplay();
+  }
+  /** A song from the library or the search on its own: it plays once, as it
+   * is, and then the player stops. */
+  let playCount = 0;
+  async function playTrack(trackId, from = 0) {
+    const t = track(trackId);
+    if (!t.exists) { toast(`${t.title || t.filename} can't play: its file isn't there.`); return; }
+    const token = `track-${trackId}-${++playCount}`;
+    Object.assign(S.player, { entryId: null, playlistId: null, trackId, token, playing: true, pos: from, dur: t.duration, error: null, silent: DEMO && !t.url, from: "source" });
+    renderPlayer();
+    markPlaying();
+    renderDisplay();
+    try {
+      await api.play({ trackId, token, from, gainDb: 0, recipe: null });
+    } catch (err) {
+      toast(String(err));
+      if (S.player.token === token) stopPlayback();
+    }
   }
   async function playEntry(entryId, plId = S.current, from = 0) {
     const p = pl(plId);
@@ -2022,7 +2049,7 @@
         args.gainDb = it.recipe.kind === "gain" ? it.recipe.steps * R.STEP : it.recipe.gainDb || 0;
       }
     }
-    Object.assign(S.player, { entryId, playlistId: plId, playing: true, pos: from, dur: t.duration, error: null, silent: DEMO && !t.url, from: "source" });
+    Object.assign(S.player, { entryId, playlistId: plId, trackId: null, token: entryId, playing: true, pos: from, dur: t.duration, error: null, silent: DEMO && !t.url, from: "source" });
     renderPlayer();
     markPlaying();
     renderDisplay();
@@ -2036,8 +2063,9 @@
   }
   function onPlayer(ev) {
     const pp = S.player;
-    if (!pp.entryId || ev.token !== pp.entryId) return;
-    if (ev.state === "ended") { nextTrack(true); return; }
+    if (!pp.token || ev.token !== pp.token) return;
+    // A song from the library is one and done; a playlist goes on.
+    if (ev.state === "ended") { if (pp.trackId) stopPlayback(); else nextTrack(true); return; }
     if (ev.state === "error") { toast(ev.error || "Playback stopped."); stopPlayback(); return; }
     if (ev.state === "stopped") return;
     pp.pos = ev.pos;
@@ -2049,7 +2077,8 @@
   }
   function togglePlay() {
     const pp = S.player;
-    if (!pp.entryId) {
+    if (!pp.entryId && !pp.trackId) {
+      if (S.view === "library") { const id = lib.trackToPlay(); if (id) playTrack(id); return; }
       const first = S.focus || pl().entries.find((e) => track(e.trackId).exists)?.id;
       if (first) playEntry(first);
       return;
@@ -2062,6 +2091,7 @@
   }
   function nextTrack(auto) {
     const pp = S.player;
+    if (pp.trackId) return stopPlayback();
     const p = pl(pp.playlistId);
     if (!p) return stopPlayback();
     const i = p.entries.findIndex((e) => e.id === pp.entryId);
@@ -2072,7 +2102,7 @@
   }
   function prevTrack() {
     const pp = S.player;
-    if (pp.pos > 3) return seekTo(0);
+    if (pp.pos > 3 || pp.trackId) return seekTo(0);
     const p = pl(pp.playlistId);
     const i = p.entries.findIndex((e) => e.id === pp.entryId);
     for (let k = i - 1; k >= 0; k--) {
@@ -2087,6 +2117,7 @@
   }
   function markPlaying() {
     if (S.player.playlistId === S.current || !S.player.entryId) renderList();
+    lib.markPlaying();
   }
 
   // ---- adding files ------------------------------------------------------------------------------
@@ -2540,7 +2571,7 @@
     if (mod && k === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (mod && k === "y") { e.preventDefault(); redo(); return; }
     if (mod && k === "o") { e.preventDefault(); addFiles(false); return; }
-    if (e.key === " " && !e.target.closest("button, [role=listbox]:not(#list)")) { e.preventDefault(); togglePlay(); return; }
+    if (e.key === " " && !e.target.closest("button")) { e.preventDefault(); togglePlay(); return; }
     if (S.view !== "playlist") return;
     const inList = document.activeElement === $("list") || document.activeElement === document.body;
     if (!inList) return;
@@ -2740,7 +2771,7 @@
     persist();
     scheduleWork();
     // For the app's self-test (tests/app_e2e.py) and for poking around in the inspector.
-    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, stopPlayback, refreshSticks, holder, selectSet, openLayout, layoutData, setView, lib, toggleTags, ready: true };
+    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, playTrack, stopPlayback, refreshSticks, holder, selectSet, openLayout, layoutData, setView, lib, toggleTags, ready: true };
     if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Playlist2USB to get it back.");
     if (!DEMO) {
       stickPoll = setInterval(() => { if (!(S.sync && S.sync.running)) refreshSticks(true); }, 3000);

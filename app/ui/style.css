@@ -491,6 +491,8 @@ html.framed .player { padding-inline: 2px; }
 .aos { display: grid; grid-template-columns: auto auto; column-gap: 8px; align-items: center; font-size: 13px; cursor: pointer; max-width: 22em; }
 .aos input { accent-color: var(--chassis-ink); }
 .aos small { grid-column: 2; font-size: 12px; color: var(--chassis-ink-2); }
+.aos.off { cursor: default; }
+.aos.off > span { opacity: 0.55; }
 .vol { display: flex; align-items: center; gap: 6px; }
 .vol input { width: 84px; accent-color: var(--chassis-ink); }
 
@@ -633,6 +635,10 @@ html.framed .player { padding-inline: 2px; }
 .lr.sel .c-artist, .lr.sel .c-album, .lr.sel .c-genre, .lr.sel .num { color: inherit; opacity: 0.85; }
 .lr .r { text-align: right; }
 .lr .c-labels { display: flex; gap: 3px; }
+.lr.playing .c-title .t, .sr.playing .sr-t { color: var(--accent-text); font-weight: 600; }
+.lr.sel.playing .c-title .t, .sr.sel.playing .sr-t { color: inherit; }
+.lr .c-title .eq, .sr-t .eq { margin: 0 2px 0 0; align-self: center; flex: none; }
+.sr-t .eq { margin-right: 7px; vertical-align: -1px; }
 .lr .c-labels .tag { display: inline-block; flex: 0 1 auto; min-width: 0; text-overflow: ellipsis; }
 .tag.lbl.more { flex: none; background: var(--chip-bg); color: var(--ink-2); }
 .lr-div { position: absolute; left: 10px; right: 10px; height: 30px; }

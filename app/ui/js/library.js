@@ -634,7 +634,7 @@
           const now = performance.now();
           if (X.lastTap && X.lastTap.id === id && now - X.lastTap.t < 450) {
             X.lastTap = null;
-            addToCurrent(X.sel.has(id) && X.sel.size > 1 ? X.ordered() : [id]);
+            core.playTrack(id);
           } else X.lastTap = { id, t: now };
         },
       });
@@ -647,7 +647,8 @@
       for (let k = Math.min(i, j); k <= Math.max(i, j); k++) out.add(ids[k]);
       return out;
     }
-    /** Arrow keys, Home, End, Ctrl+A, Enter and Escape in a track list. */
+    /** Arrow keys, Home, End, Ctrl+A, Enter (play), Shift+Enter (add to the
+     * open playlist) and Escape in a track list. */
     function listKey(e, X, pageRows) {
       const ids = X.ids();
       if (!ids.length) return false;
@@ -667,7 +668,8 @@
       else if (e.key === "Home") go(0);
       else if (e.key === "End") go(ids.length - 1);
       else if (mod && e.key.toLowerCase() === "a") X.set(new Set(ids), X.focus);
-      else if (e.key === "Enter") addToCurrent(X.ordered());
+      else if (e.key === "Enter" && e.shiftKey) addToCurrent(X.ordered());
+      else if (e.key === "Enter") { const id = X.focus && X.sel.has(X.focus) ? X.focus : X.ordered()[0]; if (id) core.playTrack(id); }
       else if (e.key === "Escape") { if (X.sel.size) X.set(new Set(), null); else if (X.escape) X.escape(); else return false; }
       else return false;
       e.preventDefault();
@@ -684,8 +686,11 @@
       const p = core.pl();
       const others = S.playlists.filter((x) => !p || x.id !== p.id);
       const canTag = ids.some((x) => !whyNot(track(x)));
+      const t = track(id);
       menu({ x: e.clientX, y: e.clientY }, [
-        p ? { label: `Add to ${p.name}`, key: "Enter", action: () => addToCurrent(ids) } : null,
+        { label: "Play", key: "Enter", action: () => core.playTrack(id), disabled: !t.exists },
+        "-",
+        p ? { label: `Add to ${p.name}`, key: "Shift+Enter", action: () => addToCurrent(ids) } : null,
         ...(others.length ? [{ heading: n === 1 ? "Add to playlist" : `Add ${n} tracks to` }, ...others.map((x) => ({ label: x.name, action: () => core.insertTracks(ids, { kind: "playlist", id: x.id }) }))] : []),
         { label: "New playlist from these", action: () => { core.newPlaylist(n === 1 ? titleOf(track(ids[0])) : "From the library", ids); if (S.view === "library") core.setView("playlist"); } },
         "-",
@@ -693,6 +698,24 @@
         X.inLibrary ? null : { label: n === 1 ? "Edit tags…" : `Edit the tags of ${n} tracks…`, action: () => editTagsDialog(ids), disabled: !canTag },
         X.inLibrary ? { label: n === 1 ? "Clean up the file name…" : `Clean up ${n} file names…`, action: () => renameDialog(ids), disabled: !ids.some((x) => !whyNot(track(x), true)) } : null,
       ].filter(Boolean));
+    }
+
+    // ---- playing a song on its own ------------------------------------------------------------
+    /** The equalizer bars beside the song that's playing on its own. */
+    function eqFor(t) {
+      if (S.player.trackId !== t.id) return null;
+      return h("span", { class: `eq${S.player.playing ? "" : " paused"}`, "aria-label": S.player.playing ? "Playing" : "Paused" }, h("i"), h("i"), h("i"));
+    }
+    /** The player started, paused or stopped: mark the song in the lists. */
+    function markPlaying() {
+      if (S.view === "library" && V.inner) renderRows();
+      if (S.searching && SE.root) refreshSearch();
+    }
+    /** Space with nothing playing, in the library: the focused or selected song, or the first. */
+    function trackToPlay() {
+      if (!V.root || !L.ids.length) return null;
+      if (L.focus && L.sel.has(L.focus)) return L.focus;
+      return LX.ordered()[0] || L.ids[0];
     }
 
     // ---- the search panel ------------------------------------------------------------------
@@ -744,7 +767,7 @@
           SE.input,
           h("button", { type: "button", class: "btn quiet small icon", title: "Close the search (Esc)", "aria-label": "Close the search", onclick: closeSearch }, icon("close"))),
         SE.scope, SE.list,
-        h("p", { class: "srch-foot", text: "Drag songs into the playlist, or double-click to add one at the end." }));
+        h("p", { class: "srch-foot", text: "Double-click a song to hear it. Drag songs into the playlist to add them." }));
     }
     function searchRoot() {
       if (!SE.root) buildSearch();
@@ -794,11 +817,11 @@
         const sub = [t.artist, t.album].filter(Boolean).join(", ");
         const on = SE.sel.has(t.id);
         return h("div", {
-          class: `sr${on ? " sel" : ""}${SE.focus === t.id ? " focus" : ""}${close ? " close" : ""}`, role: "option", id: `sr-${t.id}`,
+          class: `sr${on ? " sel" : ""}${SE.focus === t.id ? " focus" : ""}${close ? " close" : ""}${S.player.trackId === t.id ? " playing" : ""}`, role: "option", id: `sr-${t.id}`,
           "aria-selected": String(on), dataset: { tid: t.id }, title: t.path,
         },
         h("div", { class: "sr-txt" },
-          h("span", { class: t.title ? "sr-t" : "sr-t untagged", text: titleOf(t) }),
+          h("span", { class: t.title ? "sr-t" : "sr-t untagged" }, eqFor(t), titleOf(t)),
           sub ? h("span", { class: "sr-s", text: sub }) : null,
           hints.length ? h("span", { class: "sr-hints tags" }, hints) : null),
         h("span", { class: "sr-r" },
@@ -1202,7 +1225,7 @@
     }
     function lcell(c, t) {
       switch (c) {
-        case "title": return h("div", { class: "c c-title" }, h("span", { class: t.title ? "t" : "t untagged", text: titleOf(t) }), t.exists ? null : h("span", { class: "sub", text: "File not found" }));
+        case "title": return h("div", { class: "c c-title" }, eqFor(t), h("span", { class: t.title ? "t" : "t untagged", text: titleOf(t) }), t.exists ? null : h("span", { class: "sub", text: "File not found" }));
         case "track": return h("div", { class: "c r num", text: t.track ? String(t.track) : "" });
         case "year": return h("div", { class: "c r num", text: t.year ? String(t.year) : "" });
         case "time": return h("div", { class: "c r num", text: t.duration ? clock(t.duration) : "" });
@@ -1245,7 +1268,7 @@
         const t = it.t;
         const on = L.sel.has(t.id);
         const r = h("div", {
-          class: `lr${on ? " sel" : ""}${L.focus === t.id ? " focus" : ""}${t.exists ? "" : " missing"}`, role: "option", id: `lr-${t.id}`,
+          class: `lr${on ? " sel" : ""}${L.focus === t.id ? " focus" : ""}${t.exists ? "" : " missing"}${S.player.trackId === t.id ? " playing" : ""}`, role: "option", id: `lr-${t.id}`,
           "aria-selected": String(on), dataset: { tid: t.id }, style: { top: `${i * RH}px` }, title: rel(t.path),
         });
         for (const c of L.cols) r.append(lcell(c, t));
@@ -1314,7 +1337,7 @@
         h("p", { class: "lib-count" },
           L.q.trim() || L.filters.length ? `${n} of ${plural(all, "track")}` : plural(all, "track"),
           n ? `, ${length(dur(L.ids))}` : "",
-          sel.length ? `. ${sel.length} selected, ${clock(dur(sel))}: drag ${sel.length === 1 ? "it" : "them"} onto a playlist on the left.` : ". Drag tracks onto a playlist on the left; double-click adds one to the open playlist."),
+          sel.length ? `. ${sel.length} selected, ${clock(dur(sel))}: drag ${sel.length === 1 ? "it" : "them"} onto a playlist on the left.` : ". Double-click a track to hear it; drag tracks onto a playlist on the left to add them."),
         sel.length ? h("div", { class: "tools" },
           p ? h("button", { type: "button", class: "btn small", text: `Add to ${p.name}`, onclick: () => addToCurrent(sel) }) : null,
           h("button", { type: "button", class: "btn small", text: "New playlist", onclick: () => { core.newPlaylist("From the library", sel); core.setView("playlist"); } })) : null);
@@ -1401,7 +1424,7 @@
             : root() && t.exists && !inMusic(t) ? h("span", { class: "tags-why", text: "Not in your music folder" }) : null);
       },
       canTag: (t) => !whyNot(t),
-      inMusic, editTagsDialog, renameDialog, renderView, refresh, useFolder, renderSearch, openSearch, closeSearch, searchRoot,
+      inMusic, editTagsDialog, renameDialog, renderView, refresh, useFolder, markPlaying, trackToPlay, renderSearch, openSearch, closeSearch, searchRoot,
       onProgress, onScanned, onKey, display, revealInLibrary,
       /** The folder's state from the window's start, unless a scan's event beat it here. */
       initial(music) {

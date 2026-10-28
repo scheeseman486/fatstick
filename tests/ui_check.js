@@ -327,7 +327,16 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('a search result dragged into the list lands there', after19.length === before19 + 1 && after19[2] === 'Go Your Own Way', after19.slice(0, 4).join(' | '));
     await p.locator('.srch-res .sr').first().dblclick();
     await p.waitForTimeout(150);
-    check('double-clicking a result adds it at the end', (await titles()).length === before19 + 2 && (await titles()).pop() === 'Go Your Own Way');
+    check('double-clicking a result plays it, on its own', (await p.locator('#player .np-t').textContent()) === 'Go Your Own Way' && /From the library/.test(await p.locator('#player .np-s').textContent()) && (await titles()).length === before19 + 1);
+    check('the song playing is marked in the results', (await p.locator('.srch-res .sr.playing .eq').count()) === 1);
+    check('a song on its own has no next', await p.locator('#player button[aria-label="Next"]').isDisabled());
+    await p.evaluate(() => P2U.api.seek(P2U.app.S.player.dur - 0.3));
+    await p.waitForFunction(() => !P2U.app.S.player.trackId, null, { timeout: 3000 }).catch(() => {});
+    check('it plays once: then the player stops', (await p.locator('#player .np-t').textContent()) === 'Nothing playing');
+    await p.locator('.srch-res .sr').first().click();
+    await p.keyboard.press('Shift+Enter');
+    await p.waitForTimeout(150);
+    check('Shift+Enter adds it at the end of the playlist', (await titles()).length === before19 + 2 && (await titles()).pop() === 'Go Your Own Way');
     await p.locator('#srch-in').focus();
     await p.keyboard.press('Escape');
     await p.keyboard.press('Escape');
@@ -400,6 +409,17 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.locator('#toast .btn').click();
     await toastSays(/Put back the old names/);
     check('undo puts the old names back', JSON.stringify(await pathsOf(selIds)) === JSON.stringify(pathsBefore));
+
+    // Double-click plays a library track on its own.
+    const roadWas = await p.locator('[data-pl="p-road"] .mt').textContent();
+    const playMe = (await p.locator('.lr').nth(3).locator('.c-title .t').textContent());
+    await p.locator('.lr').nth(3).dblclick();
+    await p.waitForTimeout(150);
+    check('double-clicking a library track plays it', (await p.locator('#player .np-t').textContent()) === playMe && (await p.locator('.lr.playing').count()) === 1 && /^PLAY/.test(await p.locator('#disp-text').textContent()), playMe);
+    check('without adding it anywhere', (await p.locator('[data-pl="p-road"] .mt').textContent()) === roadWas);
+    await p.keyboard.press('Space');
+    check('Space pauses it', !(await p.evaluate(() => P2U.app.S.player.playing)));
+    await p.evaluate(() => P2U.app.stopPlayback());
     await p.screenshot({ path: `${out}/library.png` });
 
     // 25. Back to the playlist: click one on the left.

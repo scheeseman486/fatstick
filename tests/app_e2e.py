@@ -97,6 +97,12 @@ def make_fixtures(work):
 
 
 def run_app(phase, script, cfg, env):
+    # A script that doesn't parse never reports, and the app would wait for it.
+    if shutil.which("node"):
+        chk = subprocess.run(["node", "--check", os.path.join(ROOT, "tests", script)], capture_output=True, text=True)
+        if chk.returncode != 0:
+            record(f"app {phase}: {script} parses", False, chk.stderr.strip().splitlines()[-1] if chk.stderr.strip() else "")
+            return {}
     e = dict(env, P2U_SELFTEST=os.path.join(ROOT, "tests", script), P2U_SELFTEST_CONFIG=json.dumps(cfg))
     r = subprocess.run(["xvfb-run", "-a", "-s", "-screen 0 1280x800x24", APP], env=e, capture_output=True, text=True, timeout=900)
     lines = [l for l in r.stdout.splitlines() if l.startswith(("PASS", "FAIL", "INFO", "SELFTEST"))]

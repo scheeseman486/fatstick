@@ -71,10 +71,24 @@
     // The scan read the MP3 quickly (not every frame); in a playlist, it's read in full.
     check("the scan read the MP3 quickly", lanterns.quick === true);
     clickRow(rowOf("Lanterns"));
-    $(".lib-scroll").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-    check("Enter adds the selection to the open playlist", A.pl().entries.some((e) => e.trackId === lanterns.id));
+    $(".lib-scroll").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true, cancelable: true }));
+    check("Shift+Enter adds the selection to the open playlist", A.pl().entries.some((e) => e.trackId === lanterns.id));
     const full = await until(() => A.track(lanterns.id).quick === false, 30000);
     check("then it's read in full, in the background", !!full);
+
+    // Double-click plays a song on its own, once (the test's audio output is silent).
+    const harbour = inLib().find((t) => t.title === "Harbour Song");
+    const counts = S.playlists.map((p) => p.entries.length).join();
+    const row = rowOf("Harbour Song");
+    clickRow(row);
+    clickRow(row);
+    const started = await until(() => S.player.trackId === harbour.id && S.player.playing, 10000);
+    check("double-clicking a library track plays it", !!started && /Harbour Song/.test($("#player .np-t").textContent));
+    check("without adding it to a playlist", S.playlists.map((p) => p.entries.length).join() === counts);
+    const moved = await until(() => S.player.pos > 1, 10000);
+    check("the player plays through it", !!moved, `${S.player.pos} s`);
+    const stopped = await until(() => !S.player.trackId, 15000);
+    check("and stops when it ends: one and done", !!stopped && $("#player .np-t").textContent === "Nothing playing");
 
     // Search, from the sidebar.
     A.lib.openSearch();
