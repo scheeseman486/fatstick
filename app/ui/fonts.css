@@ -1,0 +1,15 @@
+/* Bundled fonts, all under the SIL Open Font License (see fonts/*.txt). */
+@font-face { font-family: "DSEG14"; src: url("fonts/DSEG14Classic-Bold.woff2") format("woff2"); font-weight: 700; font-display: block; }
+@font-face { font-family: "Doto"; src: url("fonts/doto-latin-900-normal.woff2") format("woff2"); font-weight: 900; font-display: block; }
+@font-face { font-family: "Doto"; src: url("fonts/doto-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: block; }
+@font-face { font-family: "Silkscreen"; src: url("fonts/silkscreen-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: block; }
+@font-face { font-family: "Barlow"; src: url("fonts/barlow-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url("fonts/barlow-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url("fonts/barlow-latin-600-normal.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Saira Semi Condensed"; src: url("fonts/saira-semi-condensed-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Saira Semi Condensed"; src: url("fonts/saira-semi-condensed-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "Saira Semi Condensed"; src: url("fonts/saira-semi-condensed-latin-600-normal.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "M PLUS Rounded 1c"; src: url("fonts/m-plus-rounded-1c-latin-400-normal.woff2") format("woff2"); font-weight: 400; unicode-range: U+0000-2025, U+2027-FFFF; font-display: swap; }
+@font-face { font-family: "M PLUS Rounded 1c"; src: url("fonts/m-plus-rounded-1c-latin-500-normal.woff2") format("woff2"); font-weight: 500; unicode-range: U+0000-2025, U+2027-FFFF; font-display: swap; }
+@font-face { font-family: "M PLUS Rounded 1c"; src: url("fonts/m-plus-rounded-1c-latin-700-normal.woff2") format("woff2"); font-weight: 700; unicode-range: U+0000-2025, U+2027-FFFF; font-display: swap; }
+@font-face { font-family: "M PLUS Rounded 1c"; src: url("fonts/m-plus-rounded-1c-latin-800-normal.woff2") format("woff2"); font-weight: 800; unicode-range: U+0000-2025, U+2027-FFFF; font-display: swap; }

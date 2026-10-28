@@ -1,0 +1,215 @@
+/* Three looks for the same window, picked with data-look on <html>.
+   Backlit: the pocket player's reflective LCD over a quiet light utility.
+   Night drive: a car head unit after dark, dot-matrix VFD on smoked glass. Dark only.
+   Clip: the cheap clip-on player itself, coloured plastic around white inserts.
+   Every token is defined on :root first (Backlit, light), then redefined. */
+
+:root {
+  --bg: #c9d1d8;
+  --pane: #e8ecef;
+  --sheet: #f7f9fa;
+  --ink: #1e252d;
+  --ink-2: #56606b;
+  --ink-3: #7f8993;
+  --rule: #d3dae0;
+  --accent: #2e5b8a;
+  --accent-ink: #ffffff;
+  --accent-text: #285381;
+  --accent-soft: #dce6f0;
+  --accent-strong: #234a73;
+  --sel: #d3e0ed;
+  --sel-ink: #1e252d;
+  --hover: #edf1f4;
+  --focus: #2e5b8a;
+  --warn: #8a5300;
+  --warn-bg: #f6e9d2;
+  --error: #b3261e;
+  --ok: #2c6e3a;
+  --ok-bg: #dcebdd;
+  --chip-bg: #e4e9ed;
+  --chassis: #2b3138;
+  --chassis-2: #3c444d;
+  --chassis-ink: #d0d6dc;
+  --chassis-ink-2: #939ea8;
+  --disp-bg: #b4c49c;
+  --disp-ink: #27331f;
+  --disp-ghost: rgba(39, 51, 31, 0.09);
+  --disp-glow: none;
+  --glass-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  --btn-bg: #ffffff;
+  --btn-border: #b5bec6;
+  --btn-ink: #1e252d;
+  --btn-hover: #f1f4f6;
+  --input-bg: #ffffff;
+  --input-border: #b5bec6;
+  --map-a: #2e5b8a;
+  --map-b: #6a90b6;
+  --map-c: #9bb5cf;
+  --map-free: #dde3e8;
+  --map-hatch: rgba(255, 255, 255, 0.5);
+  --scrim: rgba(20, 26, 32, 0.45);
+  --shadow: 0 10px 30px rgba(20, 28, 36, 0.24);
+  --shell: #3550d8;
+  --shell-ink: #ffffff;
+  --font-ui: "Barlow", "Segoe UI", system-ui, sans-serif;
+  --font-disp: "DSEG14", ui-monospace, monospace;
+  --disp-weight: 700;
+  --disp-track: 0.04em;
+  --disp-size: 26px;
+  --r-s: 5px;
+  --r-btn: 5px;
+  --r-row: 4px;
+  --r-chip: 3px;
+  --r-glass: 6px;
+  --r-pane: 0px;
+  --gap: 1px;
+  --row-h: 32px;
+}
+
+/* ---- Backlit, dark ---------------------------------------------------------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-look="backlit"] {
+    --bg: #0b0e11; --pane: #191e23; --sheet: #1e242a; --ink: #e1e6ea; --ink-2: #9ca7b1; --ink-3: #727d88; --rule: #2d343b;
+    --accent: #86b0da; --accent-ink: #0d1824; --accent-text: #9fc2e6; --accent-soft: #22354a; --accent-strong: #a9c9ea;
+    --sel: #29405a; --sel-ink: #f0f4f8; --hover: #242b31; --focus: #86b0da;
+    --warn: #e7ae58; --warn-bg: #392e1c; --error: #f1938b; --ok: #8fcf9a; --ok-bg: #1e3324; --chip-bg: #2a3138;
+    --chassis: #121519; --chassis-2: #272e35; --chassis-ink: #b4bec7; --chassis-ink-2: #7b8691;
+    --disp-bg: #a3bb88; --disp-ink: #1b2615;
+    --btn-bg: #252c33; --btn-border: #3b444d; --btn-ink: #e1e6ea; --btn-hover: #2d353d; --input-bg: #14181c; --input-border: #3b444d;
+    --map-a: #86b0da; --map-b: #5d84ab; --map-c: #44617f; --map-free: #29313a; --map-hatch: rgba(0, 0, 0, 0.35);
+    --scrim: rgba(0, 0, 0, 0.6); --shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"][data-look="backlit"] {
+  --bg: #0b0e11; --pane: #191e23; --sheet: #1e242a; --ink: #e1e6ea; --ink-2: #9ca7b1; --ink-3: #727d88; --rule: #2d343b;
+  --accent: #86b0da; --accent-ink: #0d1824; --accent-text: #9fc2e6; --accent-soft: #22354a; --accent-strong: #a9c9ea;
+  --sel: #29405a; --sel-ink: #f0f4f8; --hover: #242b31; --focus: #86b0da;
+  --warn: #e7ae58; --warn-bg: #392e1c; --error: #f1938b; --ok: #8fcf9a; --ok-bg: #1e3324; --chip-bg: #2a3138;
+  --chassis: #121519; --chassis-2: #272e35; --chassis-ink: #b4bec7; --chassis-ink-2: #7b8691;
+  --disp-bg: #a3bb88; --disp-ink: #1b2615;
+  --btn-bg: #252c33; --btn-border: #3b444d; --btn-ink: #e1e6ea; --btn-hover: #2d353d; --input-bg: #14181c; --input-border: #3b444d;
+  --map-a: #86b0da; --map-b: #5d84ab; --map-c: #44617f; --map-free: #29313a; --map-hatch: rgba(0, 0, 0, 0.35);
+  --scrim: rgba(0, 0, 0, 0.6); --shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}
+
+/* ---- Night drive (dark in both themes) ----------------------------------------- */
+:root[data-look="night"] {
+  --bg: #050b0d; --pane: #0b1417; --sheet: #081013; --ink: #cfe0dd; --ink-2: #82a09b; --ink-3: #5a7570; --rule: #172629;
+  --accent: #4fe3c4; --accent-ink: #032019; --accent-text: #5ef0d0; --accent-soft: rgba(79, 227, 196, 0.12); --accent-strong: #7ff5dc;
+  --sel: rgba(79, 227, 196, 0.14); --sel-ink: #eafcf7; --hover: #0f1c1f; --focus: #4fe3c4;
+  --warn: #ffb547; --warn-bg: rgba(255, 181, 71, 0.12); --error: #ff7266; --ok: #4fe3c4; --ok-bg: rgba(79, 227, 196, 0.1);
+  --chip-bg: #10201f;
+  --chassis: #091114; --chassis-2: #13231f; --chassis-ink: #9cb8b3; --chassis-ink-2: #5f7a75;
+  --disp-bg: #020a0b; --disp-ink: #73f7da; --disp-ghost: rgba(115, 247, 218, 0.06);
+  --disp-glow: 0 0 3px rgba(115, 247, 218, 0.7), 0 0 14px rgba(79, 227, 196, 0.35);
+  --glass-shadow: inset 0 0 0 1px #1b3134, inset 0 8px 20px rgba(0, 0, 0, 0.85);
+  --btn-bg: #0e1a1d; --btn-border: #1f3337; --btn-ink: #cfe0dd; --btn-hover: #13252a; --input-bg: #050c0e; --input-border: #1f3337;
+  --map-a: #4fe3c4; --map-b: #2b9b86; --map-c: #1d6a5c; --map-free: #0f1f1e; --map-hatch: rgba(2, 10, 11, 0.55);
+  --scrim: rgba(0, 0, 0, 0.65); --shadow: 0 0 0 1px #1b3134, 0 14px 40px rgba(0, 0, 0, 0.7);
+  --font-ui: "Saira Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-disp: "Doto", ui-monospace, monospace;
+  --disp-weight: 900; --disp-track: 0.03em; --disp-size: 30px;
+  --r-s: 3px; --r-btn: 3px; --r-row: 2px; --r-chip: 2px; --r-glass: 4px; --gap: 1px; --row-h: 30px;
+  color-scheme: dark;
+}
+[data-look="night"] .glass {
+  background-image: radial-gradient(circle, rgba(115, 247, 218, 0.07) 0.9px, transparent 1.3px);
+  background-size: 4px 4px;
+  border: 1px solid #12262a;
+}
+[data-look="night"] .seg.ghost { display: none; }
+[data-look="night"] .disp-unit { font-family: var(--font-ui); font-weight: 600; letter-spacing: 0.08em; text-shadow: var(--disp-glow); }
+[data-look="night"] .btn { background-image: linear-gradient(#ffffff08, #00000020); box-shadow: inset 0 1px 0 #ffffff0a; }
+[data-look="night"] .btn.primary { background-image: none; box-shadow: 0 0 0 1px var(--accent), 0 0 18px rgba(79, 227, 196, 0.35); }
+[data-look="night"] .row.sel { box-shadow: inset 2px 0 0 var(--accent); }
+[data-look="night"] .pbtn.play { background: transparent; color: var(--accent-text); box-shadow: inset 0 0 0 2px var(--accent), 0 0 14px rgba(79, 227, 196, 0.3); }
+[data-look="night"] .pbtn.play:hover:not(:disabled) { background: var(--accent-soft); opacity: 1; }
+[data-look="night"] .np-t, [data-look="night"] .seek { color: var(--accent-text); text-shadow: 0 0 8px rgba(79, 227, 196, 0.25); }
+[data-look="night"] .segmented button[aria-checked="true"] { background: var(--accent-soft); color: var(--accent-text); box-shadow: inset 0 0 0 1px var(--accent); }
+[data-look="night"] .player, [data-look="night"] .top { border-color: var(--rule); }
+[data-look="night"] .pl-head h1 { font-weight: 500; letter-spacing: 0.01em; }
+
+/* ---- Clip, light ------------------------------------------------------------------ */
+:root[data-look="clip"] {
+  --bg: var(--shell); --pane: #f1f2f7; --sheet: #ffffff; --ink: #1b1e2c; --ink-2: #596075; --ink-3: #8a90a3; --rule: #e3e6ee;
+  --accent: var(--shell); --accent-ink: var(--shell-ink);
+  --accent-text: color-mix(in srgb, var(--shell) 82%, #000);
+  --accent-soft: color-mix(in srgb, var(--shell) 13%, #fff);
+  --accent-strong: color-mix(in srgb, var(--shell) 82%, #000);
+  --sel: color-mix(in srgb, var(--shell) 17%, #fff); --sel-ink: #1b1e2c; --hover: #f4f5f9; --focus: var(--shell);
+  --warn: #9a4b00; --warn-bg: #fdebd5; --error: #c0262d; --ok: #217a42; --ok-bg: #dcf1e3; --chip-bg: #eef0f5;
+  --chassis: var(--shell);
+  --chassis-2: color-mix(in srgb, var(--shell) 78%, #000);
+  --chassis-ink: var(--shell-ink);
+  --chassis-ink-2: color-mix(in srgb, var(--shell-ink) 72%, var(--shell));
+  --disp-bg: #0f1119; --disp-ink: #cde5ff; --disp-ghost: transparent; --disp-glow: 0 0 2px rgba(205, 229, 255, 0.45);
+  --glass-shadow: inset 0 0 0 3px #1d2030, 0 1px 0 rgba(255, 255, 255, 0.35);
+  --btn-bg: #ffffff; --btn-border: #d4d8e3; --btn-ink: #1b1e2c; --btn-hover: #f3f4f8; --input-bg: #ffffff; --input-border: #d4d8e3;
+  --map-a: var(--shell);
+  --map-b: color-mix(in srgb, var(--shell) 55%, #fff);
+  --map-c: color-mix(in srgb, var(--shell) 30%, #fff);
+  --map-free: #eceef4; --map-hatch: rgba(255, 255, 255, 0.55);
+  --scrim: rgba(18, 20, 32, 0.45); --shadow: 0 14px 36px rgba(18, 22, 44, 0.25);
+  --font-ui: "M PLUS Rounded 1c", system-ui, sans-serif;
+  --font-disp: "Silkscreen", ui-monospace, monospace;
+  --disp-weight: 400; --disp-track: 0.02em; --disp-size: 22px;
+  --r-s: 10px; --r-btn: 999px; --r-row: 10px; --r-chip: 999px; --r-glass: 14px; --r-pane: 18px; --gap: 8px; --row-h: 36px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-look="clip"] {
+    --bg: color-mix(in srgb, var(--shell) 62%, #000); --pane: #1e2028; --sheet: #252731; --ink: #eceef6; --ink-2: #a5aabb; --ink-3: #777d90; --rule: #343745;
+    --accent-text: color-mix(in srgb, var(--shell) 50%, #fff); --accent-soft: color-mix(in srgb, var(--shell) 26%, #252731);
+    --accent-strong: color-mix(in srgb, var(--shell) 80%, #fff);
+    --sel: color-mix(in srgb, var(--shell) 32%, #252731); --sel-ink: #ffffff; --hover: #2c2f3a;
+    --focus: color-mix(in srgb, var(--shell) 55%, #fff);
+    --warn: #f5b066; --warn-bg: #3b2c1b; --error: #ff8a84; --ok: #7fd49a; --ok-bg: #1c3426; --chip-bg: #30333f;
+    --chassis: color-mix(in srgb, var(--shell) 62%, #000); --chassis-2: color-mix(in srgb, var(--shell) 40%, #000);
+    --btn-bg: #2c2f3a; --btn-border: #3f4352; --btn-ink: #eceef6; --btn-hover: #353845; --input-bg: #1a1c23; --input-border: #3f4352;
+    --map-b: color-mix(in srgb, var(--shell) 60%, #252731); --map-c: color-mix(in srgb, var(--shell) 35%, #252731); --map-free: #30333f; --map-hatch: rgba(0, 0, 0, 0.3);
+    --scrim: rgba(0, 0, 0, 0.6); --shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"][data-look="clip"] {
+  --bg: color-mix(in srgb, var(--shell) 62%, #000); --pane: #1e2028; --sheet: #252731; --ink: #eceef6; --ink-2: #a5aabb; --ink-3: #777d90; --rule: #343745;
+  --accent-text: color-mix(in srgb, var(--shell) 50%, #fff); --accent-soft: color-mix(in srgb, var(--shell) 26%, #252731);
+  --accent-strong: color-mix(in srgb, var(--shell) 80%, #fff);
+  --sel: color-mix(in srgb, var(--shell) 32%, #252731); --sel-ink: #ffffff; --hover: #2c2f3a;
+  --focus: color-mix(in srgb, var(--shell) 55%, #fff);
+  --warn: #f5b066; --warn-bg: #3b2c1b; --error: #ff8a84; --ok: #7fd49a; --ok-bg: #1c3426; --chip-bg: #30333f;
+  --chassis: color-mix(in srgb, var(--shell) 62%, #000); --chassis-2: color-mix(in srgb, var(--shell) 40%, #000);
+  --btn-bg: #2c2f3a; --btn-border: #3f4352; --btn-ink: #eceef6; --btn-hover: #353845; --input-bg: #1a1c23; --input-border: #3f4352;
+  --map-b: color-mix(in srgb, var(--shell) 60%, #252731); --map-c: color-mix(in srgb, var(--shell) 35%, #252731); --map-free: #30333f; --map-hatch: rgba(0, 0, 0, 0.3);
+  --scrim: rgba(0, 0, 0, 0.6); --shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}
+[data-look="clip"] .app { padding: 0 var(--gap) var(--gap); }
+html.framed[data-look="clip"] .app { padding-bottom: var(--gap); }
+[data-look="clip"] .side, [data-look="clip"] .main, [data-look="clip"] .stick { border-radius: var(--r-pane); overflow: hidden; }
+[data-look="clip"] .side { overflow: auto; }
+[data-look="clip"] .top { padding: 14px 10px 8px; }
+[data-look="clip"] .player { padding: 6px 10px 2px; }
+[data-look="clip"] .pl-head h1 { font-weight: 800; letter-spacing: -0.01em; }
+[data-look="clip"] .side-item .nm, [data-look="clip"] .dev .dn { font-weight: 700; }
+[data-look="clip"] .btn { font-weight: 700; }
+[data-look="clip"] .sync .btn.primary { height: 44px; font-size: 16px; font-weight: 800; }
+[data-look="clip"] .glass { padding: 9px 18px 8px; }
+[data-look="clip"] .disp-unit { font-family: var(--font-disp); }
+/* The player's own control pad: a pill with a big centre key. */
+[data-look="clip"] .pad {
+  gap: 0; padding: 4px; border-radius: 999px;
+  background: var(--chassis-2);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.25), 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+[data-look="clip"] .pbtn { width: 38px; height: 38px; color: var(--chassis-ink); }
+[data-look="clip"] .pbtn.play {
+  width: 50px; height: 50px; margin-inline: 2px;
+  background: var(--chassis-ink); color: var(--chassis);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3);
+}
+[data-look="clip"] .segmented { background: var(--chassis-2); }
+[data-look="clip"] .row.sel .c-num { color: var(--accent-text); opacity: 1; }
+[data-look="clip"] .folders li, [data-look="clip"] .preview { border-radius: 12px; }
+[data-look="clip"] .modal { border-radius: 20px; }

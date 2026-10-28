@@ -62,6 +62,27 @@ on all three. The GUI never runs as root/admin. No in-app biometric check is
 used: those APIs only return yes/no and cannot grant privileges; the OS prompt
 is what accepts the fingerprint.
 
+## The window (prototype)
+
+`app/ui` is the app's real front end, currently running on demo data: a
+playlists sidebar, the track list (multi-select, drag sorting with pointer
+events, drops from the file manager, undo), a stick panel (player profile,
+playlists on the stick, file name template with a live preview, the layout of
+the stick and whether it fits) and a player bar. It comes in three looks to
+choose from, switched from the top right: Backlit, Night drive and Clip.
+
+In the desktop app it lists your real USB sticks and imports real playlist
+files, but **Sync is simulated there too**: it needs the library, converter and
+multi-folder writer from the design doc first. To write a stick today, use the
+CLI below. To try the window in a browser:
+
+```sh
+cd app/ui && python3 -m http.server 8000      # then open http://localhost:8000
+python3 app/bundle_preview.py preview.html     # or one self-contained file
+node tests/ui_names.js                         # name template rules
+node tests/ui_check.js                         # clicks through it (needs playwright and ffmpeg)
+```
+
 ## Layout
 
 ```
@@ -69,10 +90,12 @@ crates/p2u-core     playlists, naming plan, FAT32 layout + writer + read-back ch
 crates/p2u-device   USB stick discovery and OS-brokered raw disk access (linux/macos/windows)
 crates/p2u-cli      `p2u` command-line tool
 crates/p2u-helper   tiny privileged helper (Windows UAC, Linux pkexec fallback)
-app/                Tauri v2 GUI (ui/ is plain HTML/CSS/JS, src-tauri/ is the Rust shell)
+app/                Tauri v2 GUI: ui/ is plain HTML/CSS/JS (js/names.js and js/rules.js hold the naming
+                    and copy-or-encode rules), src-tauri/ the Rust shell, bundle_preview.py a one-file preview
 packaging/linux     polkit policy for the pkexec fallback
 tests/stick_e2e.py    84 checks on disk images with awkward prior layouts, plus a pull at every write point
 tests/kernel_stick.py `p2u write` on whole virtual disks in QEMU, then the real Linux vfat driver
+tests/ui_*.js        name template unit test; a headless click-through of the window
 research/           the copy-order measurement (needs the older prototype, commit 93f9b75)
 .github/workflows   CI draft: Linux + Windows built on Linux, macOS on a macOS runner
 ```
@@ -146,5 +169,6 @@ the real Linux vfat driver. The OS broker and disk-level code (unmount, raw
 whole-disk access, power-off/eject) compiles for Linux, Windows and macOS but
 has not yet run against real USB sticks. Writing erases the stick; it is not a
 secure erase. Licence: MIT OR Apache-2.0 (no GPL code was copied; the code
-follows the FAT specification). The bundled DSEG14 font is under the SIL Open
-Font License (app/ui/fonts/DSEG-LICENSE.txt).
+follows the FAT specification). The bundled fonts (DSEG14, Barlow, Saira Semi
+Condensed, M PLUS Rounded 1c, Doto, Silkscreen) are under the SIL Open Font
+License; their licence texts are in app/ui/fonts.
