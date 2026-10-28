@@ -17,8 +17,8 @@ GPL version 3 or later.
   files; export as M3U8 or XSPF. Drop files and folders from the file manager. A
   folder is added in album order (disc, track number, then name). Moved or
   renamed files can be found again ("Locate"). Your music files only change
-  when you ask in the library (tags and file names, after a preview), and
-  nothing ever deletes them.
+  when you change them in the library (tags as you edit them; file names
+  after a preview), and nothing ever deletes them.
 - **Your music library.** "Library" (top right) turns the middle of the
   window into your music folder: choose the folder once and the app reads
   every song in it, then keeps up as files are added, moved or retagged (it
@@ -40,8 +40,11 @@ GPL version 3 or later.
   unless you type over them). Labels are your own free-form tags ("road
   trip", "kids", "sleep"), kept in each file's Grouping field where other
   players see them too, and shown as coloured boxes, one colour per label.
-  "Save to files…" shows every change before it writes, and Undo puts the
-  old tags back. "Clean up file names…" renames files from their tags with
+  A change is written into the files as soon as it's entered: Enter, or
+  leaving the field (Esc puts a field back first); a label as soon as it's
+  added or taken off. The editor says what it just saved, with Undo beside
+  it, and Ctrl+Z in the library undoes tag edits one at a time. Nothing asks
+  first, and clicking elsewhere saves what was typed. "Clean up file names…" renames files from their tags with
   the same template language as names on a stick; files stay in their
   folders and keep their type. Nothing outside the music folder is touched.
 - **Search.** The search button at the bottom left (or Ctrl+F) widens the
@@ -74,7 +77,11 @@ GPL version 3 or later.
   small baseline JPEG cover (at most 500 px and 100 KB).
 - **A track's start and end.** Cut seconds away, or add silence, at either
   end of a track: select it and press E, or "Start and end…" in its
-  right-click menu. Only the stick's copy changes, never your file.
+  right-click menu. Each end has a panel with the waveform of its first or
+  last half minute (faint where it's cut or faded), the cut marked on it
+  (drag it, or use the slider), the silence to add beside it, and a button
+  to hear it, silence included. Only the stick's copy changes, never your
+  file.
 - **A track's key.** Play a track higher or lower without changing its
   speed or length: select it and press K, or "Key…" in its right-click
   menu. The slider moves in semitones (named as intervals: "a fourth up"),
@@ -88,17 +95,19 @@ GPL version 3 or later.
   cut: select it and press F, or "Fade in and out…" in its right-click menu.
   Each end has its own slider (up to 30 s), drawn as the curve it makes (an
   S curve, gentle at both ends of the fade), and a button to hear it: "Hear
-  the end" plays from a few seconds before the fade out. Moving a slider
-  changes what's playing as it plays. On the stick the fades are rendered
+  the end" plays from a few seconds before the fade out. The waveform shows
+  the track turned down by the fade. Moving a slider changes what's playing
+  as it plays. On the stick the fades are rendered
   into the track, after any key shift; the file itself is never changed.
-- **Previews play in the main player.** The key and fade dialogs don't have
-  a player of their own: they change what the player at the bottom of the
-  window plays, and that player stays usable while they're open. Pause it,
-  or drag its position anywhere in the track: what you hear keeps the key
-  and fades you're trying. Cancel puts back what was there; Apply keeps it.
-  Outside the dialogs the player plays an entry as the stick will have it:
-  from its cut start to its cut end, in its key and with its fades (the
-  added silence is left out).
+- **Previews play in the main player.** The start and end, key and fade
+  dialogs don't have a player of their own: they change what the player at
+  the bottom of the window plays, and that player stays usable while they're
+  open. Pause it, or drag its position anywhere in the track: what you hear
+  keeps the cuts, silences, key and fades you're trying. Cancel puts back
+  what was there; Apply keeps it. Outside the dialogs the player plays an
+  entry as the stick will have it: the silence added before it (when it
+  plays from its start), its cut start to its cut end, in its key and with
+  its fades, then the silence added after it.
 - **Silence between playlists.** A stick's list can hold stretches of
   silence (30 s unless you change it) between its playlists. Each gets a
   folder of its own holding one silent MP3.
@@ -106,11 +115,14 @@ GPL version 3 or later.
   into a single long MP3 on the stick, in order, with each track's volume
   and start and end settings. In the app it stays a playlist you edit as
   usual; the list shows where each track starts in the joined track.
-- **The stick's layout.** Double-click a stick in the sidebar (or "Show the
-  stick's layout" in its right-click menu, or "List all") for a window with
-  every folder and file in the order a player reads them. Folders and joined
-  tracks fold away, and the window follows your edits. Rename a stick from
-  its right-click menu.
+- **The stick's view.** Click a stick in the sidebar (or "List all") and the
+  middle of the window shows everything on it, in the order a player reads
+  it: every folder and file, with folders and joined tracks that fold away.
+  It's where the stick's playlists are organized: drag a playlist in from
+  the sidebar (or onto a stick in the sidebar), move one by its handle (or
+  Alt+↑ and Alt+↓ on it), put silence between two (hover between them), and
+  take one off. What's in a playlist is edited in the playlist. Double-click
+  a stick to rename it.
 - **Even volume, per playlist.** Loudness is measured with EBU R128. A copied
   MP3 gets a lossless gain change in 1.5 dB steps (the global gain field of
   each frame, as mp3gain does); an encoded track gets the exact gain. No
@@ -118,7 +130,9 @@ GPL version 3 or later.
 - **Preparation in the background.** Encodes and gain changes are made while
   you edit, into a cache (10 GB by default), so a sync is mostly the write.
 - **The player.** Listen to a playlist as it is, or "as on the stick", with
-  the gain and bitrate the sync will use.
+  the gain and bitrate the sync will use. The repeat button (or R) steps
+  through play & stop (to the end of the playlist), repeat one song and
+  repeat playlist; the display shows RPT or RPT1.
 
 ![The music library: browsing by label, four tracks selected in the tag editor](docs/library.png)
 
@@ -306,11 +320,14 @@ a track, shifts another 5 semitones up (changing its key live while it
 plays), fades a third in and out (changing the fades live, and seeking, while
 it plays), joins the second playlist into one track and puts silence between
 the two, picks a disk image standing in for a stick, syncs through the button
-and its confirmation, opens the stick's layout window and plays a track. The second run checks that all of it
+and its confirmation, shows the stick's view, plays a track, and hears the
+silence being tried in the start and end dialog (with the track's waveform
+read by ffmpeg). The second run checks that all of it
 was kept, that an edit makes the stick out of date, that the stick is
 recognized from its note, and that syncing another stick's playlists onto it
 asks first. The third chooses a music folder, scans and searches it, writes
-tags into two files and renames them from the library view, and checks that
+tags into two files as they're edited (no prompts) and renames them from the
+library view, and checks that
 a file copied into the folder shows up by itself (and that the scan's own
 reading of the folder doesn't set off another scan). Then the image is
 read with tools that aren't ours: fsck.fat, mtools (the order a player sees),

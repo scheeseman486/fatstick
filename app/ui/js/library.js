@@ -178,7 +178,11 @@
     }
 
     // ---- writing tags -----------------------------------------------------------------------
-    async function writeTags(jobs, back, undoing) {
+    // Tag edits are written as they're made. Each write can be undone: from
+    // the editor's line saying what was saved, or Ctrl+Z in the library.
+    const tagUndo = [];
+    let lastSave = null; // { key, text, undo } for the editor of those tracks
+    async function writeTags(jobs, back, undoing, quiet) {
       let r;
       try {
         r = await api.libraryWriteTags(jobs);
@@ -190,6 +194,7 @@
       const okIds = new Set(r.tracks.map((t) => t.id));
       const undoJobs = back ? back.filter((j) => okIds.has(j.trackId)) : [];
       const undoIt = undoJobs.length ? () => writeTags(undoJobs, null, true) : null;
+      r.undo = undoIt;
       if (r.failed.length) {
         modal({
           title: r.tracks.length ? `${plural(r.failed.length, "file")} kept ${r.failed.length === 1 ? "its" : "their"} old tags` : "The tags weren't written",
@@ -203,35 +208,16 @@
           ],
         });
       } else if (undoing) toast(`Put the old tags back into ${plural(r.tracks.length, "file")}.`);
-      else toast(`Wrote tags into ${plural(r.tracks.length, "file")}.`, undoIt ? { label: "Undo", run: undoIt } : null);
+      else if (!quiet) toast(`Wrote tags into ${plural(r.tracks.length, "file")}.`, undoIt ? { label: "Undo", run: undoIt } : null);
       return r;
     }
-
-    function confirmWrite(jobs, back, { lines, skipped, onBack, onDone }) {
-      const files = jobs.map((j) => track(j.trackId));
-      const one = jobs.length === 1;
-      modal({
-        title: one ? "Write these tags into the file?" : `Write these tags into ${jobs.length} files?`,
-        body: [
-          h("ul", { class: "changes" }, lines),
-          one ? h("p", { class: "path-line", text: rel(files[0].path) })
-            : h("details", { class: "file-list" }, h("summary", { text: `The ${jobs.length} files` }), h("ol", null, files.map((t) => h("li", { text: rel(t.path) })))),
-          skipped ? h("p", { class: "st-note", text: `Left as they are: ${skipped}.` }) : null,
-          h("p", { class: "st-note", text: "The tags go into the files themselves, so other players and apps see them too. You can undo it straight after." }),
-        ],
-        buttons: [
-          h("button", { type: "button", class: "btn", text: onBack ? "Back" : "Cancel", onclick: onBack || closeModal }),
-          h("button", {
-            type: "button", class: "btn primary", "data-autofocus": "", text: one ? "Write tags" : `Write tags into ${jobs.length} files`,
-            onclick: async (e) => {
-              e.currentTarget.disabled = true;
-              closeModal();
-              const r = await writeTags(jobs, back);
-              if (r && onDone) onDone();
-            },
-          }),
-        ],
-      });
+    /** Ctrl+Z in the library: the last tag edit, put back. */
+    function undoTags() {
+      const u = tagUndo.pop();
+      if (!u) return false;
+      lastSave = null;
+      u.run();
+      return true;
     }
 
     // ---- the tag editor ------------------------------------------------------------------
@@ -240,7 +226,7 @@
     // they differ (left as they are unless typed over). Labels show on how
     // many of the tracks they are, and can be added to or taken off all.
     function makeEditor(ids, opts = {}) {
-      const ED = { ids: [...new Set(ids)], draft: {}, add: [], remove: new Map(), err: {}, v: S.tracksVersion };
+      const ED = { ids: [...new Set(ids)], draft: {}, add: [], remove: new Map(), err: {}, v: S.tracksVersion, sending: [] };
       const all = () => ED.ids.map(track);
       const ok = () => all().filter((t) => !whyNot(t));
       const pool = () => { const o = ok(); return o.length ? o : all(); };
@@ -259,14 +245,14 @@
         onkeydown: (e) => {
           if (e.key === "Enter" || e.key === "," || e.key === ";") {
             e.preventDefault();
-            if (lblIn.value.trim()) { addLabel(lblIn.value); lblIn.value = ""; } else if (e.key === "Enter" && opts.modal && dirty()) save();
+            if (lblIn.value.trim()) { addLabel(lblIn.value); lblIn.value = ""; }
           }
         },
         onchange: () => { if (lblIn.value.trim() && knownValues("labels").some((x) => lkey(x) === lkey(lblIn.value))) { addLabel(lblIn.value); lblIn.value = ""; } },
         onblur: () => { if (lblIn.value.trim()) { addLabel(lblIn.value); lblIn.value = ""; } },
       });
-      const saveBtn = h("button", { type: "button", class: "btn primary", text: "Save to files…", disabled: true, onclick: () => save() });
-      const revertBtn = h("button", { type: "button", class: "btn", text: "Revert", disabled: true, onclick: () => reset() });
+      const statusLine = h("p", { class: "ted-status", "aria-live": "polite" });
+      const key = ED.ids.join(",");
       const inputs = {};
 
       function head() {
@@ -291,7 +277,12 @@
           class: `input${num ? " num-in" : ""}`, id: `ted-${f}-${id}`, value: b == null ? "" : b, placeholder: b === null ? "Various" : "",
           inputmode: num ? "numeric" : null, autocomplete: "off", spellcheck: "false", list: lists[f] ? lists[f].id : null, disabled: readOnly,
           oninput: () => onField(f),
-          onkeydown: (e) => { if (e.key === "Enter" && opts.modal && dirty()) { e.preventDefault(); save(); } },
+          // Saved when it's entered: Enter, or leaving the field. Esc puts it back.
+          onkeydown: (e) => {
+            if (e.key === "Enter") { e.preventDefault(); commit(); }
+            if (e.key === "Escape" && f in ED.draft) { e.preventDefault(); e.stopPropagation(); const b = base(f); input.value = b == null ? "" : b; onField(f); }
+          },
+          onblur: () => commit(),
         });
         inputs[f] = input;
         return [h("label", { class: "lbl", for: input.id, text: FIELD_LABEL[f] }), input];
@@ -324,8 +315,10 @@
             m.set(k, e);
           }
         }
-        for (const l of ED.add) m.set(lkey(l), { ...(m.get(lkey(l)) || { label: l }), n: P.length, added: true });
-        for (const k of ED.remove.keys()) m.delete(k);
+        const adding = [...ED.add, ...ED.sending.flatMap((x) => x.add)];
+        const removing = [...ED.remove.keys(), ...ED.sending.flatMap((x) => [...x.remove.keys()])];
+        for (const l of adding) m.set(lkey(l), { ...(m.get(lkey(l)) || { label: l }), n: P.length, added: true });
+        for (const k of removing) m.delete(k);
         return [...m.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
       }
       function renderLabels() {
@@ -352,6 +345,7 @@
         if (pool().some((t) => !(t.labels || []).some((x) => lkey(x) === k))) ED.add.push(spelled);
         renderLabels();
         update();
+        commit();
       }
       function removeLabel(l) {
         const k = lkey(l);
@@ -359,15 +353,17 @@
         if (pool().some((t) => (t.labels || []).some((x) => lkey(x) === k))) ED.remove.set(k, l);
         renderLabels();
         update();
+        commit();
       }
 
       const dirty = () => Object.keys(ED.draft).length > 0 || ED.add.length > 0 || ED.remove.size > 0;
       const valid = () => !Object.values(ED.err).some(Boolean);
       function update() {
-        saveBtn.disabled = readOnly || !dirty() || !valid();
-        revertBtn.disabled = !dirty();
         errLine.textContent = Object.values(ED.err).filter(Boolean).join(" ");
-        if (opts.onState) opts.onState();
+      }
+      function showStatus(text, undo) {
+        fill(statusLine, text ? h("span", { text }) : null,
+          undo ? h("button", { type: "button", class: "btn quiet small", text: "Undo", onclick: () => { const i = tagUndo.indexOf(undo); if (i >= 0) tagUndo.splice(i, 1); lastSave = null; showStatus(""); undo.run(); } }) : null);
       }
       function reset() {
         ED.draft = {};
@@ -383,65 +379,82 @@
         renderLabels();
         update();
       }
-      function nextLabels(t) {
-        const ls = (t.labels || []).filter((l) => !ED.remove.has(lkey(l)));
-        for (const a of ED.add) if (!ls.some((x) => lkey(x) === lkey(a))) ls.push(a);
+      function nextLabels(t, x) {
+        const ls = (t.labels || []).filter((l) => !x.remove.has(lkey(l)));
+        for (const a of x.add) if (!ls.some((y) => lkey(y) === lkey(a))) ls.push(a);
         return ls;
       }
-      /** The edit for each file, and the one that undoes it. */
-      function plan() {
+      /** The edit for each file, and the one that undoes it, from the files
+       * as they are now (an earlier edit may just have been written). */
+      function plan(x) {
         const jobs = [];
         const back = [];
         for (const t of ok()) {
           const edit = {};
           const old = {};
-          for (const [f, v] of Object.entries(ED.draft)) {
+          for (const [f, v] of Object.entries(x.draft)) {
             const nv = f in NUMERIC ? (v.trim() ? String(parseInt(v.trim(), 10)) : "") : v.trim();
             if (nv !== val(t, f).trim()) { edit[f] = nv; old[f] = val(t, f); }
           }
-          if (ED.add.length || ED.remove.size) {
-            const nl = nextLabels(t);
+          if (x.add.length || x.remove.size) {
+            const nl = nextLabels(t, x);
             if (nl.join("\u0000") !== (t.labels || []).join("\u0000")) { edit.labels = nl; old.labels = [...(t.labels || [])]; }
           }
           if (Object.keys(edit).length) { jobs.push({ trackId: t.id, edit }); back.push({ trackId: t.id, edit: old }); }
         }
         return { jobs, back };
       }
-      function changeLines(jobs) {
-        const lines = [];
-        const one = jobs.length === 1;
-        const q = (s) => `“${s}”`;
+      /** "Genre “Folk”", "the label “kitchen”", "Year cleared": what a write changes. */
+      function summary(jobs, x) {
+        const q = (x) => `“${x}”`;
+        const out = [];
         for (const f of EDIT_FIELDS) {
           const js = jobs.filter((j) => f in j.edit);
-          if (!js.length) continue;
-          const nv = js[0].edit[f];
-          const was = val(track(js[0].trackId), f);
-          const to = nv === "" ? "cleared" : q(nv);
-          lines.push(h("li", null, h("b", { text: FIELD_LABEL[f] }),
-            one ? h("span", { text: `${was ? q(was) : "empty"} → ${to}` })
-              : h("span", { text: `${nv === "" ? "cleared" : `set to ${q(nv)}`}${js.length < jobs.length ? ` in ${plural(js.length, "file")}` : ""}` })));
+          if (js.length) out.push(js[0].edit[f] === "" ? `${FIELD_LABEL[f]} cleared` : `${FIELD_LABEL[f]} ${q(js[0].edit[f])}`);
         }
-        const adds = ED.add.filter((l) => jobs.some((j) => j.edit.labels && j.edit.labels.some((x) => lkey(x) === lkey(l))));
-        const rems = [...ED.remove.values()];
-        if (adds.length || rems.length) {
-          lines.push(h("li", null, h("b", { text: "Labels" }), h("span", null,
-            adds.length ? ["adds ", adds.map((l, i) => [i ? ", " : "", labelChip(l, true)])] : null,
-            adds.length && rems.length ? "; " : null,
-            rems.length ? ["takes off ", rems.map((l, i) => [i ? ", " : "", labelChip(l, true)])] : null)));
-        }
-        return lines;
+        const adds = x.add.filter((l) => jobs.some((j) => j.edit.labels && j.edit.labels.some((y) => lkey(y) === lkey(l))));
+        const rems = [...x.remove.values()];
+        if (adds.length) out.push(`${adds.length === 1 ? "the label" : "the labels"} ${adds.map(q).join(", ")} added`);
+        if (rems.length) out.push(`${rems.length === 1 ? "the label" : "the labels"} ${rems.map(q).join(", ")} taken off`);
+        const t = out.join(", ");
+        return t.charAt(0).toUpperCase() + t.slice(1);
       }
-      function save() {
-        if (lblIn.value.trim()) { addLabel(lblIn.value); lblIn.value = ""; }
-        if (!dirty() || !valid()) return;
-        const { jobs, back } = plan();
-        if (!jobs.length) {
-          toast("The files already have those tags.");
-          reset();
-          return;
-        }
-        const skipped = whyText(all());
-        confirmWrite(jobs, back, { lines: changeLines(jobs), skipped, onBack: opts.onBack, onDone: () => { if (opts.onSaved) opts.onSaved(); } });
+      /** Write what's changed into the files, now. One write at a time, in order. */
+      let writing = Promise.resolve();
+      const done = (x) => { ED.sending = ED.sending.filter((y) => y !== x); };
+      function commit() {
+        if (readOnly || !dirty() || !valid()) return writing;
+        // What's being written isn't a change any more; what's typed next is.
+        const x = { draft: { ...ED.draft }, add: [...ED.add], remove: new Map(ED.remove) };
+        ED.draft = {};
+        ED.add = [];
+        ED.remove = new Map();
+        ED.sending.push(x);
+        showStatus("Saving…");
+        writing = writing.then(async () => {
+          const { jobs, back } = plan(x);
+          if (!jobs.length) { done(x); settle(); showStatus(""); return; }
+          const what = summary(jobs, x);
+          const n = jobs.length;
+          const r = await writeTags(jobs, back, false, true);
+          done(x);
+          if (!r) { showStatus("Not saved."); return; }
+          if (r.undo) {
+            const u = { label: what, run: r.undo };
+            tagUndo.push(u);
+            if (tagUndo.length > 50) tagUndo.shift();
+            lastSave = { key, text: `Saved: ${what}${n > 1 ? `, in ${plural(n, "file")}` : ""}.`, undo: u };
+            showStatus(lastSave.text, u);
+          } else showStatus("");
+          settle();
+        });
+        return writing;
+      }
+      /** After a write: the fields measured against the files again. */
+      function settle() {
+        for (const f of EDIT_FIELDS) if (document.activeElement !== inputs[f] || !(f in ED.draft)) onField(f);
+        renderLabels();
+        update();
       }
 
       const grid = h("div", { class: "ted-grid" }, EDIT_FIELDS.map(fieldRow));
@@ -458,10 +471,12 @@
           h("p", { class: "hint", text: "Your own tags, like “road trip” or “kids”. They're saved in each file's Grouping field." })),
         errLine,
         Object.values(lists).map((l) => l.el),
-        opts.modal ? null : h("div", { class: "ted-foot" }, revertBtn, saveBtn));
+        statusLine);
       renderLabels();
       update();
-      return { el, ids: ED.ids, v: ED.v, dirty, valid, save, reset, saveBtn, revertBtn, count: () => ok().length };
+      if (lastSave && lastSave.key === key && tagUndo.includes(lastSave.undo)) showStatus(lastSave.text, lastSave.undo);
+      else showStatus(readOnly ? "" : "Changes are saved into the files as you make them.");
+      return { el, ids: ED.ids, v: ED.v, dirty, valid, commit, reset, busy: () => ED.sending.length > 0, count: () => ok().length };
     }
 
     /** "Edit tags…" from a playlist: the editor in a dialog. */
@@ -482,17 +497,15 @@
         toast(`Those tags can't be changed here: ${whyText(ts)}.`);
         return;
       }
-      let ed = null;
-      const open = () => {
-        const save = h("button", { type: "button", class: "btn primary", text: "Save to files…", onclick: () => ed.save() });
-        const cancel = h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal });
-        if (!ed) ed = makeEditor(ids, { modal: true, onBack: open, onState: () => { if (ed) save.disabled = ed.saveBtn.disabled; }, onSaved: () => {} });
-        modal({ title: ts.length === 1 ? "Edit tags" : `Edit the tags of ${ts.length} tracks`, body: [ed.el], buttons: [cancel, save], wide: false });
-        save.disabled = ed.saveBtn.disabled;
-        const first = ed.el.querySelector("input:not(:disabled)");
-        if (first) first.focus();
-      };
-      open();
+      const ed = makeEditor(ids, { modal: true });
+      modal({
+        title: ts.length === 1 ? "Edit tags" : `Edit the tags of ${ts.length} tracks`, body: [ed.el], wide: false,
+        buttons: [h("button", { type: "button", class: "btn primary", text: "Done", onclick: closeModal })],
+        // Whatever's typed and not yet entered is saved on the way out.
+        onClose: () => ed.commit(),
+      });
+      const first = ed.el.querySelector("input:not(:disabled)");
+      if (first) first.focus();
     }
 
     // ---- cleaning up file names -------------------------------------------------------------
@@ -1101,8 +1114,8 @@
       L.ids = [];
       L.at = new Map();
       rows.forEach((r, i) => { if (r.t) { L.ids.push(r.t.id); L.at.set(r.t.id, i); } });
-      // The selection only keeps what's shown, unless there are unsaved edits for it.
-      if (!(L.editor && L.editor.dirty())) {
+      // The selection only keeps what's shown, unless an edit for it is on its way.
+      if (!(L.editor && (L.editor.dirty() || L.editor.busy()))) {
         const shown = new Set(L.ids);
         const next = new Set([...L.sel].filter((x) => shown.has(x)));
         if (next.size !== L.sel.size) L.sel = next;
@@ -1304,21 +1317,9 @@
       else if (top + RH > s.scrollTop + s.clientHeight) s.scrollTop = top + RH - s.clientHeight;
       renderRows();
     }
-    function askKeep(discard) {
-      modal({
-        title: "Discard your tag changes?",
-        body: [h("p", { text: `You changed tags for ${plural(L.editor.count(), "track")} and haven't saved them to the files yet.` })],
-        buttons: [
-          h("button", { type: "button", class: "btn", text: "Discard changes", onclick: () => { closeModal(); discard(); } }),
-          h("button", { type: "button", class: "btn primary", text: "Keep editing", "data-autofocus": "", onclick: closeModal }),
-        ],
-      });
-    }
     function setSel(next, focus) {
-      if (!sameSet(next, L.sel) && L.editor && L.editor.dirty()) {
-        askKeep(() => { L.editor = null; setSel(next, focus); });
-        return false;
-      }
+      // An edit not yet entered is saved before the selection moves on.
+      if (!sameSet(next, L.sel) && L.editor && L.editor.dirty()) L.editor.commit();
       const changedSel = !sameSet(next, L.sel);
       L.sel = next;
       L.focus = focus;
@@ -1356,8 +1357,8 @@
         return;
       }
       const same = ed && ed.ids.length === ids.length && ed.ids.every((x, i) => x === ids[i]);
-      if (same && (ed.dirty() || (!force && (ed.v === S.tracksVersion || V.edit.contains(document.activeElement))))) return;
-      L.editor = makeEditor(ids, { onSaved: () => {} });
+      if (same && (ed.dirty() || ed.busy() || (!force && (ed.v === S.tracksVersion || V.edit.contains(document.activeElement))))) return;
+      L.editor = makeEditor(ids);
       const top = V.edit.scrollTop;
       fill(V.edit, L.editor.el);
       if (same) V.edit.scrollTop = top;
@@ -1397,6 +1398,10 @@
     });
     function onKey(e) {
       const mod = e.ctrlKey || e.metaKey;
+      // Ctrl+Z in the library (not while typing): the last tag edit, undone.
+      if (mod && !e.shiftKey && e.key.toLowerCase() === "z" && S.view === "library" && !e.target.closest("input, textarea, select") && document.getElementById("modal-back").hidden) {
+        if (undoTags()) { e.preventDefault(); return true; }
+      }
       if (mod && e.key.toLowerCase() === "f") {
         e.preventDefault();
         if (S.view === "library" && root()) { V.q.focus(); V.q.select(); } else openSearch();

@@ -13,6 +13,7 @@
     plus: '<svg viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>',
     up: '<svg viewBox="0 0 24 24"><path d="M12 7.5l6 6-1.4 1.4-4.6-4.6-4.6 4.6L6 13.5z"/></svg>',
     down: '<svg viewBox="0 0 24 24"><path d="M12 16.5l-6-6 1.4-1.4 4.6 4.6 4.6-4.6 1.4 1.4z"/></svg>',
+    grip: '<svg viewBox="0 0 24 24"><circle cx="9" cy="6.5" r="1.6"/><circle cx="15" cy="6.5" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="17.5" r="1.6"/><circle cx="15" cy="17.5" r="1.6"/></svg>',
     close: '<svg viewBox="0 0 24 24"><path d="M6.4 5L12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z"/></svg>',
     caret: '<svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>',
     volume: '<svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15 8.5a5 5 0 0 1 0 7l-1.2-1.2a3.3 3.3 0 0 0 0-4.6zM17.6 6a8.5 8.5 0 0 1 0 12l-1.2-1.2a6.8 6.8 0 0 0 0-9.6z"/></svg>',

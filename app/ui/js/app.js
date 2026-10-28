@@ -163,6 +163,7 @@
   /** The track a file's tags come from: none for a joined playlist or silence. */
   const fileTrack = (it) => (it.own ? "" : it.t.id);
   const gapOf = (s, id) => (s.gaps || []).find((g) => g.id === id);
+  const stickView = P.stickViewSetup({ S, pl, stickSet, layoutData, edit, openPlaylist, setView, newId, isGap, gapOf, renderSide, undo });
   /** A stick's list, as playlists: silences become stand-ins with no tracks. */
   function stickLists(s) {
     return s.playlistIds.map((id) => {
@@ -596,11 +597,14 @@
     const plItems = S.playlists.map((p) => {
       const ts = p.entries.map((e) => track(e.trackId));
       const dur = ts.reduce((a, t) => a + (t.exists ? t.duration || 0 : 0), 0);
+      const here = p.id === S.current && S.view === "playlist";
       return h("li", null, h("button", {
-        type: "button", class: `side-item${p.id === S.current ? " current" : ""}`, dataset: { pl: p.id },
-        "aria-current": p.id === S.current ? "page" : null,
+        type: "button", class: `side-item${here ? " current" : ""}`, dataset: { pl: p.id },
+        "aria-current": here ? "page" : null,
+        title: "Drag onto a stick to put it there",
         onclick: () => { if (S.view !== "playlist") setView("playlist"); openPlaylist(p.id); },
         ondblclick: () => startRename("playlist", p.id),
+        onpointerdown: (e) => { if (e.button === 0 && e.pointerType !== "touch") stickView.startDrag(e, { id: p.id, name: p.name, from: "side" }); },
         oncontextmenu: (e) => { e.preventDefault(); playlistMenu(p, { x: e.clientX, y: e.clientY }); },
       }, h("span", { class: "nm", text: p.name }), h("span", { class: "mt", text: `${plural(p.entries.length, "track")}${p.join ? " as one" : ""}, ${length(dur)}` })));
     });
@@ -612,11 +616,13 @@
       const flag = inNow
         ? h("span", { class: `flag plug${st.current ? "" : " out"}`, text: st.current ? "plugged in" : "plugged in, out of date" })
         : st.never ? h("span", { class: "flag ok", text: "not synced" }) : st.current ? null : h("span", { class: "flag", text: "out of date" });
+      const here = s.id === S.setId && S.view === "stick";
       return h("li", null, h("button", {
-        type: "button", class: `side-item${s.id === S.setId ? " current" : ""}${inNow ? " plugged" : ""}`, dataset: { set: s.id },
-        onclick: () => { if (S.view !== "playlist") setView("playlist"); selectSet(s.id); },
-        ondblclick: () => openLayout(s.id),
-        title: "Double-click to see everything on this stick",
+        type: "button", class: `side-item${here ? " current" : s.id === S.setId ? " chosen" : ""}${inNow ? " plugged" : ""}`, dataset: { set: s.id },
+        "aria-current": here ? "page" : null,
+        onclick: () => openStick(s.id),
+        ondblclick: () => startRename("set", s.id),
+        title: "Everything on this stick, in order. Drop a playlist here to put it on.",
         oncontextmenu: (e) => { e.preventDefault(); setMenu(s, { x: e.clientX, y: e.clientY }); },
       }, h("span", { class: "nm", text: s.name }), flag,
       h("span", { class: "mt", text: `${plural(plan.folders.length, "playlist")}, ${plan.profile.name}` })));
@@ -635,6 +641,13 @@
     );
   }
 
+  /** A stick's view in the middle of the window. */
+  function openStick(id) {
+    if (!stickSet(id)) return;
+    if (S.setId !== id) { S.setId = id; saveSetting("currentSet", id); }
+    if (S.view !== "stick") setView("stick");
+    else renderAll();
+  }
   function selectSet(id) {
     const s = stickSet(id);
     if (!s || S.setId === id) return;
@@ -694,7 +707,7 @@
   }
   function setMenu(s, at) {
     menu(at, [
-      { label: "Show the stick's layout", action: () => openLayout(s.id) },
+      { label: "Open", action: () => openStick(s.id) },
       "-",
       { label: "Rename", action: () => startRename("set", s.id) },
       {
@@ -1683,7 +1696,9 @@
     renderDevices(plan);
     renderSpace(plan);
     renderSyncBar(plan);
-    sendLayouts();
+    // The stick's view edits its list itself; the panel keeps to the device and sync.
+    ST.folders.hidden = S.view === "stick";
+    stickView.render();
   }
 
   function renderStickHead(plan) {
@@ -1808,7 +1823,7 @@
     } else if (first) {
       names = h("div", { class: "prof-names" },
         h("p", null, "Files named like ", h("span", { class: "mono", text: first.name })),
-        h("button", { type: "button", class: "btn quiet small", text: "List all", title: "Every folder and file, in a window of its own", onclick: () => openLayout(s.id) }));
+        h("button", { type: "button", class: "btn quiet small", text: "List all", title: "Every folder and file on this stick, in the middle of the window", onclick: () => openStick(s.id) }));
     }
     fill(ST.profile,
       h("h3", { text: "Player profile" }),
@@ -2036,6 +2051,15 @@
       main = `${pp.playing ? "PLAY" : "PAUSE"} ${t.title || t.filename}`;
       time = clock(pp.pos);
       sub = `${t.title || t.filename}${t.artist ? `, ${t.artist}` : ""}. From the library.`;
+    } else if (S.view === "stick" && !pp.entryId && s) {
+      const plan = planSet(s);
+      main = s.name;
+      count = String(plan.folders.length);
+      unit = plan.single ? "TRK" : "DIR";
+      if (plan.single) count = String(plan.all.length);
+      time = clock(plan.all.reduce((a, it) => a + (it.secs || 0), 0));
+      const st = staleness(plan);
+      sub = st.never ? `${s.name} hasn't been synced yet.` : st.current ? `${s.name} is up to date.` : `${s.name} is out of date: ${st.parts.join(", ")}.`;
     } else if (S.view === "library" && !pp.entryId) {
       ({ main, count, unit, time, sub } = lib.display());
     } else if (S.scan) {
@@ -2084,11 +2108,8 @@
     if (S.view === "library") lib.renderView();
   }
 
-  // ---- stick layout windows ------------------------------------------------------------------
-  // A window per stick shows everything on it, in FAT order. This window
-  // plans the stick and sends the plan whenever anything changes.
-  const layoutsOpen = new Set();
-  let layoutTimer = null;
+  // ---- a stick's layout ---------------------------------------------------------------------
+  // Everything on a stick, in FAT order, for its view (stickview.js).
   function layoutData(setId) {
     const s = stickSet(setId);
     if (!s) return { setId, gone: true };
@@ -2101,7 +2122,6 @@
     const kind = (f) => (f.p.gap != null ? "silence" : f.p.join ? "joined" : "playlist");
     return {
       setId, name: s.name, profile: pr.name, single: plan.single, label: N.volumeLabel(s.label || s.name) || "",
-      theme: S.theme === "system" ? hostTheme || "system" : S.theme,
       status: st.never ? { kind: "new", text: "Not synced yet." }
         : st.current ? { kind: "ok", text: `Up to date. Synced ${ago(st.at)}.` }
           : { kind: "out", text: `Out of date: ${st.parts.join(", ")} since the last sync ${ago(st.at)}.` },
@@ -2110,7 +2130,7 @@
       ignored: plan.ignored.map((p) => p.name),
       errors: plan.errors,
       folders: plan.folders.map((f) => ({
-        folder: f.folder || "", playlist: f.p.name, kind: kind(f), tracks: f.present.length,
+        id: f.p.id, folder: f.folder || "", playlist: f.p.name, kind: kind(f), tracks: f.present.length,
         secs: f.files.reduce((a, it) => a + (it.secs || 0), 0),
         bytes: f.files.reduce((a, it) => a + it.bytes, 0),
         skipped: f.items.filter((it) => it.d.action === "skip").map((it) => `${it.t.title || it.t.filename} (${it.d.reason.toLowerCase()})`),
@@ -2123,24 +2143,6 @@
       })),
     };
   }
-  function sendLayouts() {
-    if (!layoutsOpen.size) return;
-    clearTimeout(layoutTimer);
-    layoutTimer = setTimeout(() => { for (const id of layoutsOpen) P.link.emit("layout:data", layoutData(id)); }, 120);
-  }
-  function openLayout(setId) {
-    const s = stickSet(setId);
-    if (!s) return;
-    layoutsOpen.add(setId);
-    Promise.resolve(P.link.open(setId, `Layout of ${s.name}`)).catch((e) => toast(`Couldn't open the layout window: ${e}`));
-  }
-  P.link.on("layout:want", (m) => {
-    if (!m || !stickSet(m.setId)) return;
-    layoutsOpen.add(m.setId);
-    P.link.emit("layout:data", layoutData(m.setId));
-  });
-  P.link.on("layout:gone", (m) => { if (m) layoutsOpen.delete(m.setId); });
-
   // ---- dialogs ----------------------------------------------------------------------------------
   async function locate(t) {
     if (DEMO) {
@@ -3141,12 +3143,15 @@
   function tdragLost() { if (tdrag) endTrackDrag(true); }
 
   // ---- the library view ----------------------------------------------------------------------------
+  /** The middle of the window: a playlist, the library, or a stick. */
   function setView(v) {
     if (v === S.view) { if (v === "library") lib.renderView(); return; }
     S.view = v;
     if (v === "library" && S.searching) { S.searching = false; $("app").classList.remove("searching"); }
     $("app").classList.toggle("lib-mode", v === "library");
+    $("app").classList.toggle("stick-mode", v === "stick");
     $("libview").hidden = v !== "library";
+    $("stickview").hidden = v !== "stick";
     const b = $("lib-btn");
     b.setAttribute("aria-pressed", String(v === "library"));
     b.classList.toggle("on", v === "library");
@@ -3158,7 +3163,7 @@
       if (q && S.music && S.music.root) q.focus({ preventScroll: true });
     } else {
       renderAll();
-      $("list").focus({ preventScroll: true });
+      if (v === "playlist") $("list").focus({ preventScroll: true });
     }
   }
 
@@ -3437,7 +3442,7 @@
     persist();
     scheduleWork();
     // For the app's self-test (tests/app_e2e.py) and for poking around in the inspector.
-    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, edgesDialog, seekTo, refreshSticks, holder, selectSet, openLayout, layoutData, setView, lib, toggleTags, ready: true };
+    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, edgesDialog, seekTo, refreshSticks, holder, selectSet, openStick, layoutData, setView, lib, toggleTags, ready: true };
     if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Fatstick to get it back.");
     if (!DEMO) {
       stickPoll = setInterval(() => { if (!(S.sync && S.sync.running)) refreshSticks(true); }, 3000);

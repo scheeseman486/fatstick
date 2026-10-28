@@ -148,14 +148,12 @@
     check("the stick now carries a note naming this stick (set)", !!known);
     lines.push(`INFO names=${JSON.stringify(A.planSet(A.stickSet()).folders.map((f) => [f.folder, f.files.map((it) => it.name)]))}`);
 
-    // The stick's layout window, from a double-click in the sidebar: a real
-    // second window, fed by this one.
-    let drawn = null;
-    const stop = await T.event.listen("layout:rendered", (ev) => { drawn = ev.payload; });
-    document.querySelector(`[data-set="${set.id}"]`).dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-    await until(() => drawn, 15000);
-    stop();
-    check("the layout window opens and shows the stick", !!drawn && drawn.folders === 3 && drawn.files === 6 && drawn.joined === 1 && drawn.silences === 1, JSON.stringify(drawn));
+    // The stick's view, from a click in the sidebar: its folders in order.
+    document.querySelector(`[data-set="${set.id}"]`).click();
+    const shown = await until(() => !document.getElementById("stickview").hidden && document.querySelectorAll("#stickview .lay-folder").length, 5000);
+    const kinds = [...document.querySelectorAll("#stickview .lay-folder")].map((f) => [...f.classList].find((c) => c.startsWith("k-")));
+    check("the stick's view shows what's on it, in order", !!shown && JSON.stringify(kinds) === JSON.stringify(["k-playlist", "k-silence", "k-joined"]) && document.querySelectorAll("#stickview .lay-file").length >= 5, JSON.stringify(kinds));
+    document.querySelector(`[data-pl="${p.id}"]`).click();
 
     // The player (a silent output in the test): the position moves, then stop.
     await A.playEntry(p.entries[0].id, p.id);

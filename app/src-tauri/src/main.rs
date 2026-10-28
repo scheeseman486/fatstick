@@ -492,30 +492,6 @@ async fn library_rename(st: State<'_, AppState>, jobs: Vec<folder::RenameJob>) -
 
 // ---- stick layout windows -------------------------------------------------------------------
 
-/// A stick's layout in a window of its own, or the one already open brought
-/// forward. The window gets its data from the main window over events.
-/// (Async: making a window in a synchronous command can hang on Windows.)
-#[tauri::command]
-async fn open_layout(app: AppHandle, set_id: String, title: String) -> Res<()> {
-    let id: String = set_id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
-    if id.is_empty() {
-        return Err("That stick has no id.".into());
-    }
-    let label = format!("layout-{id}");
-    if let Some(w) = app.get_webview_window(&label) {
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-        return Ok(());
-    }
-    tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::App(format!("layout.html?set={id}").into()))
-        .title(title)
-        .inner_size(640.0, 780.0)
-        .min_inner_size(380.0, 420.0)
-        .build()
-        .map_err(err)?;
-    Ok(())
-}
-
 // ---- about ---------------------------------------------------------------------------------
 
 #[derive(Serialize)]
@@ -619,7 +595,6 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             init,
-            open_layout,
             library_info,
             library_set_root,
             library_scan,

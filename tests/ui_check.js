@@ -170,11 +170,11 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   check('it opens on the tab last used', (await p.getByRole('tab', { selected: true }).textContent()) === 'Tags and cover art');
   await p.getByRole('tab', { name: 'Files and folders' }).click();
   await p.keyboard.press('Escape');
-  // "List all" opens the stick's layout window.
-  const [lay0] = await Promise.all([p.waitForEvent('popup'), p.getByRole('button', { name: 'List all' }).click()]);
-  await lay0.waitForSelector('.lay-folder', { timeout: 5000 });
-  check('"List all" opens the layout window', (await lay0.locator('.lay-folder').count()) === 2);
-  await lay0.close();
+  // "List all" shows the stick in the middle of the window.
+  await p.getByRole('button', { name: 'List all' }).click();
+  check('"List all" shows the stick in the middle of the window', await p.locator('#stickview').isVisible() && (await p.locator('#stickview .lay-folder').count()) === 2);
+  await p.locator('[data-pl="p-road"]').click();
+  check('a playlist on the left goes back to it', await p.locator('#main').isVisible() && await p.locator('#stickview').isHidden());
 
   // 12. Real files dropped onto the list.
   const files = ['tone.mp3', 'fixture.flac'].map(n => ({ n, b64: fs.readFileSync(path.join(work, n)).toString('base64') }));
@@ -220,6 +220,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   await p.keyboard.press('Escape');
   await p.keyboard.press('Control+z');
   await p.locator('[data-set="set-car"]').click();
+  await p.locator('[data-pl="p-road"]').click();
 
   // 14. A track's start and end: cut 2 s from the start of row 2 and add
   // 1.5 s of silence at its end. It's encoded rather than copied.
@@ -271,25 +272,80 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   check('the stick gets one file for it, made of its 12 tracks', JSON.stringify(joinPlan) === JSON.stringify([1, 12, "01 - Kids' car.mp3", 12]), JSON.stringify(joinPlan));
   check("the stick panel counts it as joined", /12 tracks joined into one/.test(await p.locator('#stick .folders').textContent()));
 
-  // 17. The stick's layout in a window of its own, from a double-click in the
-  // sidebar: every folder, collapsible, kept up to date.
-  const [lay] = await Promise.all([p.waitForEvent('popup'), p.locator('[data-set="set-car"]').dblclick()]);
-  lay.on('pageerror', (e) => errs.push(`layout window: ${e.message}`));
-  await lay.waitForSelector('.lay-folder', { timeout: 5000 });
-  const heads = await lay.locator('.lay-folder > summary').allTextContents();
-  check('the layout window lists the folders in stick order', heads.length === 3 && /^01 Road Trip\//.test(heads[0]) && /12 tracks joined into one file/.test(heads[1]) && /^03 Silence\/10 s of silence/.test(heads[2]), heads.join(' | '));
-  check('a joined track lists its tracks with their start times', (await lay.locator('.lay-folder.k-joined .lay-parts li').count()) === 12);
-  await lay.setViewportSize({ width: 640, height: 780 });
-  await lay.screenshot({ path: `${out}/layout-window.png` });
-  await lay.locator('.lay-folder > summary').first().click();
-  check('folders collapse', !(await lay.locator('.lay-folder').first().evaluate((d) => d.open)));
+  // 17. The stick's view, from the sidebar: every folder in stick order,
+  // collapsible, for organizing the stick's playlists.
+  const carIds = () => p.evaluate(() => Fatstick.app.stickSet('set-car').playlistIds.slice());
+  const folders = () => p.locator('#stickview .lay-folder');
+  await p.locator('[data-set="set-car"]').click();
+  check('clicking a stick shows it in the middle of the window', await p.locator('#stickview').isVisible() && await p.locator('#main').isHidden() && (await p.locator('[data-set="set-car"]').getAttribute('aria-current')) === 'page');
+  const heads = await p.locator('#stickview .lay-folder > summary, #stickview .lay-sumline').allTextContents();
+  check('it lists the folders in stick order', heads.length === 3 && /^01 Road Trip\//.test(heads[0]) && /12 tracks joined into one file/.test(heads[1]) && /^03 Silence\/s of silence/.test(heads[2]), heads.join(' | '));
+  check('a joined track lists its tracks with their start times', (await p.locator('#stickview .lay-folder.k-joined .lay-parts li').count()) === 12);
+  check('nothing in a playlist is edited here', (await p.locator('#stickview input[type="checkbox"]').count()) === 0);
+  check('the stick panel leaves the list to the view', await p.locator('#stick [aria-label="Playlists on this stick"]').isHidden());
+  check('the display shows the stick', /CAR STICK/.test((await p.locator('#disp-text').textContent()).toUpperCase()) && /DIR/.test(await p.locator('#disp-unit').textContent()));
+  await p.screenshot({ path: `${out}/stick-view.png` });
+  await folders().first().locator('summary .lay-fname').click();
+  check('folders collapse', !(await folders().first().evaluate((d) => d.open)));
+  // Alt+Down on a handle moves a playlist.
+  const ids0 = await carIds();
+  await folders().first().locator('.sv-grip').focus();
+  await p.keyboard.press('Alt+ArrowDown');
+  check('Alt+Down on the handle moves it down', (await carIds())[1] === ids0[0], JSON.stringify(await carIds()));
+  await p.keyboard.press('Control+z');
+  check('undo puts it back', JSON.stringify(await carIds()) === JSON.stringify(ids0));
+  // Silence between the first two.
+  await p.locator('.sv-insert').first().hover();
+  await p.locator('.sv-insert').first().locator('.sv-ins-btn').click();
+  const withGap = await carIds();
+  check('"Silence here" puts silence between them', withGap.length === 4 && /^gap-/.test(withGap[1]), JSON.stringify(withGap));
+  await p.waitForFunction(() => document.activeElement && document.activeElement.matches('#stickview input.secs'), null, { timeout: 2000 }).catch(() => {});
+  await p.keyboard.type('5');
+  await p.keyboard.press('Enter');
+  check('and its seconds are ready to change', await p.evaluate((id) => Fatstick.app.stickSet('set-car').gaps.find((g) => g.id === id).seconds, withGap[1]) === 5);
+  await p.keyboard.press('Control+z');
+  await p.keyboard.press('Control+z');
+  check('undo takes it off again', JSON.stringify(await carIds()) === JSON.stringify(ids0));
+  await p.getByRole('button', { name: 'Collapse all' }).click();
+  // Drag a playlist in from the left, above the first folder.
+  const dragPl = async (from, to, frac = 0.25) => {
+    const a = await from.boundingBox();
+    const z = await to.boundingBox();
+    await p.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+    await p.mouse.down();
+    await p.mouse.move(a.x + a.width / 2 + 20, a.y + a.height / 2 + 10, { steps: 3 });
+    await p.mouse.move(z.x + z.width / 2, z.y + Math.min(z.height * frac, 40), { steps: 8 });
+    const badge = await p.locator('#drag-badge').textContent();
+    await p.mouse.up();
+    return badge;
+  };
+  const badge = await dragPl(p.locator('[data-pl="p-gym"]'), folders().first(), 0.2);
+  check('dragging a playlist from the left puts it where it\'s dropped', (await carIds())[0] === 'p-gym' && /Put Gym here/.test(badge), `${badge}: ${JSON.stringify(await carIds())}`);
+  check('the drop doesn\'t open the playlist', await p.locator('#stickview').isVisible());
+  // ... and the handles move them by dragging too.
+  await p.getByRole('button', { name: 'Collapse all' }).click();
+  await dragPl(folders().first().locator('.sv-grip'), folders().last(), 0.9);
+  check('dragging a handle moves it', (await carIds()).at(-1) === 'p-gym', JSON.stringify(await carIds()));
+  await p.keyboard.press('Control+z');
+  await p.keyboard.press('Control+z');
+  check('undo puts the stick back as it was', JSON.stringify(await carIds()) === JSON.stringify(ids0), JSON.stringify(await carIds()));
+  // Onto a stick in the sidebar: it goes on the end of that stick.
+  await dragPl(p.locator('[data-pl="p-sleep"]'), p.locator('[data-set="set-gym"]'), 0.5);
+  check('a playlist dropped on a stick on the left goes on it', await p.evaluate(() => Fatstick.app.stickSet('set-gym').playlistIds.includes('p-sleep')));
+  await p.keyboard.press('Control+z');
+  // Taken off, with undo.
+  await folders().nth(1).hover();
+  await folders().nth(1).getByRole('button', { name: /Take .* off this stick/ }).click();
+  check('a playlist can be taken off', (await carIds()).length === 2 && !(await carIds()).includes('p-kids'));
+  await p.keyboard.press('Control+z');
+  check('and put back with undo', (await carIds()).includes('p-kids'));
+  // A change to a playlist shows here too.
   await p.locator('[data-pl="p-kids"]').click();
   await p.locator('#join-btn').click();
   await p.locator('#join-on').uncheck();
   await p.keyboard.press('Escape');
-  await lay.waitForFunction(() => /12 files/.test(document.querySelectorAll('.lay-folder > summary')[1].textContent), null, { timeout: 5000 }).catch(() => {});
-  check('the layout window follows edits', /^02 Kids' car\/12 files/.test(await lay.locator('.lay-folder > summary').nth(1).textContent()));
-  await lay.close();
+  await p.locator('[data-set="set-car"]').click();
+  check('the stick view follows edits made in the playlist', /12 files/.test(await folders().nth(1).locator('summary').textContent()));
   await p.locator('[data-pl="p-road"]').click();
 
   // 18. Sync flow.
@@ -383,34 +439,42 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.waitForTimeout(150);
     check('the playlist gets them', parseInt(await p.locator('[data-pl="p-gym"] .mt').textContent(), 10) === gymWas + 2, `${gymWas} -> ${await p.locator('[data-pl="p-gym"] .mt').textContent()}`);
 
-    // 22. Tags written into the files, after a preview, with undo.
-    const tagsOf = (ids) => p.evaluate((ids) => ids.map((id) => { const t = Fatstick.app.S.tracks.get(id); return `${t.genre}|${t.labels.join(',')}`; }), ids);
+    // 22. Tags saved into the files as they're entered: no preview, no prompts, and undo.
+    const tagsOf = (ids) => p.evaluate((ids) => ids.map((id) => { const t = Fatstick.app.S.tracks.get(id); return `${t.genre}|${t.labels.join(',')}|${t.year || ''}`; }), ids);
     const selIds = await p.evaluate(() => Fatstick.app.lib.state.L.ids.filter((x) => Fatstick.app.lib.state.L.sel.has(x)));
     const tagsBefore = await tagsOf(selIds);
+    const toastSays = (re) => p.waitForFunction((src) => new RegExp(src).test(document.getElementById('toast').textContent), re.source, { timeout: 5000 }).catch(() => {});
+    const settled = (re) => p.waitForFunction((src) => new RegExp(src).test(document.querySelector('.lib-edit .ted-status').textContent), re.source, { timeout: 5000 }).catch(() => {});
+    check('the editor says edits save as they are made', /saved into the files as you make them/.test(await p.locator('.lib-edit .ted-status').textContent()));
     await p.locator('.lib-edit input[id^="ted-genre"]').fill('Kids');
+    await p.keyboard.press('Enter');
+    await settled(/Saved: Genre/);
+    check('Enter in a field writes it into the files, without asking', (await tagsOf(selIds)).every((x) => /^Kids\|/.test(x)) && await p.locator('#modal-back').isHidden(), (await tagsOf(selIds)).join(' / '));
+    check('and says what was saved', /Saved: Genre “Kids”, in 2 files\./.test(await p.locator('.lib-edit .ted-status').textContent()));
     await p.locator('.lib-edit input[id^="ted-lbl"]').fill('car');
     await p.keyboard.press('Enter');
-    check('the editor shows the new label on all of them', (await p.locator('.lib-edit .tag.lbl.added', { hasText: 'car' }).count()) === 1);
-    await p.locator('.lib-edit .ted-foot .btn.primary').click();
-    const preview = await p.locator('#modal').textContent();
-    check('saving shows what changes first', /Write these tags into 2 files/.test(preview) && /Genre/.test(preview) && /adds/.test(preview), preview.slice(0, 120));
-    await p.screenshot({ path: `${out}/tag-preview.png` });
-    await p.locator('#modal .mfoot .btn.primary').click();
-    const toastSays = (re) => p.waitForFunction((src) => new RegExp(src).test(document.getElementById('toast').textContent), re.source, { timeout: 5000 }).catch(() => {});
-    await toastSays(/Wrote tags/);
-    check('then writes them', /Wrote tags into 2 files/.test(await p.locator('#toast').textContent()) && (await tagsOf(selIds)).every((x) => /^Kids\|.*car/.test(x)), (await tagsOf(selIds)).join(' / '));
+    await settled(/label “car” added/);
+    check('a label is written as soon as it is added', (await tagsOf(selIds)).every((x) => /^Kids\|.*car/.test(x)), (await tagsOf(selIds)).join(' / '));
     check('the table shows the new label', (await p.locator('.lr.sel .c-labels').evaluateAll((cs) => cs.filter((c) => c.title.split(', ').includes('car')).length)) === 2);
-    await p.locator('#toast .btn').click();
-    await toastSays(/Put the old tags back/);
-    check('undo writes the old tags back', JSON.stringify(await tagsOf(selIds)) === JSON.stringify(tagsBefore), (await tagsOf(selIds)).join(' / '));
+    await p.screenshot({ path: `${out}/tags-saved.png` });
+    await p.locator('.lib-edit .ted-status .btn', { hasText: 'Undo' }).click();
+    await p.waitForFunction(() => Fatstick.app.lib.state.L.ids.filter((x) => Fatstick.app.lib.state.L.sel.has(x)).every((id) => !Fatstick.app.S.tracks.get(id).labels.includes('car')), null, { timeout: 5000 }).catch(() => {});
+    check('Undo beside it takes the label off again', (await tagsOf(selIds)).every((x) => /^Kids\|/.test(x) && !/car/.test(x)), (await tagsOf(selIds)).join(' / '));
+    await p.locator('.lib-scroll').focus();
+    await p.keyboard.press('Control+z');
+    await p.waitForFunction((want) => JSON.stringify(Fatstick.app.lib.state.L.ids.filter((x) => Fatstick.app.lib.state.L.sel.has(x)).map((id) => { const t = Fatstick.app.S.tracks.get(id); return `${t.genre}|${t.labels.join(',')}|${t.year || ''}`; })) === want, JSON.stringify(tagsBefore), { timeout: 5000 }).catch(() => {});
+    check('Ctrl+Z puts the genre back', JSON.stringify(await tagsOf(selIds)) === JSON.stringify(tagsBefore), (await tagsOf(selIds)).join(' / '));
 
-    // 23. Unsaved edits aren't lost by clicking elsewhere.
+    // 23. Clicking away saves what was typed: no warning.
     await p.locator('.lib-edit input[id^="ted-year"]').fill('1999');
     await p.locator('.lr').nth(4).click();
-    check('changing the selection asks first', /Discard your tag changes/.test(await p.locator('#modal-title').textContent()));
-    await p.getByRole('button', { name: 'Keep editing' }).click();
-    check('keeping them keeps the selection and the edit', (await p.locator('.lr.sel').count()) === 2 && (await p.locator('.lib-edit input[id^="ted-year"]').inputValue()) === '1999');
-    await p.locator('.lib-edit .ted-foot .btn', { hasText: 'Revert' }).click();
+    await p.waitForTimeout(300);
+    check('clicking another track saves the edit, without asking', await p.locator('#modal-back').isHidden() && (await tagsOf(selIds)).every((x) => /\|1999$/.test(x)), (await tagsOf(selIds)).join(' / '));
+    await p.keyboard.press('Control+z');
+    await p.waitForTimeout(300);
+    check('and Ctrl+Z puts it back', JSON.stringify(await tagsOf(selIds)) === JSON.stringify(tagsBefore), (await tagsOf(selIds)).join(' / '));
+    await p.locator('.lr').nth(0).click();
+    await p.locator('.lr').nth(1).click({ modifiers: ['Shift'] });
 
     // 24. File names cleaned up from the tags, with undo.
     const pathsOf = (ids) => p.evaluate((ids) => ids.map((id) => Fatstick.app.S.tracks.get(id).path), ids);

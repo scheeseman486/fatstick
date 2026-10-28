@@ -103,18 +103,16 @@
     clickRow(rowOf("Lanterns"));
     clickRow(rowOf("Harbour Song"), { ctrlKey: true });
     check("two tracks selected", $$(".lr.sel").length === 2 && /2 tracks/.test($(".lib-edit h3").textContent));
-    typeIn($('.lib-edit input[id^="ted-genre"]'), "Night Folk");
+    const genre = $('.lib-edit input[id^="ted-genre"]');
+    typeIn(genre, "Night Folk");
+    genre.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
     const lbl = $('.lib-edit input[id^="ted-lbl"]');
     lbl.value = "kitchen";
     lbl.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
     const road = $$(".lib-edit .tag.lbl").find((t) => /road trip/.test(t.textContent));
     road.querySelector('button[aria-label^="Remove"]').click();
-    $(".lib-edit .ted-foot .btn.primary").click();
-    const preview = await until(() => !$("#modal-back").hidden && $("#modal").textContent);
-    check("saving shows the changes first", /Write these tags into 2 files/.test(preview) && /Night Folk/.test(preview), preview && preview.slice(0, 160));
-    $("#modal .mfoot .btn.primary").click();
-    const wrote = await until(() => /Wrote tags into 2 files/.test(toast()), 30000);
-    check("the tags are written", !!wrote, toast());
+    const wrote = await until(() => /“road trip” taken off/.test($(".lib-edit .ted-status").textContent), 30000);
+    check("each change is written as it's made, with no prompt", !!wrote && $("#modal-back").hidden, $(".lib-edit .ted-status").textContent);
     const now = (title) => inLib().find((t) => t.title === title);
     check("the library reads them back", ["Lanterns", "Harbour Song"].every((x) => now(x).genre === "Night Folk" && now(x).labels.includes("kitchen") && now(x).labels.includes("chill") && !now(x).labels.includes("road trip")),
       ["Lanterns", "Harbour Song"].map((x) => `${now(x).genre} [${now(x).labels}]`).join(" / "));
