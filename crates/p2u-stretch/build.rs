@@ -13,8 +13,15 @@ fn main() {
         .opt_level(3)
         .debug(false)
         .warnings(false);
-    if b.get_compiler().is_like_msvc() {
+    let cc = b.get_compiler();
+    if cc.is_like_msvc() {
         b.flag("/std:c++14").flag("/EHsc");
+        // Cross-building for Windows (cargo-xwin) uses the distribution's
+        // clang-cl with the newest MSVC headers, which ask for a newer clang
+        // than Ubuntu ships; the few parts of the STL used here don't mind.
+        if cc.is_like_clang_cl() {
+            b.define("_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH", None);
+        }
     } else {
         b.flag("-std=c++14");
     }
