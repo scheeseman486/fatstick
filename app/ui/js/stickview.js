@@ -9,7 +9,7 @@
   const { h, fill, icon, clock, length, bytes, plural, toast } = Fatstick.ui;
 
   Fatstick.stickViewSetup = function (core) {
-    const { S, pl, stickSet, layoutData, edit, newId, isGap, gapOf, renderSide } = core;
+    const { S, pl, stickSet, layoutData, edit, newId, isGap, gapOf, renderSide, printSetlist } = core;
     const root = document.getElementById("stickview");
     // Folders and joined tracks closed by the person, remembered per stick.
     let closed = new Set();
@@ -123,7 +123,8 @@
             h("span", { class: "tools" },
               d.single ? null : h("button", { type: "button", class: "btn small", id: "sv-silence", title: "Silence at the end; drag it where it goes", onclick: () => addSilence(s, s.playlistIds.length) }, icon("plus"), "Silence"),
               h("button", { type: "button", class: "btn small", text: "Expand all", onclick: all(true) }),
-              h("button", { type: "button", class: "btn small", text: "Collapse all", onclick: all(false) })))),
+              h("button", { type: "button", class: "btn small", text: "Collapse all", onclick: all(false) }),
+              h("button", { type: "button", class: "btn small", text: "Print a setlist…", title: "The stick's playlists as a setlist on paper (Ctrl+P)", onclick: () => printSetlist() })))),
         h("div", { class: "sv-scroll", id: "sv-scroll" },
           d.errors && d.errors.length ? h("p", { class: "st-note err", text: `The file names don't work: ${d.errors[0]}` }) : null,
           items.length ? list : h("div", { class: "sv-empty", id: "sv-list" },

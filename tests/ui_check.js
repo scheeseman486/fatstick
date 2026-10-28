@@ -652,26 +652,41 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('the sidebar never scrolls sideways', side[0] <= side[1] && side[2] === 'hidden', JSON.stringify(side));
   }
 
-  // 31. A setlist to print: Ctrl+P, settings beside a preview of the pages, black and white.
+  // 31. A stick's setlist to print: Ctrl+P, each playlist in full, by name
+  // or left out, its silences as lines, a preview of the pages, black and white.
   {
     await p.locator('[data-pl="p-road"]').click();
+    const car = await p.evaluate(() => { const A = Fatstick.app; const s = A.stickSet(); return { id: s.id, name: s.name, items: s.playlistIds.map((id) => (id.startsWith('gap-') ? null : A.pl(id).name)) }; });
     await p.keyboard.press('Control+p');
     await p.waitForSelector('.sl-thumb .sl-page', { timeout: 5000 });
-    check('Ctrl+P opens the setlist with a preview of its pages', /^Print a setlist of Road Trip/.test(await p.locator('#modal-title').textContent()) && (await p.locator('.sl-thumb').count()) >= 1);
+    check('Ctrl+P opens the chosen stick\'s setlist with a preview of its pages', (await p.locator('#modal-title').textContent()) === 'Print a setlist' && (await p.locator('.sl-thumb .sl-h1').first().textContent()) === car.name, car.name);
+    const named = car.items.filter(Boolean);
+    const sets = await p.locator('.sl-thumb .sl-set:not(.gap) .sl-set-name').allTextContents();
+    check('each playlist on it is headed by its name, in the stick\'s order', JSON.stringify(sets) === JSON.stringify(named), sets.join(' | '));
+    check('its silences are lines of their own', (await p.locator('.sl-thumb .sl-set.gap').count()) === car.items.filter((x) => x === null).length);
+    const songsOf = async () => p.locator('.sl-thumb .sl-song').count();
+    const all = await songsOf();
+    // The second playlist as filler: its name only.
+    await p.locator('.sl-pl').nth(car.items.indexOf(named[1])).locator('label', { hasText: 'Name only' }).click();
+    await p.waitForTimeout(150);
+    const only = await p.locator('.sl-thumb .sl-set.only:not(.gap) .sl-set-name').allTextContents();
+    check('a playlist can show just its name (filler between sets)', JSON.stringify(only) === JSON.stringify([named[1]]) && (await songsOf()) < all, `${only.join(' | ')}; ${await songsOf()} of ${all} songs`);
+    // The first left out.
+    await p.locator('.sl-pl').nth(car.items.indexOf(named[0])).locator('label', { hasText: 'Leave out' }).click();
+    await p.waitForTimeout(150);
+    check('and one can be left out', !(await p.locator('.sl-thumb .sl-set-name').allTextContents()).includes(named[0]) && (await songsOf()) === 0);
+    await p.locator('.sl-pl').nth(car.items.indexOf(named[0])).locator('label', { hasText: 'Songs' }).click();
+    await p.waitForTimeout(150);
     const pages1 = await p.locator('.sl-thumb').count();
-    const firstTitle = await p.locator('.sl-thumb .sl-title').first().textContent();
-    const want = await p.evaluate(() => { const A = Fatstick.app; const e = A.pl().entries[0]; const t = A.track(e.trackId); return t.title; });
-    check('it lists the playlist in order, numbered', firstTitle === want && (await p.locator('.sl-thumb .sl-n').first().textContent()) === '1', firstTitle);
     const colours = await p.evaluate(() => [...document.querySelectorAll('.sl-thumb .sl-page, .sl-thumb .sl-page *')].map((e) => { const c = getComputedStyle(e); return [c.color, c.backgroundColor, c.borderTopColor]; }).flat().filter((c) => !['rgb(0, 0, 0)', 'rgb(255, 255, 255)', 'rgba(0, 0, 0, 0)'].includes(c)));
     check('the pages are black on white, nothing else', colours.length === 0, [...new Set(colours)].join(' '));
     await p.locator('.sl-seg label', { hasText: 'Landscape' }).click();
-    await p.locator('.sl-seg label', { hasText: /^3$/ }).click();
+    await p.locator('.sl-seg[aria-label="Columns"] label', { hasText: /^3$/ }).click();
     await p.waitForTimeout(150);
     check('three columns, landscape: fewer pages', (await p.locator('.sl-thumb').count()) <= pages1 && (await p.locator('.sl-thumb').first().locator('.sl-col').count()) === 3);
     await p.locator('.sl-controls input[aria-label="Heading"]').fill('Saturday set');
     await p.locator('.sl-controls input[aria-label="Under the heading"]').fill('The Fox, 9pm');
-    const titleRange = p.locator('.sl-controls input[aria-label="Title size, points"]');
-    await titleRange.fill('40');
+    await p.locator('.sl-controls input[aria-label="Title size, points"]').fill('40');
     await p.waitForTimeout(150);
     check('the heading, the line under it and the size follow the settings', (await p.locator('.sl-thumb .sl-h1').first().textContent()) === 'Saturday set' && /The Fox, 9pm/.test(await p.locator('.sl-thumb .sl-h2').first().textContent())
       && Math.abs(parseFloat(await p.locator('.sl-thumb .sl-title').first().evaluate((e) => getComputedStyle(e).fontSize)) - 40 * 96 / 72) < 1);
@@ -680,15 +695,31 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('numbers can be left off', (await p.locator('.sl-thumb .sl-n').count()) === 0);
     await p.screenshot({ path: `${out}/setlist.png` });
     // What prints: only those pages, each the paper's size.
-    const n = await p.evaluate(() => Fatstick.app.setlist.preparePrint(Fatstick.app.setlist.data(Fatstick.app.S.current)));
+    const n = await p.evaluate((id) => Fatstick.app.setlist.preparePrint(Fatstick.app.setlist.data(id)), car.id);
     await p.emulateMedia({ media: 'print' });
     const pdf = await p.pdf({ preferCSSPageSize: true });
     await p.emulateMedia({ media: 'screen' });
     const pdfPages = (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
     check('printing gives just the setlist, a page per page', pdfPages === n && n >= 1, `${pdfPages} printed, ${n} prepared`);
+    // Rows too: two by two in landscape, quarters, with lines between them.
+    await p.locator('.sl-seg[aria-label="Columns"] label', { hasText: /^2$/ }).click();
+    await p.locator('.sl-seg[aria-label="Rows"] label', { hasText: /^2$/ }).click();
+    await p.locator('.sl-controls input[aria-label="Title size, points"]').fill('20');
+    await p.waitForTimeout(150);
+    const q = p.locator('.sl-thumb').first();
+    check('rows split the page: quarters in landscape, with lines between', (await q.locator('.sl-col').count()) === 4 && (await q.locator('.sl-div').count()) === 2 && /2 × 2 parts/.test(await p.locator('.sl-info').textContent()), await p.locator('.sl-info').textContent());
+    const filled = await q.locator('.sl-col').evaluateAll((cs) => cs.map((c) => c.children.length));
+    check('the songs fill the quarters in turn', filled[0] > 0 && filled.indexOf(0) === -1 || filled.slice(0, filled.indexOf(0)).every((x) => x > 0), JSON.stringify(filled));
+    await p.screenshot({ path: `${out}/setlist-quarters.png` });
     await p.getByRole('button', { name: 'Back to the defaults' }).click();
-    check('back to the defaults: one portrait column again', (await p.locator('.sl-seg input:checked + span').allTextContents()).join(',') === 'Portrait,1,Normal');
+    check('back to the defaults: one portrait column again', (await p.locator('.sl-seg:not(.small) input:checked + span').allTextContents()).join(',') === 'Portrait,1,1,Normal');
     await p.getByRole('button', { name: 'Close' }).click();
+    // From the stick's view too.
+    await p.locator('[data-set="set-car"]').click();
+    await p.getByRole('button', { name: 'Print a setlist…' }).click();
+    check('the stick\'s view prints its setlist', (await p.locator('#modal-title').textContent()) === 'Print a setlist' && await p.locator('.sl-thumb').first().isVisible());
+    await p.getByRole('button', { name: 'Close' }).click();
+    await p.locator('[data-pl="p-road"]').click();
   }
 
   check('no console errors', errs.length === 0, errs.join(' / '));

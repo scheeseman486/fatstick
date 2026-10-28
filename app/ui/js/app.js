@@ -163,8 +163,10 @@
   /** The track a file's tags come from: none for a joined playlist or silence. */
   const fileTrack = (it) => (it.own ? "" : it.t.id);
   const gapOf = (s, id) => (s.gaps || []).find((g) => g.id === id);
-  const setlist = P.setlistSetup({ S, pl, track, R, keyText, saveSetting, api, DEMO });
-  const stickView = P.stickViewSetup({ S, pl, stickSet, layoutData, edit, openPlaylist, setView, newId, isGap, gapOf, renderSide, undo });
+  const setlist = P.setlistSetup({ S, pl, track, R, keyText, saveSetting, api, DEMO, stickSet, isGap, gapOf });
+  /** The setlist of the stick that's chosen (the one in the stick panel, or open in its view). */
+  const printSetlist = () => setlist.open(S.setId);
+  const stickView = P.stickViewSetup({ S, pl, stickSet, layoutData, edit, openPlaylist, setView, newId, isGap, gapOf, renderSide, undo, printSetlist: () => setlist.open(S.setId) });
   /** A stick's list, as playlists: silences become stand-ins with no tracks. */
   function stickLists(s) {
     return s.playlistIds.map((id) => {
@@ -690,7 +692,6 @@
     menu(at, [
       { label: "Rename", action: () => startRename("playlist", p.id) },
       { label: "Duplicate", action: () => newPlaylist(`${p.name} copy`, p.entries.map((e) => e.trackId)) },
-      { label: "Print a setlist…", action: () => setlist.open(p.id), disabled: !p.entries.length },
       ...(others.length ? ["-", { heading: "Put on a stick" }, ...others.map((s) => ({ label: s.name, action: () => edit(`Put ${p.name} on ${s.name}`, () => { s.playlistIds.push(p.id); }) }))] : []),
       "-",
       {
@@ -710,6 +711,7 @@
   function setMenu(s, at) {
     menu(at, [
       { label: "Open", action: () => openStick(s.id) },
+      { label: "Print a setlist…", action: () => setlist.open(s.id) },
       "-",
       { label: "Rename", action: () => startRename("set", s.id) },
       {
@@ -3232,7 +3234,7 @@
       e.preventDefault();
       const b = document.getElementById("sl-print");
       if (modalOpen()) { if (b) b.click(); return; }
-      setlist.open(S.current);
+      printSetlist();
       return;
     }
     if (modalOpen() || !$("menu").hidden) return;
@@ -3322,7 +3324,7 @@
       { label: "Add a folder…", action: () => addFiles(true) },
       { label: "Import a playlist file…", action: importPlaylist },
       { label: "Export this playlist…", action: exportPlaylist, disabled: !pl() },
-      { label: "Print a setlist…", key: "Ctrl+P", action: () => setlist.open(S.current), disabled: !pl() || !pl().entries.length },
+      { label: `Print a setlist${stickSet() ? ` of ${stickSet().name}` : ""}…`, key: "Ctrl+P", action: printSetlist, disabled: !stickSet() },
       "-",
       { label: "Search your music", key: "Ctrl+F", action: () => lib.openSearch() },
       { label: S.view === "library" ? "Back to the playlist" : "Music library", action: () => setView(S.view === "library" ? "playlist" : "library") },

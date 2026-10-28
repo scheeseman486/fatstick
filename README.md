@@ -129,19 +129,24 @@ GPL version 3 or later.
   ReplayGain tags: these players ignore them.
 - **Preparation in the background.** Encodes and gain changes are made while
   you edit, into a cache (10 GB by default), so a sync is mostly the write.
-- **Setlists to print.** "Print a setlist…" (in the menu, a playlist's
-  right-click menu, or Ctrl+P) lays the playlist out for a music stand or
-  the floor: big titles, the artist, length and key shift under or beside
-  them a little smaller, black on white only (nothing grey or coloured, for
-  a laser printer) and tight margins. Beside the settings is a preview of
-  the actual pages. Page: A4 or Letter, portrait or landscape, one to three
-  columns, margins. Text: Barlow Condensed (narrow, so long titles fit),
-  Barlow or a serif, title and detail sizes, spacing, bold, capitals. On
-  the page: a heading and a line under it ("The Fox, 9pm"; kept for each
-  playlist), numbers, artist, album, length, key shift, the song count and
-  total length, page numbers, lines between songs, or only the selected
-  songs. The settings are remembered. Print to paper or to a PDF from the
-  system's print dialog, at 100% size on the same paper.
+- **Setlists to print.** "Print a setlist…" (in the menu or with Ctrl+P, in
+  a stick's right-click menu, or in the stick's view) lays a stick out for a
+  music stand or the floor: its playlists in order, each under its name,
+  big titles with the artist, length and key shift a little smaller, black
+  on white only (nothing grey or coloured, for a laser printer) and tight
+  margins. Each playlist shows its songs, or just its name (filler music
+  between sets, in a box), or is left out; the stick's silences are lines
+  of their own, or left out too. Beside the settings is a preview of the
+  actual pages. Page: A4 or Letter, portrait or landscape, one to three
+  columns and one to three rows (two by two in landscape is a page in
+  quarters), lines between the parts, margins. Text: Barlow Condensed
+  (narrow, so long titles fit), Barlow or a serif, title and detail sizes,
+  spacing, bold, capitals. On the page: a heading and a line under it ("The
+  Fox, 9pm"; kept for each stick), numbers (each playlist from 1, or
+  straight through), artist, album, length, key shift, the song count and
+  total length, page numbers, lines between songs. The settings are
+  remembered. Print to paper or to a PDF from the system's print dialog, at
+  100% size on the same paper.
 - **The player.** Listen to a playlist as it is, or "as on the stick", with
   the gain and bitrate the sync will use. The repeat button (or R) steps
   through play & stop (to the end of the playlist), repeat one song and

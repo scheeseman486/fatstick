@@ -1,8 +1,10 @@
-// A playlist printed as a setlist: big titles to read from the floor, the
-// details under them a little smaller, black on white only (a laser printer,
-// no colour, no greys), tight margins so more fits on a page. The dialog has
-// the page, text and content settings beside a preview of the actual pages;
-// what prints is those pages.
+// A stick printed as a setlist: its playlists in order, big titles to read
+// from the floor, the details under them a little smaller, black on white
+// only (a laser printer, no colour, no greys), tight margins so more fits on
+// a page. Each playlist shows its songs, or just its name (filler music
+// between sets, say), or is left out; the stick's silences show as lines of
+// their own. The dialog has the playlist, page, text and content settings
+// beside a preview of the actual pages; what prints is those pages.
 "use strict";
 (function (Fatstick) {
   const { h, fill, clock, length, plural, modal, closeModal, toast } = Fatstick.ui;
@@ -20,23 +22,35 @@
   function defaults() {
     const letter = /^(en-US|en-CA|es-MX|fr-CA|en-PH)/i.test(navigator.language || "");
     return {
-      paper: letter ? "letter" : "a4", landscape: false, columns: 1, margin: 10,
+      paper: letter ? "letter" : "a4", landscape: false, columns: 1, rows: 1, dividers: true, margin: 10,
       font: "condensed", titlePt: 24, detailPt: 17, spacing: "normal", bold: true, caps: false,
       numbers: true, artist: true, album: false, length: true, key: true, total: true, pageNumbers: true, rules: false,
+      runOn: false,
     };
   }
 
   Fatstick.setlistSetup = function (core) {
-    const { S, pl, track, R, keyText, saveSetting, api, DEMO } = core;
+    const { S, pl, track, R, keyText, saveSetting, api, DEMO, stickSet, isGap, gapOf } = core;
     const o = defaults();
-    // The line under the heading, per playlist ("The Fox, Saturday 9pm").
+    // The line under the heading, per playlist or stick ("The Fox, Saturday 9pm").
     const subs = {};
+    // For a stick's setlist, how each of its playlists shows: "songs", "name" or "out".
+    const modes = {};
     /** The settings saved last time (read when the app starts). */
     function load(saved) {
       if (saved && saved.options) for (const k of Object.keys(o)) if (k in saved.options && typeof saved.options[k] === typeof o[k]) o[k] = saved.options[k];
       if (saved && saved.subs) Object.assign(subs, saved.subs);
+      if (saved && saved.modes) Object.assign(modes, saved.modes);
     }
-    const keep = () => saveSetting("setlist", { options: o, subs });
+    const keep = () => saveSetting("setlist", { options: o, subs, modes });
+    const MODES = [["songs", "Songs"], ["name", "Name only"], ["out", "Leave out"]];
+    const GAP_MODES = [["name", "Show"], ["out", "Leave out"]];
+    /** How a stick's playlist (or silence) shows: its songs, its name alone, or not at all. */
+    const modeOf = (setId, id) => {
+      const m = modes[setId] && modes[setId][id];
+      if (isGap(id)) return m === "out" ? "out" : "name";
+      return m || "songs";
+    };
 
     const dims = () => {
       const p = PAPER[o.paper] || PAPER.a4;
@@ -45,16 +59,50 @@
     const stem = (n) => (n || "").replace(/\.[^.]+$/, "");
 
     /** The songs, in order, as the setlist shows them. */
-    function songs(p, only) {
+    function songs(p, only, from = 0) {
       return p.entries.filter((e) => !only || only.has(e.id)).map((e, i) => {
         const t = track(e.trackId);
         const x = R.edges(e);
         return {
-          n: i + 1, title: t.title || stem(t.filename) || "Untitled", artist: t.artist || "", album: t.album || "",
+          n: from + i + 1, title: t.title || stem(t.filename) || "Untitled", artist: t.artist || "", album: t.album || "",
           secs: Math.max(0, (t.duration || 0) - x.cutStart - x.cutEnd),
           key: R.hasKey(e) ? `Key ${keyText(R.key(e).pitch)}` : "",
         };
       });
+    }
+
+    /**
+     * What's on the page, as sections: the stick's playlists in its order,
+     * each with its songs under its name, or its name alone, and its
+     * silences; whatever's left out isn't there.
+     */
+    function sections(setId) {
+      const st = stickSet(setId);
+      if (!st) return [];
+      const out = [];
+      let n = 0;
+      for (const id of st.playlistIds) {
+        const mode = modeOf(st.id, id);
+        if (mode === "out") continue;
+        if (isGap(id)) {
+          const g = gapOf(st, id);
+          if (g) out.push({ id, kind: "name", gap: true, name: "Silence", secs: g.seconds, songs: [] });
+          continue;
+        }
+        const p = pl(id);
+        if (!p) continue;
+        const list = songs(p, null, o.runOn ? n : 0);
+        n += mode === "songs" ? list.length : 0;
+        out.push({ id, kind: mode, name: p.name, secs: list.reduce((a, x) => a + x.secs, 0), songs: mode === "songs" ? list : [] });
+      }
+      return out;
+    }
+
+    /** A playlist's name over its songs, or on its own line. */
+    function setEl(sec) {
+      return h("div", { class: `sl-set${sec.kind === "name" ? " only" : ""}${sec.gap ? " gap" : ""}` },
+        h("span", { class: "sl-set-name", text: sec.name }),
+        o.length && sec.secs ? h("span", { class: "sl-len", text: clock(sec.secs) }) : null);
     }
 
     function songEl(s) {
@@ -76,7 +124,8 @@
     function paginate(d) {
       const pd = dims();
       const F = FONTS[o.font] || FONTS.condensed;
-      const digits = String(Math.max(1, d.songs.length)).length;
+      const most = Math.max(1, ...d.sections.flatMap((x) => x.songs.map((y) => y.n)));
+      const digits = String(most).length;
       const vars = {
         width: `${pd.w}mm`, height: `${pd.h}mm`, padding: `${o.margin}mm`,
         "--sl-font": F.family, "--sl-title": `${o.titlePt}pt`, "--sl-detail": `${o.detailPt}pt`,
@@ -89,10 +138,17 @@
       const pages = [];
       let cols;
       let ci = 0;
+      // The page in parts: columns, and rows of them (two by two in landscape: quarters).
+      // The songs fill each part in turn, left to right, then the next row.
+      const parts = o.columns * o.rows;
+      const lines = () => (!o.dividers ? [] : [
+        ...Array.from({ length: o.columns - 1 }, (_, i) => h("i", { class: "sl-div v", style: { left: `calc(${i + 1} * (100% + 8mm) / ${o.columns} - 4mm)` } })),
+        ...Array.from({ length: o.rows - 1 }, (_, i) => h("i", { class: "sl-div h", style: { top: `calc(${i + 1} * (100% + 6mm) / ${o.rows} - 3mm)` } })),
+      ]);
       const newPage = () => {
         const first = !pages.length;
-        cols = h("div", { class: "sl-cols", style: { "grid-template-columns": `repeat(${o.columns}, minmax(0, 1fr))` } },
-          Array.from({ length: o.columns }, () => h("div", { class: "sl-col" })));
+        cols = h("div", { class: "sl-cols", style: { "grid-template-columns": `repeat(${o.columns}, minmax(0, 1fr))`, "grid-template-rows": `repeat(${o.rows}, minmax(0, 1fr))` } },
+          Array.from({ length: parts }, () => h("div", { class: "sl-col" })), lines());
         const page = h("div", { class: cls, style: vars },
           first ? h("header", { class: "sl-head" },
             h("div", { class: "sl-h1", text: d.heading || " " }),
@@ -104,17 +160,26 @@
         ci = 0;
       };
       newPage();
-      for (const s of d.songs) {
-        const el = songEl(s);
+      // The flow: each playlist's name (when there are several), then its songs.
+      const flow = [];
+      for (const sec of d.sections) {
+        flow.push({ el: setEl(sec) });
+        for (const x of sec.songs) flow.push({ el: songEl(x) });
+      }
+      for (const item of flow) {
         for (;;) {
           const col = cols.children[ci];
-          col.append(el);
+          col.append(item.el);
           if (col.scrollHeight <= col.clientHeight + 1) break;
-          el.remove();
+          item.el.remove();
           // Too tall for an empty column: it goes there anyway.
-          if (!col.children.length) { col.append(el); break; }
-          if (ci + 1 < o.columns) ci++;
+          if (!col.children.length) { col.append(item.el); break; }
+          // A playlist's name doesn't stay at the foot of a column without its first song.
+          const last = col.lastElementChild;
+          const orphan = last && last.classList.contains("sl-set") && !last.classList.contains("only") && col.children.length > 1 ? last : null;
+          if (ci + 1 < parts) ci++;
           else newPage();
+          if (orphan) cols.children[ci].append(orphan);
         }
       }
       pages.forEach((pg, i) => fill(pg.querySelector(".sl-foot"),
@@ -146,19 +211,21 @@
     }
     window.addEventListener("afterprint", () => document.documentElement.classList.remove("printing-setlist"));
 
-    /** The setlist dialog for a playlist: settings, and the pages as they'll print. */
-    function open(plId) {
-      const p = pl(plId);
-      if (!p) return;
-      if (!p.entries.length) { toast(`${p.name} has no songs to print yet.`); return; }
-      const selected = plId === S.current && S.sel.size > 1 ? new Set(S.sel) : null;
-      let onlySel = false;
-      let heading = p.name;
-      const data = () => {
-        const list = songs(p, onlySel ? selected : null);
-        const secs = list.reduce((a, s) => a + s.secs, 0);
-        return { heading, sub: subs[p.id] || "", total: o.total ? `${plural(list.length, "song")}, ${length(secs)}` : "", songs: list };
-      };
+    /** Everything a stick's pages need. */
+    function pageData(setId, heading) {
+      const secs = sections(setId);
+      const n = secs.reduce((a, x) => a + x.songs.length, 0);
+      const time = secs.reduce((a, x) => a + x.secs, 0);
+      return { heading, sub: subs[setId] || "", total: o.total ? `${plural(n, "song")}, ${length(time)}` : "", sections: secs };
+    }
+
+    /** The setlist dialog for a stick: settings, and the pages as they'll print. */
+    function open(setId) {
+      let st = stickSet(setId) || stickSet();
+      if (!st) { toast("Make a stick first: a setlist is printed from a stick's playlists."); return; }
+      let heading = st.name;
+      let headingTouched = false;
+      const data = () => pageData(st.id, heading);
 
       // ---- the controls ---------------------------------------------------------------------
       let uid = 0;
@@ -189,20 +256,57 @@
         return h("label", { class: "check sl-check" }, input, h("span", { text: label }));
       };
       const headIn = h("input", { class: "input", value: heading, "aria-label": "Heading" });
-      headIn.addEventListener("input", () => { heading = headIn.value; changed(); });
-      const subIn = h("input", { class: "input", value: subs[p.id] || "", placeholder: "Where and when, say", "aria-label": "Under the heading" });
-      subIn.addEventListener("input", () => { if (subIn.value.trim()) subs[p.id] = subIn.value; else delete subs[p.id]; changed(); });
-      const onlyBox = selected ? h("input", { type: "checkbox" }) : null;
-      if (onlyBox) onlyBox.addEventListener("change", () => { onlySel = onlyBox.checked; changed(); });
+      headIn.addEventListener("input", () => { heading = headIn.value; headingTouched = true; changed(); });
+      const subIn = h("input", { class: "input", value: subs[st.id] || "", placeholder: "Where and when, say", "aria-label": "Under the heading" });
+      subIn.addEventListener("input", () => { if (subIn.value.trim()) subs[st.id] = subIn.value; else delete subs[st.id]; changed(); });
+
+      // The stick, and how each of its playlists and silences shows.
+      const stickSel = h("select", { class: "input", "aria-label": "Stick" }, S.sets.map((x) => h("option", { value: x.id, text: x.name })));
+      stickSel.value = st.id;
+      const plList = h("div", { class: "sl-pls" });
+      function renderPls() {
+        const rows = st.playlistIds.filter((id) => (isGap(id) ? gapOf(st, id) : pl(id))).map((id) => {
+          const gap = isGap(id);
+          const name = gap ? `Silence, ${gapOf(st, id).seconds} s` : pl(id).name;
+          const nm = `sl-mode-${id}-${++uid}`;
+          return h("div", { class: `sl-pl${gap ? " gap" : ""}` },
+            h("span", { class: "sl-pl-name", text: name, title: name }),
+            h("div", { class: "sl-seg small", role: "radiogroup", "aria-label": `How ${name} shows` },
+              (gap ? GAP_MODES : MODES).map(([v, t]) => {
+                const input = h("input", { type: "radio", name: nm, value: v, checked: modeOf(st.id, id) === v });
+                input.addEventListener("change", () => {
+                  if (!input.checked) return;
+                  modes[st.id] = { ...(modes[st.id] || {}), [id]: v };
+                  changed();
+                });
+                return h("label", null, input, h("span", { text: t }));
+              })));
+        });
+        fill(plList, rows.length ? rows : h("p", { class: "st-note", text: "Nothing on this stick yet." }));
+      }
+      stickSel.addEventListener("change", () => {
+        st = stickSet(stickSel.value);
+        if (!headingTouched) { heading = st.name; headIn.value = heading; }
+        subIn.value = subs[st.id] || "";
+        renderPls();
+        changed();
+      });
+      renderPls();
       const [marginIn, marginOut] = range("margin", 5, 25, 1, "mm", "Margins, millimetres");
       const [titleIn, titleOut] = range("titlePt", 12, 48, 1, "pt", "Title size, points");
       const [detailIn, detailOut] = range("detailPt", 8, 24, 1, "pt", "Detail size, points");
 
       const controls = h("div", { class: "sl-controls" },
+        h("fieldset", { class: "sl-group" }, h("legend", { text: "Playlists" }),
+          field("Stick", stickSel),
+          plList,
+          check("runOn", "Number straight through")),
         h("fieldset", { class: "sl-group" }, h("legend", { text: "Page" }),
           field("Paper", select("paper", Object.fromEntries(Object.entries(PAPER).map(([k, v]) => [k, v.label])))),
           seg("landscape", [[false, "Portrait"], [true, "Landscape"]], "Orientation"),
           h("div", { class: "sl-field" }, h("span", { class: "lbl", text: "Columns" }), seg("columns", [[1, "1"], [2, "2"], [3, "3"]], "Columns")),
+          h("div", { class: "sl-field" }, h("span", { class: "lbl", text: "Rows" }), seg("rows", [[1, "1"], [2, "2"], [3, "3"]], "Rows")),
+          check("dividers", "Lines between the parts"),
           field("Margins", marginIn, marginOut)),
         h("fieldset", { class: "sl-group" }, h("legend", { text: "Text" }),
           field("Font", select("font", Object.fromEntries(Object.entries(FONTS).map(([k, v]) => [k, v.label])))),
@@ -215,8 +319,7 @@
           field("Under it", subIn),
           h("div", { class: "sl-checks" },
             check("numbers", "Numbers"), check("artist", "Artist"), check("album", "Album"), check("length", "Length"),
-            check("key", "Key shift"), check("total", "Song count and length"), check("pageNumbers", "Page numbers"), check("rules", "Lines between songs"),
-            onlyBox ? h("label", { class: "check sl-check" }, onlyBox, h("span", { text: `Only the ${selected.size} selected` })) : null)));
+            check("key", "Key shift"), check("total", "Song count and length"), check("pageNumbers", "Page numbers"), check("rules", "Lines between songs"))));
 
       // ---- the preview ----------------------------------------------------------------------
       const info = h("p", { class: "sl-info", "aria-live": "polite" });
@@ -238,7 +341,9 @@
             h("div", { class: "sl-scale", style: { transform: `scale(${scale})` } }, pg)),
           h("figcaption", { text: `Page ${i + 1} of ${pages.length}` }))));
         const d = data();
-        info.textContent = `${plural(pages.length, "page")}, ${PAPER[o.paper].label} ${o.landscape ? "landscape" : "portrait"}, ${plural(d.songs.length, "song")}.`;
+        const n = d.sections.reduce((a, x) => a + x.songs.length, 0);
+        const split = o.columns * o.rows > 1 ? `, in ${o.rows > 1 ? `${o.columns} × ${o.rows} parts` : `${o.columns} columns`}` : "";
+        info.textContent = `${plural(pages.length, "page")}, ${PAPER[o.paper].label} ${o.landscape ? "landscape" : "portrait"}${split}, ${plural(n, "song")}.`;
         hint.textContent = `In the print dialog, choose ${PAPER[o.paper].label} paper, ${o.landscape ? "landscape" : "portrait"}, at 100% size.`;
       }
       function changed() {
@@ -249,7 +354,7 @@
         Object.assign(o, defaults());
         keep();
         closeModal();
-        open(plId);
+        open(st.id);
       };
       async function print() {
         preparePrint(data());
@@ -262,7 +367,7 @@
         }
       }
       modal({
-        title: `Print a setlist of ${p.name}`,
+        title: "Print a setlist",
         wide: true, tall: true, cls: "sl-modal",
         body: [h("div", { class: "sl-dlg" }, controls, preview)],
         buttons: [
@@ -277,6 +382,10 @@
       draw();
     }
 
-    return { open, load, preparePrint, paginate, data: (plId) => { const p = pl(plId); return { heading: p.name, sub: subs[p.id] || "", total: "", songs: songs(p) }; }, options: o };
+    return {
+      open, load, preparePrint, paginate, options: o,
+      /** A stick's page data (the tests' way in). */
+      data: (setId) => pageData(setId, stickSet(setId).name),
+    };
   };
 })(window.Fatstick = window.Fatstick || {});

@@ -994,7 +994,11 @@ body.pl-dragging .sv-ins-btn { visibility: hidden; }
 .sl-head { flex: 0 0 auto; padding-bottom: 2.5mm; margin-bottom: 3mm; border-bottom: 1pt solid #000; }
 .sl-h1 { font-size: calc(var(--sl-title) * 1.25); font-weight: var(--sl-bold); line-height: 1.1; overflow-wrap: anywhere; }
 .sl-h2 { display: flex; justify-content: space-between; gap: 6mm; margin-top: 1mm; font-size: var(--sl-detail); font-weight: var(--sl-normal); }
-.sl-cols { flex: 1 1 auto; min-height: 0; display: grid; column-gap: 8mm; }
+.sl-cols { position: relative; flex: 1 1 auto; min-height: 0; display: grid; column-gap: 8mm; row-gap: 6mm; }
+/* Lines between the parts, in the middle of the gaps. */
+.sl-div { position: absolute; display: block; }
+.sl-div.v { top: 0; bottom: 0; border-left: 0.6pt solid #000; }
+.sl-div.h { left: 0; right: 0; border-top: 0.6pt solid #000; }
 .sl-col { min-height: 0; overflow: hidden; }
 .sl-song { display: grid; grid-template-columns: var(--sl-nw) minmax(0, 1fr); column-gap: 0.35em; padding-block: calc(var(--sl-gap) / 2); }
 .sl-page.nonum .sl-song { grid-template-columns: minmax(0, 1fr); }
@@ -1004,7 +1008,16 @@ body.pl-dragging .sv-ins-btn { visibility: hidden; }
 .sl-title { flex: 1 1 auto; min-width: 0; font-size: var(--sl-title); font-weight: var(--sl-weight); line-height: 1.15; overflow-wrap: anywhere; }
 .sl-len { flex: 0 0 auto; font-size: var(--sl-detail); font-weight: var(--sl-normal); font-variant-numeric: tabular-nums; }
 .sl-sub { font-size: var(--sl-detail); font-weight: var(--sl-normal); overflow-wrap: anywhere; }
-.sl-page.caps .sl-title, .sl-page.caps .sl-h1 { text-transform: uppercase; }
+.sl-page.caps .sl-title, .sl-page.caps .sl-h1, .sl-page.caps .sl-set-name { text-transform: uppercase; }
+/* A playlist's name: over its songs, or on its own line in a box (a break, say). */
+.sl-set { display: flex; align-items: baseline; gap: 0.6em; margin-top: calc(var(--sl-gap) + 2mm); padding-bottom: 1mm; border-bottom: 1pt solid #000; }
+.sl-col > .sl-set:first-child { margin-top: 0; }
+.sl-set-name { flex: 1 1 auto; min-width: 0; font-size: calc(var(--sl-title) * 0.9); font-weight: var(--sl-bold); line-height: 1.15; overflow-wrap: anywhere; }
+.sl-set.only { margin-block: calc(var(--sl-gap) / 2 + 1mm); padding: 1mm 2mm; border: 1pt solid #000; }
+.sl-set.gap { border-style: dashed; }
+.sl-set.gap .sl-set-name { font-weight: var(--sl-normal); font-size: var(--sl-detail); }
+.sl-set + .sl-song { padding-top: calc(var(--sl-gap) / 2 + 1mm); }
+.sl-page.rules .sl-col .sl-set + .sl-song { border-top: 0; }
 .sl-page.rules .sl-col .sl-song + .sl-song { border-top: 0.6pt solid #000; }
 .sl-foot { flex: 0 0 auto; display: flex; justify-content: space-between; gap: 6mm; padding-top: 2mm; font-size: calc(var(--sl-detail) * 0.85); line-height: 1; min-height: calc(var(--sl-detail) * 0.85 + 2mm); }
 .sl-page.nofoot .sl-foot span:last-child { visibility: hidden; }
@@ -1018,3 +1031,9 @@ body.pl-dragging .sv-ins-btn { visibility: hidden; }
   #print-root .sl-page { break-after: page; page-break-after: always; }
   #print-root .sl-page:last-child { break-after: auto; page-break-after: auto; }
 }
+
+/* The stick's playlists in the setlist dialog, each in full, by name or left out. */
+.sl-pls { display: grid; gap: 6px; }
+.sl-pl { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; }
+.sl-pl-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl-seg.small span { padding: 2px 4px; font-size: 12px; }
