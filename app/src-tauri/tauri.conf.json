@@ -12,10 +12,10 @@
       {
         "label": "main",
         "title": "Playlist2USB",
-        "width": 1000,
-        "height": 680,
-        "minWidth": 760,
-        "minHeight": 520,
+        "width": 1180,
+        "height": 760,
+        "minWidth": 860,
+        "minHeight": 560,
         "dragDropEnabled": true
       }
     ],
@@ -27,7 +27,7 @@
     "active": true,
     "targets": "all",
     "category": "Utility",
-    "shortDescription": "Playlist to USB stick, in the order cheap players use",
+    "shortDescription": "Playlists onto USB sticks, in the order cheap players use",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -36,9 +36,35 @@
       "icons/icon.ico"
     ],
     "fileAssociations": [
-      { "ext": ["m3u", "m3u8"], "name": "M3U playlist", "role": "Viewer" },
-      { "ext": ["xspf"], "name": "XSPF playlist", "role": "Viewer" },
-      { "ext": ["pls"], "name": "PLS playlist", "role": "Viewer" }
-    ]
+      {
+        "ext": [
+          "m3u",
+          "m3u8"
+        ],
+        "name": "M3U playlist",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "xspf"
+        ],
+        "name": "XSPF playlist",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "pls"
+        ],
+        "name": "PLS playlist",
+        "role": "Viewer"
+      }
+    ],
+    "resources": {
+      "../../COPYING": "licenses/COPYING.txt",
+      "../../packaging/licenses/LGPL-2.1.txt": "licenses/LGPL-2.1.txt",
+      "../../packaging/licenses/LGPL-2.0.txt": "licenses/LGPL-2.0.txt",
+      "../../packaging/licenses/THIRD-PARTY-NOTICES.md": "licenses/THIRD-PARTY-NOTICES.md"
+    },
+    "license": "GPL-3.0-or-later"
   }
 }

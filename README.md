@@ -1,27 +1,57 @@
-# Playlist2USB (prototype)
+# Playlist2USB
 
 ![Playlist2USB main window](docs/gui.png)
 
-Writes an M3U/M3U8, XSPF (VLC) or PLS playlist onto a USB stick so that cheap
-MP3 players and car stereos, which play files in **FAT order** rather than by
-name or tag, play it in playlist order. FAT order is the order of the entries
-in each folder's table on the FAT volume (what fatsort, YAFS and DriveSort
-sort); it is not stored in the File Allocation Table itself, which only chains
-clusters.
+Puts your playlists onto a USB stick so that cheap MP3 players and car
+stereos play them in playlist order. Those players play files in **FAT
+order**, not by name or tag. FAT order is the order of the entries in each
+folder's table on the FAT volume (what fatsort, YAFS and DriveSort sort). It is
+not stored in the File Allocation Table itself, which only chains clusters.
 
-## How it works
+A desktop app for Linux, Windows and macOS (Tauri v2), free software under the
+GPL version 3 or later.
 
-**Writing a stick erases it.** The app doesn't copy through the OS, and it
+## What it does
+
+- **Playlists.** Make them in the app, or import M3U/M3U8, XSPF (VLC) and PLS
+  files; export as M3U8 or XSPF. Drop files and folders from the file manager. A
+  folder is added in album order (disc, track number, then name). Moved or
+  renamed files can be found again ("Locate"), and nothing ever changes or
+  deletes your music files.
+- **Sticks.** A stick holds one or more playlists, one folder each and in the
+  order you choose, or a single playlist at the top level. It also has a player
+  profile, which sets the bitrate cap, sample rates, tag version, cover art and
+  file names. A Generic profile is built in; make your own for a particular
+  player. The window shows what is on the stick now, what the next sync would
+  write, and whether it fits.
+- **Copy or convert.** An MP3 the player can take is copied as it is.
+  Everything else (FLAC, ALAC, WAV, AIFF, AAC, Ogg Vorbis, Opus, WMA, WavPack,
+  APE, and MP3s over the cap or at odd sample rates) is encoded with LAME to
+  constant-bitrate MP3 at 320 or 256 kbps. Tags are written fresh: ID3v2.3 or
+  2.4, optional ID3v1, the track number as the position in the playlist, and a
+  small baseline JPEG cover (at most 500 px and 100 KB).
+- **Even volume, per playlist.** Loudness is measured with EBU R128. A copied
+  MP3 gets a lossless gain change in 1.5 dB steps (the global gain field of
+  each frame, as mp3gain does); an encoded track gets the exact gain. No
+  ReplayGain tags: these players ignore them.
+- **Preparation in the background.** Encodes and gain changes are made while
+  you edit, into a cache (10 GB by default), so a sync is mostly the write.
+- **The player.** Listen to a playlist as it is, or "as on the stick", with
+  the gain and bitrate the sync will use.
+
+## How a stick is written
+
+**Syncing erases the stick.** The app doesn't copy through the OS, and it
 doesn't try to adapt to whatever is already on the stick. It lays down a fresh
 FAT32 file system itself:
 
 - one MBR partition (type 0x0C, FAT32 LBA) from 1 MiB to the end of the stick,
   cluster size from the table in Microsoft's FAT specification, first cluster
   aligned to 4 MiB (1 MiB on sticks under 2 GiB);
-- at the top level only the volume label and the playlist folder (or the
-  tracks themselves);
-- in the folder, `.` and `..`, then one entry per track in playlist order;
-- every track's data in one unbroken run of clusters, back to back in playlist
+- at the top level only the volume label and the playlist folders, in stick
+  order (or one playlist's tracks themselves);
+- in each folder, `.` and `..`, then one entry per track in playlist order;
+- every track's data in one unbroken run of clusters, back to back in stick
   order, straight after the folder tables;
 - names numbered and modification times spaced 2 s apart, so players that
   sort by name or date agree.
@@ -33,8 +63,8 @@ odd format, leftover partition, FAT12/16 volume and scattered free space is an
 edge case. FAT32 only: the players this is for implement FAT32 and little else.
 
 The write runs in a fixed order, with the partition table last, so pulling the
-stick at any point leaves either a stick every OS sees as blank or the complete
-one:
+stick (or pressing Cancel) at any point leaves either a stick every OS sees as
+blank or the complete one:
 
 1. Plan everything (geometry, names, every cluster). If it doesn't fit, stop:
    nothing has been written.
@@ -45,8 +75,8 @@ one:
 4. The backup boot sector, then the primary.
 5. The MBR.
 6. Drop the OS cache and read it all back: MBR, boot sectors, FSInfo, both FATs
-   and the folder tables byte for byte against the plan; the folder parsed the
-   way a player reads it; every byte of every track against its source.
+   and the folder tables byte for byte against the plan; the folders parsed
+   the way a player reads them; every byte of every track against its source.
 
 Then the stick is powered off (Linux) or ejected, so nothing writes to it
 before you unplug it.
@@ -58,46 +88,41 @@ before you unplug it.
 | Windows | `p2u-helper.exe` (UAC) locks + dismounts every volume, opens `\\.\PhysicalDriveN` | UAC; Windows Hello when configured |
 
 Only USB and SD disks are listed, and the disk the system runs from is refused
-on all three. The GUI never runs as root/admin. No in-app biometric check is
+on all three. A stick is remembered by its device, model and size: another
+stick plugged in at the same place is not taken for it, and the confirmation
+names the stick and what is on it now. The app never runs as root/admin. No in-app biometric check is
 used: those APIs only return yes/no and cannot grant privileges; the OS prompt
 is what accepts the fingerprint.
 
-## The window (prototype)
+## Where things are kept
 
-`app/ui` is the app's real front end, currently running on demo data: a
-playlists sidebar, the track list (multi-select, drag sorting with pointer
-events, drops from the file manager, undo), a stick panel (player profile,
-playlists on the stick, file name template with a live preview, the layout of
-the stick and whether it fits) and a player bar. It comes in three looks to
-choose from, switched from the top right: Backlit, Night drive and Clip.
+| What | Linux | macOS | Windows |
+|------|-------|-------|---------|
+| Library (`library.db`, SQLite: tracks, measurements, playlists, profiles, sticks, past syncs) | `~/.local/share/playlist2usb` | `~/Library/Application Support/playlist2usb` | `%APPDATA%\playlist2usb` |
+| Prepared files (safe to clear, from the menu) | `~/.cache/playlist2usb` | `~/Library/Caches/playlist2usb` | `%LOCALAPPDATA%\playlist2usb` |
 
-In the desktop app it lists your real USB sticks and imports real playlist
-files, but **Sync is simulated there too**: it needs the library, converter and
-multi-folder writer from the design doc first. To write a stick today, use the
-CLI below. To try the window in a browser:
-
-```sh
-cd app/ui && python3 -m http.server 8000      # then open http://localhost:8000
-python3 app/bundle_preview.py preview.html     # or one self-contained file
-node tests/ui_names.js                         # name template rules
-node tests/ui_check.js                         # clicks through it (needs playwright and ffmpeg)
-```
+`P2U_DATA_DIR` and `P2U_CACHE_DIR` override these. `P2U_FFMPEG_DIR` points the
+app at your own `ffmpeg` and `ffprobe` instead of the bundled ones.
 
 ## Layout
 
 ```
-crates/p2u-core     playlists, naming plan, FAT32 layout + writer + read-back check, FAT32 reader (+ unit tests)
-crates/p2u-device   USB stick discovery and OS-brokered raw disk access (linux/macos/windows)
-crates/p2u-cli      `p2u` command-line tool
-crates/p2u-helper   tiny privileged helper (Windows UAC, Linux pkexec fallback)
-app/                Tauri v2 GUI: ui/ is plain HTML/CSS/JS (js/names.js and js/rules.js hold the naming
-                    and copy-or-encode rules), src-tauri/ the Rust shell, bundle_preview.py a one-file preview
-packaging/linux     polkit policy for the pkexec fallback
-tests/stick_e2e.py    84 checks on disk images with awkward prior layouts, plus a pull at every write point
-tests/kernel_stick.py `p2u write` on whole virtual disks in QEMU, then the real Linux vfat driver
-tests/ui_*.js        name template unit test; a headless click-through of the window
-research/           the copy-order measurement (needs the older prototype, commit 93f9b75)
-.github/workflows   CI draft: Linux + Windows built on Linux, macOS on a macOS runner
+crates/p2u-core      playlists, naming plan, FAT32 layout + writer + read-back check, FAT32 reader
+crates/p2u-device    USB stick discovery and OS-brokered raw disk access (linux/macos/windows)
+crates/p2u-audio     the ffmpeg engine: probing, MP3 frame scan, loudness, LAME encodes, lossless gain,
+                     covers, ID3 tags, the prepared-file cache, PCM for the player
+crates/p2u-library   the SQLite library and reading files, folders and playlist files into it
+crates/p2u-cli       `p2u` command-line tool
+crates/p2u-helper    tiny privileged helper (Windows UAC, Linux pkexec fallback)
+app/src-tauri        the app: commands, background preparation, sync, sticks, the player (cpal)
+app/ui               the window: plain HTML/CSS/JS. js/api.js talks to the app (or to demo data in a
+                     browser); js/names.js and js/rules.js hold the naming and copy-or-encode rules
+packaging/ffmpeg     builds the bundled LGPL ffmpeg and ffprobe, with LAME, from source
+packaging/licenses   LGPL texts and third-party notices, installed with the app
+packaging/linux      polkit policy for the pkexec fallback
+tests/               see Test below
+research/            the copy-order measurement (needs commit 93f9b75), the lossless gain test, the ffmpeg build test
+.github/workflows    CI draft: tests, Linux + Windows built on Linux, macOS on a macOS runner
 ```
 
 ## Build
@@ -105,32 +130,32 @@ research/           the copy-order measurement (needs the older prototype, commi
 Linux (Ubuntu 24.04 packages):
 
 ```sh
-sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev
-cargo build --release                       # p2u, p2u-helper
-mkdir -p app/src-tauri/binaries \
-  && cp target/release/p2u-helper app/src-tauri/binaries/p2u-helper-x86_64-unknown-linux-gnu
-cd app/src-tauri && cargo build --release   # GUI; `npx @tauri-apps/cli@^2 build` for .deb/.rpm/AppImage
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev \
+  libxdo-dev libasound2-dev nasm
+packaging/ffmpeg/build-ffmpeg.sh x86_64-unknown-linux-gnu   # ffmpeg + ffprobe into app/src-tauri/binaries
+cargo build --release                                       # p2u, p2u-helper
+cp target/release/p2u-helper app/src-tauri/binaries/p2u-helper-x86_64-unknown-linux-gnu
+cd app/src-tauri && npx @tauri-apps/cli@^2 build             # .deb, .rpm, AppImage
 ```
 
-Windows, from Linux:
+Windows, from Linux: `packaging/ffmpeg/build-ffmpeg.sh x86_64-pc-windows-gnu`
+(needs mingw-w64; the files serve both the GNU and MSVC builds), the helper
+built with `--target x86_64-pc-windows-gnu` and copied to
+`binaries/p2u-helper-x86_64-pc-windows-msvc.exe`, then Tauri's documented
+route: `npx @tauri-apps/cli@^2 build --runner cargo-xwin --target
+x86_64-pc-windows-msvc` (NSIS, LLVM and cargo-xwin installed; see the CI
+workflow).
+
+macOS: build on a Mac or the `macos` CI job: `packaging/ffmpeg/build-ffmpeg.sh
+universal-apple-darwin`, then `--target universal-apple-darwin`. The Apple SDK
+licence rules out building on Linux.
+
+The window also runs in a browser on demo data, with the sync, player and
+file reading simulated:
 
 ```sh
-sudo apt install gcc-mingw-w64-x86-64
-rustup target add x86_64-pc-windows-gnu
-cargo build --release -p p2u-cli -p p2u-helper --target x86_64-pc-windows-gnu
-cp target/x86_64-pc-windows-gnu/release/p2u-helper.exe app/src-tauri/binaries/p2u-helper-x86_64-pc-windows-gnu.exe
-cd app/src-tauri && cargo build --release --target x86_64-pc-windows-gnu
+cd app/ui && python3 -m http.server 8000      # then open http://localhost:8000
 ```
-
-The GNU build of the GUI needs `WebView2Loader.dll` shipped beside the exe;
-cargo leaves it in the same output folder. For an installer, use Tauri's
-documented route instead: `npx @tauri-apps/cli@^2 build --runner cargo-xwin
---target x86_64-pc-windows-msvc` (NSIS, LLVM and cargo-xwin installed; see the
-CI workflow), with the helper copied to
-`binaries/p2u-helper-x86_64-pc-windows-msvc.exe`.
-
-macOS: build on a Mac or the `macos` CI job (`--target universal-apple-darwin`);
-the Apple SDK licence rules out building on Linux.
 
 ## CLI
 
@@ -139,6 +164,7 @@ p2u sticks                                            # USB sticks and what is o
 p2u plan "Road Trip.xspf"                             # names and order, writes nothing
 p2u write <stick> --playlist "Road Trip.xspf"         # ERASES the stick: asks you to type "erase", then the OS prompt
 p2u write <stick> --playlist "Road Trip.xspf" --top-level --label ROADTRIP
+p2u write-job <stick> --job job.json                  # several folders, files given as parts (what the app writes)
 # Disk images, and whole-disk device nodes you can open yourself:
 truncate -s 1G stick.img
 p2u write stick.img --playlist "Road Trip.xspf" --yes
@@ -148,27 +174,60 @@ p2u verify stick.img --playlist "Road Trip.xspf"      # order and sizes
 p2u inspect stick.img
 ```
 
+The CLI copies files as they are; converting and evening out the volume are
+the app's.
+
 ## Test
 
 ```sh
-cargo test --workspace
-sudo apt install dosfstools mtools fatsort fdisk gdisk exfatprogs ntfs-3g e2fsprogs
-cargo build -p p2u-cli
-python3 tests/stick_e2e.py      # 84 checks, verified with sfdisk, blkid, wipefs, fsck.fat, fatsort, mtools
+sudo apt install ffmpeg xvfb dosfstools mtools fatsort fdisk gdisk exfatprogs ntfs-3g e2fsprogs
+cargo test --workspace                                  # unit tests; the audio engine against the bundled ffmpeg
+P2U_FFMPEG_DIR=/usr/bin cargo test -p p2u-audio         # ... and against the system's
+cargo build --workspace && python3 tests/stick_e2e.py   # 84 checks on disk images with awkward prior layouts
+cargo test --manifest-path app/src-tauri/Cargo.toml     # the app's backend: a full sync to a disk image, the player
+cargo build --manifest-path app/src-tauri/Cargo.toml && python3 tests/app_e2e.py
+node tests/ui_names.js                                  # the file name rules
+node tests/ui_check.js                                  # the window on demo data (needs playwright)
 # Real Linux driver (needs qemu-system-x86, busybox-static and an extracted Ubuntu kernel):
 cargo build --release -p p2u-cli --target x86_64-unknown-linux-musl
 python3 tests/kernel_stick.py --kroot <kernel dir> --p2u target/x86_64-unknown-linux-musl/release/p2u
 ```
 
+`tests/app_e2e.py` runs the real app under Xvfb, twice. The first run starts
+from an empty library: it adds two folders of real audio (FLAC, Opus, WAV,
+MP3s at 320 kbps and at 22.05 kHz mono), turns on even volume, puts both
+playlists on a disk image standing in for a stick, syncs through the button
+and its confirmation, and plays a track. The second run checks that all of it
+was kept, and that an edit makes the stick out of date. Then the image is
+read with tools that aren't ours: fsck.fat, mtools (the order a player sees),
+ffprobe (codec, sample rate, tags, cover) and ffmpeg's EBU R128 meter (−18 LUFS
+where the volume was evened out).
+
 ## Status
 
-Prototype. The writer is tested on disk images from 64 MiB to 40 GiB that
-started out blank, junk-filled, GPT/exFAT, NTFS/ext4, FAT16 or used FAT32, with
-a simulated pull at every write point, and on four virtual sticks read back by
-the real Linux vfat driver. The OS broker and disk-level code (unmount, raw
-whole-disk access, power-off/eject) compiles for Linux, Windows and macOS but
-has not yet run against real USB sticks. Writing erases the stick; it is not a
-secure erase. Licence: MIT OR Apache-2.0 (no GPL code was copied; the code
-follows the FAT specification). The bundled fonts (DSEG14, Barlow, Saira Semi
-Condensed, M PLUS Rounded 1c, Doto, Silkscreen) are under the SIL Open Font
-License; their licence texts are in app/ui/fonts.
+Working, and tested on disk images; not yet tried on real hardware.
+
+- The writer is tested on disk images from 64 MiB to 40 GiB that started out
+  blank, junk-filled, GPT/exFAT, NTFS/ext4, FAT16 or used FAT32, with a
+  simulated pull at every write point, and on four virtual sticks read back
+  by the real Linux vfat driver.
+- The whole app is tested end to end on Linux, on disk images, with a silent
+  audio output.
+- Not yet run: real USB sticks (the OS broker and disk-level code, meaning
+  unmount, raw whole-disk access, power-off and eject, compiles for all three
+  systems), a real sound card, and the app on Windows and macOS. The Windows
+  ffmpeg is built; the macOS one needs a Mac.
+- Writing erases the stick; it is not a secure erase.
+
+## Licence
+
+Playlist2USB is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. See `COPYING`.
+
+It bundles FFmpeg (LGPL 2.1 or later, built without GPL or non-free parts) with
+LAME (LGPL 2 or later); `packaging/ffmpeg/build-ffmpeg.sh` builds both from
+the exact sources. The fonts in the window, DSEG14 and Barlow, are under the
+SIL Open Font License. Details, and the written offer for the FFmpeg and LAME
+sources, are in `packaging/licenses/THIRD-PARTY-NOTICES.md`.

@@ -43,7 +43,7 @@ def main():
     js = "\n".join(read(s) for s in scripts)
     body = re.search(r"<body>(.*?)\n\s*<script", html, re.S).group(1)
     # Framed: a side gutter around the window, for pages that aren't a desktop window.
-    boot = "document.documentElement.classList.add('framed');document.documentElement.dataset.look='backlit';"
+    boot = "document.documentElement.classList.add('framed');"
     head = (
         f"<title>{a.title}</title>\n"
         '<meta name="claude:viewport-fit-sides" content="cover">\n'

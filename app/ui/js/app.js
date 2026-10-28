@@ -1,31 +1,27 @@
-// Playlist2USB front end (prototype). Plain DOM, no framework.
-// State lives in S; every playlist edit goes through edit() so it can be
-// undone. Rendering is a few functions that rebuild their own area; the stick
-// panel is split into sections so typing a name template doesn't lose focus.
+// Playlist2USB's window. Plain DOM, no framework.
+// State lives in S. Every playlist edit goes through edit(), so it can be
+// undone, and is saved to the library straight away. Rendering is a few
+// functions that rebuild their own area; the stick panel is split into
+// sections so typing a name template doesn't lose focus. Everything outside
+// the window goes through P2U.api: the app's own commands, or a demo version
+// in a plain browser.
 "use strict";
 (function () {
   const P = window.P2U;
   const { h, fill, icon, clock, length, bytes, ago, plural, db, menu, popover, closeMenu, modal, closeModal, modalOpen, toast } = P.ui;
   const R = P.rules;
   const N = P.names;
-  const B = P.backend;
-  const D = P.demo;
+  const api = P.api;
+  const DEMO = api.kind === "demo";
   const $ = (id) => document.getElementById(id);
   const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
   const clone = (o) => JSON.parse(JSON.stringify(o));
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  let uid = 1000;
-  const newId = (p) => `${p}${++uid}`;
+  let uid = 0;
+  // Ids are saved, so they must be unique across sessions.
+  const newId = (p) => `${p}${Date.now().toString(36)}${(++uid).toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
   const pad2 = (n, w = 2) => String(n).padStart(w, "0");
 
-  const SHELLS = [
-    { name: "Cobalt", color: "#3550d8", ink: "#ffffff" },
-    { name: "Berry", color: "#c4306c", ink: "#ffffff" },
-    { name: "Lime", color: "#9acb2b", ink: "#152006" },
-    { name: "Tangerine", color: "#f07d1d", ink: "#231100" },
-    { name: "Graphite", color: "#3a3e49", ink: "#ffffff" },
-  ];
-  const LOOKS = { backlit: "Backlit", night: "Night drive", clip: "Clip" };
   const PRESETS = [
     { label: "01 - Artist - Title", tpl: "{n} - [{artist} - ]{title|filename}" },
     { label: "01 - Title", tpl: "{n} - {title|filename}" },
@@ -33,15 +29,25 @@
     { label: "01 (number only)", tpl: "{n}" },
     { label: "Artist - Title (no number)", tpl: "[{artist} - ]{title|filename}" },
   ];
+  /** The profile the app ships with: safe for most cheap players. */
+  const GENERIC = {
+    id: "prof-generic", name: "Generic", builtIn: true,
+    bitrateCap: 320, mode: "cbr", sampleRates: [44100, 48000], tags: "id3v23", id3v1: false, cover: "small",
+    layout: "folders", fileTemplate: "{n} - [{artist} - ]{title|filename}", folderTemplate: "{n} {playlist}",
+    ascii: false, maxLen: 0, trackTagIsPosition: true, numberInTitle: false,
+  };
 
   const S = {
-    tracks: new Map(D.tracks.map((t) => [t.id, { ...t }])),
-    playlists: clone(D.playlists),
-    profiles: clone(D.profiles),
-    sets: clone(D.stickSets),
+    tracks: new Map(),
+    playlists: [],
+    profiles: [],
+    sets: [],
+    /** The last sync of each stick, by stick id. */
+    syncs: {},
     sticks: [],
-    current: "p-road",
-    setId: "set-car",
+    stickError: null,
+    current: null,
+    setId: null,
     sel: new Set(),
     anchor: null,
     focus: null,
@@ -50,39 +56,44 @@
     undo: [],
     redo: [],
     clip: null,
+    /** Preparation keys whose files are in the cache, and ones that failed. */
     cache: new Set(),
-    preparing: null,
+    prepFailed: new Map(),
+    analyzing: new Set(),
     sync: null,
     renaming: null,
-    look: "backlit",
     theme: "system",
-    shell: 0,
-    player: { entryId: null, playlistId: null, playing: false, pos: 0, dur: 0, asOnStick: false, volume: 0.8, silent: true, error: null },
+    scan: null,
+    ffmpegError: null,
+    version: "",
+    player: { entryId: null, playlistId: null, playing: false, pos: 0, dur: 0, asOnStick: false, volume: 0.8, silent: false, error: null, from: "source" },
   };
   const hostTheme = document.documentElement.getAttribute("data-theme");
 
   // ---- lookups ----------------------------------------------------------------
   const pl = (id = S.current) => S.playlists.find((p) => p.id === id);
   const stickSet = (id = S.setId) => S.sets.find((s) => s.id === id);
-  const prof = (id) => S.profiles.find((p) => p.id === id) || S.profiles[0];
-  const track = (id) => S.tracks.get(id);
+  const prof = (id) => S.profiles.find((p) => p.id === id) || S.profiles[0] || GENERIC;
+  const unknownTrack = (id) => ({ id, path: "", filename: "(a track the library lost)", title: "", artist: "", album: "", codec: "", exists: false, duration: 0, size: 0 });
+  const track = (id) => S.tracks.get(id) || unknownTrack(id);
   const device = (id) => S.sticks.find((s) => s.id === id);
+  /** The stick a set syncs to, if it's plugged in. Device names (sdb,
+   * PhysicalDrive2, disk4) go to whatever is plugged in next, so a set also
+   * remembers the stick's model and size: another stick in the same place
+   * isn't taken for it, and isn't erased without being picked. */
+  const chosen = (s) => {
+    const d = device(s.stickId);
+    return d && (!s.stickModel || (d.name === s.stickModel && d.sizeBytes === s.stickSize)) ? d : null;
+  };
   const setsFor = (plId) => S.sets.filter((s) => s.playlistIds.includes(plId));
   function listSet() {
     const cur = stickSet();
     if (cur && cur.playlistIds.includes(S.current)) return cur;
     return setsFor(S.current)[0] || null;
   }
-  const listProfile = () => (listSet() ? prof(listSet().profileId) : prof("prof-generic"));
+  const listProfile = () => (listSet() ? prof(listSet().profileId) : prof(GENERIC.id));
 
   // ---- planning: what a sync would write ------------------------------------------
-  function prepKey(t, d, g, profile) {
-    if (d.action === "skip") return null;
-    const gain = g && g.db ? g.db : 0;
-    if (d.action === "copy") return gain ? `${t.id}|copy|${gain}` : null; // plain copies stream from the source
-    return `${t.id}|${profile.bitrateCap}${profile.mode}|${gain}`;
-  }
-
   function planPlaylist(p, profile) {
     const items = p.entries.map((e) => ({ entry: e, t: track(e.trackId) }));
     const ds = items.map((it) => R.decide(it.t, profile));
@@ -91,7 +102,10 @@
       it.d = ds[i];
       it.g = gs[i];
       it.bytes = R.outBytes(it.t, it.d, profile);
-      it.key = prepKey(it.t, it.d, it.g, profile);
+      // Loudness not measured yet: the gain (and so the recipe) isn't known.
+      it.waiting = !!(it.g && it.g.unknown);
+      it.recipe = R.recipe(it.t, it.d, it.waiting ? null : it.g, profile);
+      it.key = it.recipe && it.recipe.kind !== "copy" && !it.waiting ? `${it.t.id}|${R.describe(it.recipe)}` : null;
     });
     const present = items.filter((it) => it.d.action !== "skip");
     const nm = N.fileNames(present.map((it) => ({ tags: it.t, filename: it.t.filename })), {
@@ -112,9 +126,9 @@
     const used = single ? pls.slice(0, 1) : pls;
     const fnames = N.folderNames(used, { template: used.length > 1 ? profile.folderTemplate : "{playlist}", ascii: profile.ascii }).names;
     const folders = used.map((p, i) => ({ ...planPlaylist(p, profile), folder: single ? null : fnames[i].name }));
-    const dev = device(s.stickId);
+    const dev = chosen(s);
     const lay = dev
-      ? R.layout(dev.size_bytes, folders.map((f, i) => ({ index: i, top: single, files: f.present.map((it) => ({ bytes: it.bytes, entry: it.entry.id })) })))
+      ? R.layout(dev.sizeBytes, folders.map((f, i) => ({ index: i, top: single, files: f.present.map((it) => ({ bytes: it.bytes, entry: it.entry.id })) })))
       : null;
     const all = folders.flatMap((f) => f.present);
     const keys = [...new Set(all.map((it) => it.key).filter(Boolean))];
@@ -122,6 +136,8 @@
       s, profile, single, folders, dev, lay, all, keys,
       ignored: single ? pls.slice(1) : [],
       pending: keys.filter((k) => !S.cache.has(k)),
+      failed: keys.filter((k) => S.prepFailed.has(k)),
+      waiting: all.filter((it) => it.waiting),
       total: all.reduce((a, it) => a + it.bytes, 0),
       skipped: folders.flatMap((f) => f.items.filter((it) => it.d.action === "skip")),
       errors: [...new Set(folders.flatMap((f) => f.errors))],
@@ -129,15 +145,16 @@
     };
   }
 
+  /** Everything about a stick's settings that changes what a sync writes. */
   function recipeOf(plan) {
     const pr = plan.profile;
     const norm = plan.folders.map((f) => (f.p.norm.on ? `${f.p.norm.target}${f.p.norm.mode}` : "off")).join(",");
-    return [pr.bitrateCap, pr.mode, pr.layout, pr.fileTemplate, pr.folderTemplate, pr.ascii, pr.maxLen, pr.tags, pr.cover, norm].join("|");
+    return [pr.bitrateCap, pr.mode, pr.layout, pr.fileTemplate, pr.folderTemplate, pr.ascii, pr.maxLen, pr.tags, pr.cover, pr.id3v1, pr.trackTagIsPosition, pr.numberInTitle, norm].join("|");
   }
 
   function staleness(plan) {
-    const ls = plan.s.lastSync;
-    if (!ls) return { never: true, parts: [] };
+    const ls = S.syncs[plan.s.id];
+    if (!ls || !ls.content) return { never: true, parts: [] };
     const now = plan.folders.map((f) => f.present.map((it) => it.t.id));
     const flatNow = now.flat();
     const flatWas = ls.content.flat();
@@ -151,7 +168,53 @@
     if (removed) parts.push(`${plural(removed, "track")} removed`);
     if (moved) parts.push("order changed");
     if (recipeOf(plan) !== ls.recipe) parts.push("settings changed");
-    return { at: ls.at, stickId: ls.stickId, parts, current: parts.length === 0 };
+    return { at: ls.at, stickId: ls.stickId, stickName: ls.stickName, parts, current: parts.length === 0 };
+  }
+
+  // ---- saving to the library ----------------------------------------------------------
+  // The window keeps what was last saved of each playlist, profile and stick,
+  // and sends only what changed (and the order) after every edit.
+  const saved = { playlist: new Map(), profile: new Map(), set: new Map() };
+  const savedOrder = { playlist: "", profile: "", set: "" };
+  let persisting = false;
+  let persistAgain = false;
+  function remember(kind, list) {
+    saved[kind] = new Map(list.map((x) => [x.id, JSON.stringify(x)]));
+    savedOrder[kind] = list.map((x) => x.id).join();
+  }
+  async function persist() {
+    if (persisting) { persistAgain = true; return; }
+    persisting = true;
+    try {
+      for (const [kind, list] of [["playlist", S.playlists], ["profile", S.profiles], ["set", S.sets]]) {
+        // What is sent is what gets remembered: an edit made while this save
+        // is under way is still unsaved afterwards, and goes in the next one.
+        const now = new Map(list.map((x) => [x.id, JSON.stringify(x)]));
+        const ids = list.map((x) => x.id);
+        const prev = saved[kind];
+        const put = ids.filter((id) => prev.get(id) !== now.get(id)).map((id) => JSON.parse(now.get(id)));
+        const del = [...prev.keys()].filter((id) => !now.has(id));
+        if (!put.length && !del.length && ids.join() === savedOrder[kind]) continue;
+        await api.saveDocs(kind, put, del, ids);
+        saved[kind] = now;
+        savedOrder[kind] = ids.join();
+      }
+    } catch (e) {
+      toast(`Couldn't save to the library: ${e}`);
+    } finally {
+      persisting = false;
+      if (persistAgain) { persistAgain = false; persist(); }
+    }
+  }
+  let settingTimers = {};
+  function saveSetting(key, value) {
+    clearTimeout(settingTimers[key]);
+    settingTimers[key] = setTimeout(() => api.setSetting(key, typeof value === "string" ? value : JSON.stringify(value)).catch(() => {}), 400);
+  }
+  /** After any change: save, and update the background work. */
+  function changed() {
+    persist();
+    scheduleWork();
   }
 
   // ---- undoable edits ---------------------------------------------------------------
@@ -168,6 +231,7 @@
     }
     S.redo = [];
     renderAll();
+    changed();
     return true;
   }
   function restore(snap) {
@@ -184,6 +248,7 @@
     const pp = S.player;
     if (pp.entryId && !pl(pp.playlistId)?.entries.some((e) => e.id === pp.entryId)) stopPlayback();
     renderAll();
+    changed();
   }
   function undo() {
     const u = S.undo.pop();
@@ -362,6 +427,8 @@
     selectOnly(null);
     const sets = setsFor(id);
     if (sets.length && !sets.includes(stickSet())) S.setId = sets[0].id;
+    saveSetting("currentPlaylist", id);
+    saveSetting("currentSet", S.setId);
     renderAll();
     $("list").scrollTop = 0;
   }
@@ -372,7 +439,7 @@
     const side = $("side");
     const plItems = S.playlists.map((p) => {
       const ts = p.entries.map((e) => track(e.trackId));
-      const dur = ts.reduce((a, t) => a + (t.exists ? t.duration : 0), 0);
+      const dur = ts.reduce((a, t) => a + (t.exists ? t.duration || 0 : 0), 0);
       return h("li", null, h("button", {
         type: "button", class: `side-item${p.id === S.current ? " current" : ""}`, dataset: { pl: p.id },
         "aria-current": p.id === S.current ? "page" : null,
@@ -390,6 +457,7 @@
         onclick: () => {
           if (S.setId === s.id) return;
           S.setId = s.id;
+          saveSetting("currentSet", s.id);
           if (!s.playlistIds.includes(S.current) && s.playlistIds[0]) openPlaylist(s.playlistIds[0]);
           renderAll();
         },
@@ -474,7 +542,7 @@
   function newSet() {
     const id = newId("set-");
     edit("New stick", () => {
-      S.sets.push({ id, name: `Stick ${S.sets.length + 1}`, profileId: "prof-generic", playlistIds: [S.current], stickId: null, label: "", lastSync: null });
+      S.sets.push({ id, name: `Stick ${S.sets.length + 1}`, profileId: S.profiles[0].id, playlistIds: [S.current], stickId: null, label: "" });
       S.setId = id;
     });
     startRename("set", id);
@@ -542,7 +610,7 @@
     ]);
   }
   function columnsMenu(a) {
-    const t = (k) => () => { S.cols[k] = !S.cols[k]; renderList(); };
+    const t = (k) => () => { S.cols[k] = !S.cols[k]; saveSetting("columns", S.cols); renderList(); };
     menu(a, [
       { label: "Album", checked: S.cols.album, action: t("album") },
       { label: "Format", checked: S.cols.format, action: t("format") },
@@ -557,6 +625,7 @@
       { label: "Add a folder…", action: () => addFiles(true) },
       "-",
       { label: "Import a playlist file…", action: importPlaylist },
+      { label: "Export this playlist…", action: exportPlaylist, disabled: !pl().entries.length },
     ]);
   }
 
@@ -620,7 +689,9 @@
     if (!rows.length) {
       empty.replaceChildren(
         h("p", { text: "This playlist is empty. Drop audio files or folders here, or add them from your music folder." }),
-        h("button", { type: "button", class: "btn", text: "Add files…", onclick: () => addFiles(false) }),
+        h("div", { class: "tools", style: { "justify-content": "center" } },
+          h("button", { type: "button", class: "btn", text: "Add files…", onclick: () => addFiles(false) }),
+          h("button", { type: "button", class: "btn", text: "Add a folder…", onclick: () => addFiles(true) })),
       );
     }
     if (S.focus) list.setAttribute("aria-activedescendant", `row-${S.focus}`);
@@ -645,7 +716,7 @@
       case "stick": {
         const d = it.d;
         if (d.action === "skip") {
-          return h("div", { class: "c c-stick" }, t.exists ? h("span", { class: "chip bad", text: "Skipped" })
+          return h("div", { class: "c c-stick" }, t.exists ? h("span", { class: "chip bad", title: d.reason, text: t.codec ? "Skipped" : "Not read" })
             : h("button", { type: "button", class: "btn quiet small", text: "Locate…", onclick: () => locate(t) }));
         }
         const why = [d.reason, ...(d.notes || [])].join("; ");
@@ -739,6 +810,7 @@
     renderStick(fromTemplate);
     renderSide();
     renderDisplay();
+    changed();
   }
 
   function renderStick(fromTemplate) {
@@ -777,7 +849,7 @@
     let status;
     if (st.never) status = h("p", { class: "st-status", text: "Not synced yet." });
     else {
-      const where = device(st.stickId)?.name || "a stick that isn't plugged in";
+      const where = device(st.stickId)?.name || st.stickName || "a stick that isn't plugged in";
       status = st.current
         ? h("p", { class: "st-status ok", text: `Up to date. Synced ${ago(st.at)} to ${where}.` })
         : h("p", { class: "st-status out", text: `Out of date: ${st.parts.join(", ")} since the last sync ${ago(st.at)}.` });
@@ -892,17 +964,26 @@
   function renderDevices(plan) {
     const s = plan.s;
     const items = S.sticks.map((d) => {
-      const on = d.id === s.stickId;
+      const on = d === chosen(s);
       const input = h("input", { type: "radio", name: "dev", value: d.id, checked: on, "aria-label": d.name });
-      input.addEventListener("change", () => edit(`Sync ${s.name} to ${d.name}`, () => { s.stickId = d.id; }));
-      const vols = d.volumes.length ? d.volumes.map((v) => v.summary).join("; ") : "Blank";
+      input.addEventListener("change", () => edit(`Sync ${s.name} to ${d.name}`, () => {
+        s.stickId = d.id;
+        s.stickModel = d.name;
+        s.stickSize = d.sizeBytes;
+      }));
       return h("label", { class: `dev${on ? " sel" : ""}` }, input,
-        h("span", { class: "dn", text: d.name }), h("span", { class: "ds", text: bytes(d.size_bytes) }),
-        h("span", { class: "don", text: `Now: ${vols}` }));
+        h("span", { class: "dn", text: d.name }), h("span", { class: "ds", text: bytes(d.sizeBytes) }),
+        h("span", { class: "don", text: `${d.device ? `${d.device}. ` : ""}Now: ${d.volumes.length ? d.volumes.join("; ") : "blank"}` }));
     });
-    fill(ST.device, 
-      h("h3", null, "USB stick", h("button", { type: "button", class: "btn quiet small", text: "Look again", onclick: refreshSticks })),
-      items.length ? h("div", { class: "devices", role: "radiogroup", "aria-label": "USB stick" }, items) : h("p", { class: "st-note", text: "No USB stick found. Plug one in, then look again." }),
+    const gone = s.stickId && !chosen(s);
+    const other = gone && device(s.stickId);
+    fill(ST.device,
+      h("h3", null, "USB stick", h("button", { type: "button", class: "btn quiet small", text: "Look again", onclick: () => refreshSticks(false) })),
+      gone ? h("p", { class: "st-note warn", text: other
+        ? `${other.name} isn't the stick this one syncs to (${s.stickModel}, ${bytes(s.stickSize)}). Pick it to sync to it instead.`
+        : "The stick this one syncs to isn't plugged in. Plug it in, or pick another." }) : null,
+      items.length ? h("div", { class: "devices", role: "radiogroup", "aria-label": "USB stick" }, items) : h("p", { class: "st-note", text: "No USB stick found. Plug one in; it shows up here." }),
+      S.stickError ? h("p", { class: "st-note err", text: `Looking for sticks failed: ${S.stickError}` }) : null,
     );
   }
 
@@ -937,7 +1018,7 @@
     const lossy = enc.filter((it) => it.d.lossy).length;
     const parts = [`${plural(plan.all.length - enc.length, "track")} copied as they are`];
     if (enc.length) parts.push(`${enc.length} encoded at ${plan.profile.bitrateCap} kbps${lossy ? ` (${lossy} lossy to lossy)` : ""}`);
-    if (plan.skipped.length) parts.push(`${plan.skipped.length} missing, skipped`);
+    if (plan.skipped.length) parts.push(`${plan.skipped.length} skipped (missing or unreadable)`);
     kids.push(h("p", { class: "counts", text: parts.join(", ") + "." }));
     ST.prep = h("p", { class: "prep", "aria-live": "polite" });
     kids.push(ST.prep);
@@ -950,28 +1031,38 @@
     plan = plan || planSet(stickSet());
     if (!plan) return;
     const total = plan.keys.length;
-    const left = plan.pending.length;
-    if (!total) { ST.prep.replaceChildren("Nothing to prepare: every track is copied as it is."); return; }
-    if (!left) { ST.prep.replaceChildren(`Prepared: all ${plural(total, "file")} that need encoding or gain are in the cache.`); return; }
-    const now = S.preparing && plan.pending.includes(S.preparing.key) ? `, now ${S.preparing.what}` : "";
-    ST.prep.replaceChildren(h("span", { class: "spin", "aria-hidden": "true" }), `Preparing in the background: ${total - left} of ${total} ready${now}.`);
+    const left = plan.pending.length - plan.failed.length;
+    if (S.ffmpegError) { fill(ST.prep, h("span", { class: "st-note err", text: "Nothing can be prepared: ffmpeg wasn't found." })); return; }
+    if (plan.failed.length) {
+      const e = S.prepFailed.get(plan.failed[0]);
+      fill(ST.prep, h("span", { class: "st-note err", text: `${plural(plan.failed.length, "file")} couldn't be prepared: ${e}` }));
+      return;
+    }
+    if (plan.waiting.length) {
+      fill(ST.prep, h("span", { class: "spin", "aria-hidden": "true" }), `Measuring loudness: ${plural(plan.waiting.length, "track")} to go.`);
+      return;
+    }
+    if (!total) { fill(ST.prep, "Nothing to prepare: every track is copied as it is."); return; }
+    if (left <= 0) { fill(ST.prep, `Prepared: all ${plural(total, "file")} that need encoding or gain are in the cache.`); return; }
+    fill(ST.prep, h("span", { class: "spin", "aria-hidden": "true" }), `Preparing in the background: ${total - left} of ${total} ready.`);
   }
 
   function renderSyncBar(plan) {
     if (S.sync && S.sync.setId === plan.s.id) return renderSyncProgress();
     const lay = plan.lay;
     const reasons = [];
-    if (!plan.dev) reasons.push("Pick a USB stick.");
+    if (S.ffmpegError) reasons.push("ffmpeg wasn't found, so nothing can be prepared.");
+    if (!plan.dev) reasons.push(S.sticks.length ? "Pick a USB stick." : "Plug in a USB stick.");
     else if (!lay.fits) reasons.push("It doesn't fit on this stick.");
     if (!plan.all.length) reasons.push("There's nothing to write yet.");
     if (plan.errors.length) reasons.push("Fix the file name template first.");
     if (S.sync && S.sync.running) reasons.push(`${stickSet(S.sync.setId)?.name || "Another stick"} is syncing.`);
     const btn = h("button", { type: "button", class: "btn primary", id: "sync-btn", text: "Erase and sync…", disabled: reasons.length > 0, onclick: confirmSync });
-    fill(ST.sync, 
+    fill(ST.sync,
       plan.dev ? h("p", { class: "erase" }, h("strong", { text: "Syncing erases the stick. " }), `Everything on ${plan.dev.name} is replaced with ${plan.folders.length === 1 ? "this playlist" : `these ${plan.folders.length} playlists`}.`) : null,
       btn,
       reasons.length ? h("p", { class: "why-not", text: reasons[0] }) : null,
-      h("p", { class: "proto-note", text: "Prototype: the sync is simulated, nothing is written." }),
+      DEMO ? h("p", { class: "sync-note", text: "Demo: the sync is simulated, nothing is written." }) : null,
     );
   }
 
@@ -986,11 +1077,15 @@
     const seek = h("input", { type: "range", min: "0", max: String(Math.max(1, Math.round(pp.dur || 1))), step: "1", value: String(Math.round(pp.pos)), "aria-label": "Position", disabled: !t, id: "seek" });
     seek.addEventListener("input", () => seekTo(Number(seek.value)));
     const aos = h("input", { type: "checkbox", checked: pp.asOnStick, id: "aos" });
-    aos.addEventListener("change", () => { pp.asOnStick = aos.checked; applyGain(); renderPlayer(); });
+    aos.addEventListener("change", () => {
+      pp.asOnStick = aos.checked;
+      if (pp.entryId) playEntry(pp.entryId, pp.playlistId, pp.pos);
+      else renderPlayer();
+    });
     const vol = h("input", { type: "range", min: "0", max: "1", step: "0.01", value: String(pp.volume), "aria-label": "Volume", id: "vol" });
-    vol.addEventListener("input", () => { pp.volume = Number(vol.value); if (audio) audio.volume = pp.volume; });
+    vol.addEventListener("input", () => { pp.volume = Number(vol.value); api.volume(pp.volume).catch(() => {}); saveSetting("volume", String(pp.volume)); });
     let sub = "Double-click a track, or press Enter, to hear it.";
-    if (t) sub = `${t.artist || "No artist tag"}. ${p.name}, ${idx + 1} of ${p.entries.length}.${pp.silent ? pp.error ? ` ${pp.error}` : " Demo track, no sound." : ""}`;
+    if (t) sub = `${t.artist || "No artist tag"}. ${p.name}, ${idx + 1} of ${p.entries.length}.${pp.silent ? " Demo track, no sound." : ""}`;
     fill($("player"), 
       h("div", { class: "pad" },
         h("button", { type: "button", class: "pbtn", "aria-label": "Previous", title: "Previous", disabled: !t, onclick: prevTrack }, icon("prev")),
@@ -1005,16 +1100,15 @@
 
   function aosCaption(e) {
     if (!e) return "Hear the gain and bitrate the sync will use.";
-    const p = pl(S.player.playlistId);
-    const s = setsFor(p.id)[0];
-    if (!s) return "Not on a stick yet, so nothing changes.";
-    const plan = planPlaylist(p, prof(s.profileId));
-    const it = plan.items.find((x) => x.entry.id === e.id);
-    if (!it || it.d.action === "skip") return "";
-    const g = it.g && !it.g.unknown && it.g.db ? db(it.g.db) : null;
-    if (it.d.action === "copy") return g ? `${g} in lossless steps, copied as it is.` : "Copied as it is, no change.";
-    const ready = it.key && S.cache.has(it.key);
-    return `${ready ? "Plays the cached" : "The"} ${prof(s.profileId).bitrateCap} kbps encode${ready ? "" : " isn't ready, so the source plays"}${g ? `, ${g}` : ""}.`;
+    const it = stickItem(S.player.playlistId, e.id);
+    if (!it) return "Not on a stick yet, so nothing changes.";
+    if (!it.recipe) return "";
+    const r = it.recipe;
+    if (r.kind === "copy") return it.waiting ? "Loudness not measured yet." : "Copied as it is, no change.";
+    if (r.kind === "gain") return `${db(r.steps * R.STEP)} in lossless steps, copied as it is.`;
+    const g = r.gainDb ? `, ${db(r.gainDb)}` : "";
+    if (!S.player.asOnStick) return `The stick gets a ${r.cap} kbps encode${g}.`;
+    return S.player.from === "cache" ? `Playing the cached ${r.cap} kbps encode${g}.` : `The ${r.cap} kbps encode isn't ready, so the source plays${g}.`;
   }
 
   function tickPlayerUI() {
@@ -1047,6 +1141,11 @@
       count = String(Math.floor(S.sync.pct));
       unit = "%";
       sub = S.sync.msg;
+    } else if (S.scan) {
+      main = "READING";
+      count = S.scan.total ? String(Math.floor((100 * S.scan.done) / S.scan.total)) : "";
+      unit = S.scan.total ? "%" : "";
+      sub = S.scan.total ? `Reading files: ${S.scan.done} of ${S.scan.total}.` : "Reading files.";
     } else if (pp.entryId) {
       const p = pl(pp.playlistId);
       const i = p.entries.findIndex((e) => e.id === pp.entryId);
@@ -1056,8 +1155,8 @@
       time = clock(pp.pos);
       sub = `${t.title || t.filename}${t.artist ? `, ${t.artist}` : ""}`;
     } else {
-      const p = pl();
-      const live = p.entries.map((e) => track(e.trackId)).filter((t) => t.exists);
+      const p = pl() || { name: "", entries: [] };
+      const live = p.entries.map((e) => track(e.trackId)).filter((t) => t.exists && t.duration);
       main = p.name;
       count = String(p.entries.length);
       unit = "TRK";
@@ -1112,33 +1211,61 @@
     });
   }
 
-  function locate(t) {
-    const input = $("file-in");
-    const pickReal = () => {
-      input.onchange = async () => {
-        const f = input.files[0];
-        input.value = "";
-        if (!f) return;
-        const found = await P.sniff.fromFile(f, t.id);
-        if (found) Object.assign(t, { exists: true, path: found.path, url: found.url, size: found.size, local: true });
-        closeModal();
-        renderAll();
-        toast(`Located ${t.title || t.filename}.`);
-      };
-      input.click();
-    };
-    modal({
-      title: `Where is ${t.title || t.filename}?`,
-      body: [
-        h("p", { text: `The playlist points at ${t.path}, and there's no file there now. Point the entry at the file's new place; the file itself isn't changed.` }),
-        h("p", { class: "st-note", text: "In the app, after one Locate, other missing tracks found in the same new folder can be fixed in one go." }),
-      ],
-      buttons: [
-        h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal }),
-        h("button", { type: "button", class: "btn", text: "Use the demo copy", onclick: () => { t.exists = true; t.path = t.path.replace("~/Music/", "~/Music/Old library/"); closeModal(); renderAll(); toast(`Located ${t.title} in ~/Music/Old library.`); } }),
-        h("button", { type: "button", class: "btn primary", text: "Choose the file…", onclick: B.kind === "tauri" ? () => toast("Choosing files needs the library backend, which is next in the build order.") : pickReal }),
-      ],
-    });
+  async function locate(t) {
+    if (DEMO) {
+      modal({
+        title: `Where is ${t.title || t.filename}?`,
+        body: [h("p", { text: `The playlist points at ${t.path}, and there's no file there now. Point the entry at the file's new place; the file itself isn't changed.` })],
+        buttons: [
+          h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal }),
+          h("button", { type: "button", class: "btn primary", text: "Use the demo copy", onclick: async () => { await api.locate(t.id); closeModal(); renderAll(); scheduleWork(); toast(`Located ${t.title} in ~/Music/Old library.`); } }),
+        ],
+      });
+      return;
+    }
+    const path = await api.pickFile(`Where is ${t.title || t.filename}?`);
+    if (!path) return;
+    let r;
+    try {
+      r = await api.locate(t.id, path);
+    } catch (e) {
+      toast(`Couldn't use that file: ${e}`);
+      return;
+    }
+    S.tracks.set(r.track.id, r.track);
+    if (r.track.id !== t.id) {
+      edit(`Locate ${r.track.title || r.track.filename}`, () => {
+        for (const p of S.playlists) for (const e of p.entries) if (e.trackId === t.id) e.trackId = r.track.id;
+      });
+    } else {
+      renderAll();
+      scheduleWork();
+    }
+    toast(`Located ${r.track.title || r.track.filename}.`);
+    if (r.matches.length) {
+      modal({
+        title: `Found ${plural(r.matches.length, "more missing track")} there`,
+        body: [h("p", { text: `${plural(r.matches.length, "other missing track")} ${r.matches.length === 1 ? "has its" : "have their"} file in the same folder. Point ${r.matches.length === 1 ? "it" : "them"} there too?` })],
+        buttons: [
+          h("button", { type: "button", class: "btn", text: "Leave them", onclick: closeModal }),
+          h("button", {
+            type: "button", class: "btn primary", text: "Fix them",
+            onclick: async () => {
+              closeModal();
+              for (const [id, p] of r.matches) {
+                try {
+                  const x = await api.locate(id, p);
+                  S.tracks.set(x.track.id, x.track);
+                } catch { /* left missing */ }
+              }
+              renderAll();
+              scheduleWork();
+              toast(`Located ${plural(r.matches.length, "more track")}.`);
+            },
+          }),
+        ],
+      });
+    }
   }
 
   function profileEditor(id) {
@@ -1204,7 +1331,7 @@
       profileEditor(copy.id);
     };
     const reset = () => {
-      Object.assign(pr, clone(D.profiles.find((x) => x.id === pr.id)));
+      Object.assign(pr, clone(GENERIC));
       closeModal();
       changed();
       profileEditor(pr.id);
@@ -1221,54 +1348,103 @@
     });
   }
 
-  // ---- background preparation (simulated) ---------------------------------------------------
-  let prepTimer = null;
-  function prepLoop() {
-    clearTimeout(prepTimer);
-    const fast = S.sync && S.sync.running && S.sync.step === 0;
-    const order = [stickSet(), ...S.sets.filter((x) => x !== stickSet())].filter(Boolean);
-    for (const s of order) {
-      const plan = planSet(s);
-      const key = plan.pending[0];
-      if (!key) continue;
-      const [tid, kind] = key.split("|");
-      const t = track(tid);
-      S.preparing = { key, what: `${kind === "copy" ? "applying gain to" : "encoding"} ${t.title || t.filename}` };
-      renderPrep();
-      const ms = kind === "copy" ? 200 : Math.min(1400, 300 + t.duration * 2.2);
-      prepTimer = setTimeout(() => {
-        S.cache.add(key);
-        S.preparing = null;
-        renderPrep();
-        prepLoop();
-      }, fast ? ms / 4 : ms);
-      return;
+  // ---- background work: loudness and preparation ------------------------------------------
+  // Loudness is measured for playlists that even out the volume; the files the
+  // sticks will need are prepared in the cache, current stick first, so
+  // pressing Sync is mostly writing.
+  let workTimer = null;
+  let lastQueue = null;
+  function scheduleWork() {
+    clearTimeout(workTimer);
+    workTimer = setTimeout(() => { requestAnalysis(); queuePrep(); }, 300);
+  }
+  function requestAnalysis() {
+    const want = new Set();
+    const pls = new Set([S.current, ...S.sets.flatMap((s) => s.playlistIds)]);
+    for (const id of pls) {
+      const p = pl(id);
+      if (!p || !p.norm.on) continue;
+      for (const e of p.entries) {
+        const t = track(e.trackId);
+        if (t.exists && t.codec && t.lufs == null && !t.analysisError && !S.analyzing.has(t.id)) want.add(t.id);
+      }
     }
-    S.preparing = null;
+    if (!want.size) return;
+    for (const id of want) S.analyzing.add(id);
+    api.analyze([...want]).catch(() => {});
+  }
+  async function queuePrep() {
+    if (S.ffmpegError) return;
+    const jobs = [];
+    const seen = new Set();
+    for (const s of [stickSet(), ...S.sets.filter((x) => x !== stickSet())].filter(Boolean)) {
+      for (const it of planSet(s).all) {
+        if (!it.key || seen.has(it.key) || S.cache.has(it.key) || S.prepFailed.has(it.key)) continue;
+        seen.add(it.key);
+        jobs.push({ key: it.key, trackId: it.t.id, recipe: it.recipe });
+      }
+    }
+    const sig = jobs.map((j) => j.key).join("\n");
+    if (sig === lastQueue) return;
+    lastQueue = sig;
+    try {
+      const ready = await api.prepareQueue(jobs);
+      for (const k of ready) S.cache.add(k);
+      if (ready.length) renderPrep();
+    } catch (e) {
+      console.warn("prepare queue", e);
+    }
+  }
+  let renderTimer = null;
+  function scheduleRender() {
+    clearTimeout(renderTimer);
+    renderTimer = setTimeout(() => {
+      renderHead();
+      renderList();
+      renderStick();
+      renderSide();
+    }, 150);
+  }
+  function onPrepared(p) {
+    if (p.ok) { S.cache.add(p.key); S.prepFailed.delete(p.key); } else S.prepFailed.set(p.key, p.error || "failed");
     renderPrep();
-    prepTimer = setTimeout(prepLoop, 1200);
+  }
+  function onAnalyzed(a) {
+    S.analyzing.delete(a.trackId);
+    const t = S.tracks.get(a.trackId);
+    if (!t) return;
+    if (a.error) t.analysisError = a.error;
+    else Object.assign(t, { lufs: a.lufs, truePeak: a.truePeak });
+    scheduleRender();
+    scheduleWork();
   }
 
-  // ---- sync (simulated) ---------------------------------------------------------------------------
+  // ---- sync ---------------------------------------------------------------------------------------
   const STEPS = ["Prepare the files", "Check the space", "Erase the stick", "Write the files", "Read back and compare", "Eject"];
+  const STAGE_STEP = { measure: 0, prepare: 0, tags: 0, check: 1, authorize: 2, erase: 2, write: 3, verify: 4, eject: 5 };
   function confirmSync() {
     const plan = planSet(stickSet());
     const dev = plan.dev;
     const enc = plan.all.filter((it) => it.d.action === "encode").length;
     const kv = [
-      ["Stick", `${dev.name}, ${bytes(dev.size_bytes)}${dev.device ? ` (${dev.device})` : ""}`],
-      ["Now on it", dev.volumes.length ? dev.volumes.map((v) => v.summary).join("; ") : "Nothing (blank)"],
-      ["Will hold", `${plan.folders.map((f) => f.folder || f.p.name).join(", ")}: ${plural(plan.all.length, "track")}, ${bytes(plan.lay.used)}`],
+      ["Stick", `${dev.name}, ${bytes(dev.sizeBytes)}${dev.device ? ` (${dev.device})` : ""}`],
+      ["Now on it", dev.volumes.length ? dev.volumes.join("; ") : "Nothing (blank)"],
+      ["Will hold", `${plan.folders.map((f) => f.folder || f.p.name).join(", ")}: ${plural(plan.all.length, "track")}, about ${bytes(plan.lay.used)}`],
       ["Encoded", enc ? `${plural(enc, "track")} at ${plan.profile.bitrateCap} kbps` : "None, every track is copied"],
       ["Skipped", plan.skipped.length ? plan.skipped.map((it) => `${it.t.title || it.t.filename} (${it.d.reason.toLowerCase()})`).join("; ") : "None"],
       ["Format", `FAT32, ${bytes(plan.lay.cluster)} clusters, label ${N.volumeLabel(plan.s.label || plan.s.name) || "none"}`],
     ];
+    const prompt = DEMO
+      ? "This is the demo: nothing is asked and nothing is written."
+      : dev.image
+        ? "This is a disk image, so no password is needed."
+        : "Your system asks for your password or fingerprint before the stick is erased.";
     modal({
       title: `Erase ${dev.name} and sync ${plan.s.name}?`,
       body: [
         h("div", { class: "danger-box" }, h("strong", { text: "Everything on the stick is erased. " }), "Copy off anything you want to keep first. The stick then holds only these playlists, written in FAT order."),
         h("dl", { class: "kv" }, kv.flatMap(([k, v]) => [h("dt", { text: k }), h("dd", { text: v })])),
-        h("p", { class: "st-note", text: "Your system asks for your password or fingerprint before the stick is erased. In this prototype nothing is asked and nothing is written." }),
+        h("p", { class: "st-note", text: prompt }),
       ],
       buttons: [
         h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal, "data-autofocus": "" }),
@@ -1281,18 +1457,18 @@
     const y = S.sync;
     if (!y) return;
     if (y.done) {
-      fill(ST.sync, 
+      fill(ST.sync,
         h("p", { class: `sync-done${y.ok ? "" : " bad"}` }, h("strong", { text: y.ok ? "Synced. " : "Stopped. " }), y.msg),
-        y.note ? h("p", { class: "proto-note", text: y.note }) : null,
+        (y.notes || []).map((n) => h("p", { class: "sync-note", text: n })),
         h("button", { type: "button", class: "btn", text: "Done", onclick: () => { S.sync = null; renderAll(); } }),
       );
       return;
     }
-    fill(ST.sync, 
+    fill(ST.sync,
       h("ol", { class: "steps" }, STEPS.map((label, i) => h("li", { class: i < y.step ? "done" : i === y.step ? "now" : null, text: i === 3 && y.files ? `Write ${plural(y.files, "file")}` : label }))),
       h("div", { class: "bar", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.round(y.pct)) }, h("i", { style: { width: `${y.pct}%` } })),
       h("p", { class: "sync-msg", text: y.msg }),
-      h("button", { type: "button", class: "btn", text: "Cancel", disabled: y.step >= 5, onclick: () => { y.cancel = true; } }),
+      h("button", { type: "button", class: "btn", text: y.cancel ? "Cancelling…" : "Cancel", disabled: y.step >= 4 || y.cancel, onclick: cancelSync }),
     );
   }
   function syncUpdate(fields) {
@@ -1300,161 +1476,142 @@
     if (S.sync.setId === S.setId) renderSyncProgress();
     renderDisplay();
   }
+  function cancelSync() {
+    if (!S.sync || !S.sync.running) return;
+    S.sync.cancel = true;
+    api.cancelSync().catch(() => {});
+    renderSyncProgress();
+  }
+
+  function buildSyncPlan(plan) {
+    const pr = plan.profile;
+    return {
+      setId: plan.s.id,
+      setName: plan.s.name,
+      stickId: plan.dev.id,
+      stickSize: plan.dev.sizeBytes,
+      label: plan.s.label || plan.s.name,
+      profile: {
+        bitrateCap: pr.bitrateCap, mode: pr.mode, sampleRates: pr.sampleRates, tags: pr.tags, id3v1: !!pr.id3v1,
+        cover: pr.cover, trackTagIsPosition: pr.trackTagIsPosition !== false, numberInTitle: !!pr.numberInTitle,
+      },
+      folders: plan.folders.map((f) => ({
+        name: f.folder || "",
+        files: f.present.map((it, i) => ({ name: it.name, trackId: it.t.id, recipe: it.recipe, position: i + 1, total: f.present.length, key: it.key })),
+      })),
+      verify: true,
+      estimateBytes: plan.lay ? plan.lay.used : 0,
+      record: { content: plan.folders.map((f) => f.present.map((it) => it.t.id)), recipe: recipeOf(plan), playlists: plan.folders.map((f) => f.p.id) },
+    };
+  }
+
+  function onSyncProgress(p) {
+    if (!S.sync || !S.sync.running) return;
+    const step = STAGE_STEP[p.stage] ?? S.sync.step;
+    const pct = p.total ? Math.min(100, (100 * p.done) / p.total) : 0;
+    const lcd = {
+      prepare: `PREP ${pad2(p.done)}-${pad2(p.total)}`, tags: "TAGS", check: "CHECK", authorize: "AUTHORIZE", erase: "ERASE",
+      write: "WRITE", verify: "VERIFY", eject: "EJECT",
+    }[p.stage] || S.sync.lcd;
+    let msg = p.message || S.sync.msg;
+    if ((p.stage === "write" || p.stage === "verify") && p.total) msg = `${msg}. ${bytes(p.done)} of ${bytes(p.total)}.`;
+    syncUpdate({ step, pct, lcd, msg, stage: p.stage });
+  }
 
   async function runSync() {
     const s = stickSet();
-    S.sync = { setId: s.id, running: true, step: 0, pct: 0, msg: "", lcd: "PREPARE", cancel: false };
-    renderAll();
-    const stop = (wrote) => {
-      const dev = device(s.stickId);
-      if (wrote && dev) dev.volumes = [];
-      S.sync = { setId: s.id, done: true, ok: false, msg: wrote ? "Cancelled while writing. The stick is blank now; sync again to fill it." : "Cancelled. Nothing was written; the stick is as it was." };
-      renderAll();
-    };
-    // 1. Finish preparing.
-    prepLoop();
     let plan = planSet(s);
-    const total0 = plan.keys.length;
-    while (plan.pending.length) {
-      if (S.sync.cancel) return stop(false);
-      syncUpdate({ msg: `Preparing: ${total0 - plan.pending.length} of ${total0} files ready.`, lcd: `PREP ${pad2(total0 - plan.pending.length)}-${pad2(total0)}`, pct: (100 * (total0 - plan.pending.length)) / Math.max(1, total0) });
-      await sleep(120);
-      plan = planSet(s);
+    S.sync = { setId: s.id, running: true, step: 0, pct: 0, msg: "Getting ready.", lcd: "PREPARE", files: plan.all.length, cancel: false };
+    renderAll();
+    // Loudness first, where a playlist evens out the volume: the gains depend on it.
+    if (plan.waiting.length) {
+      requestAnalysis();
+      while ((plan = planSet(s)).waiting.length) {
+        if (S.sync.cancel) return finishSync({ ok: false, cancelled: true, error: "Cancelled. Nothing was written; the stick is as it was." });
+        syncUpdate({ msg: `Measuring loudness: ${plural(plan.waiting.length, "track")} to go.`, lcd: "MEASURE" });
+        await sleep(250);
+      }
     }
-    // 2. The exact fit check, now that every size is known.
-    syncUpdate({ step: 1, pct: 0, msg: "Laying out every cluster.", lcd: "CHECK" });
-    await sleep(500);
-    if (S.sync.cancel) return stop(false);
-    if (!plan.lay || !plan.lay.fits) {
-      S.sync = { setId: s.id, done: true, ok: false, msg: "It doesn't fit after all. Nothing was written." };
-      return renderAll();
+    if (S.sync.cancel) return finishSync({ ok: false, cancelled: true, error: "Cancelled. Nothing was written; the stick is as it was." });
+    if (!plan.dev) return finishSync({ ok: false, error: "The stick isn't plugged in any more. Nothing was written." });
+    let res;
+    try {
+      res = await api.sync(buildSyncPlan(plan));
+    } catch (e) {
+      res = { ok: false, error: String(e) };
     }
-    const dev = plan.dev;
-    // 3. Erase.
-    syncUpdate({ step: 2, msg: `Erasing ${dev.name}: the old partition table and file system signatures.`, lcd: "ERASE" });
-    await sleep(800);
-    if (S.sync.cancel) return stop(false);
-    dev.volumes = [];
-    // 4. Write. Simulated at 20 times a typical stick's 15 MB/s.
-    const REAL = 15e6;
-    const SPEED = REAL * 20;
-    const total = plan.lay.used;
-    const files = plan.all;
-    const ends = [];
-    let acc = 0;
-    for (const it of files) { acc += it.bytes; ends.push(acc); }
-    let done = 0;
-    while (done < total) {
-      if (S.sync.cancel) return stop(true);
-      done = Math.min(total, done + SPEED / 10);
-      const i = Math.min(files.length - 1, ends.findIndex((e) => e >= done * (acc / total)));
-      const left = (total - done) / REAL;
-      syncUpdate({
-        step: 3, files: files.length, pct: (100 * done) / total, lcd: `WRITE ${pad2(i + 1)}-${pad2(files.length)}`,
-        msg: `Writing ${i + 1} of ${files.length}: ${files[i].name}. ${bytes(done)} of ${bytes(total)}; a real stick would need about ${Math.max(1, Math.round(left / 60))} min more.`,
-      });
-      await sleep(100);
-    }
-    // 5. Read back.
-    let back = 0;
-    while (back < total) {
-      if (S.sync.cancel) return stop(true);
-      back = Math.min(total, back + (SPEED * 2) / 10);
-      syncUpdate({ step: 4, pct: (100 * back) / total, lcd: "CHECK", msg: `Reading back and comparing every byte: ${bytes(back)} of ${bytes(total)}.` });
-      await sleep(100);
-    }
-    // 6. Eject.
-    syncUpdate({ step: 5, pct: 100, lcd: "EJECT", msg: "Ejecting, so nothing changes the stick after the check." });
-    await sleep(600);
-    const label = N.volumeLabel(s.label || s.name);
-    dev.volumes = [{ label, fs_type: "vfat", summary: `${label || "no label"} (FAT32), ${plan.single ? "" : plural(plan.folders.length, "folder") + ", "}${plural(files.length, "file")}, ${bytes(total)}` }];
-    s.lastSync = { at: Date.now(), stickId: dev.id, content: plan.folders.map((f) => f.present.map((it) => it.t.id)), recipe: recipeOf(plan) };
-    S.sync = {
-      setId: s.id, done: true, ok: true,
-      msg: `${plural(files.length, "file")} written and checked byte for byte, then ${dev.name} was ejected. You can unplug it.`,
-      note: "Simulated: the real sync does the same steps with the stick writer that's in the repo now.",
-    };
+    finishSync(res);
+  }
+
+  function finishSync(res) {
+    const s = stickSet(S.sync.setId);
+    if (res.ok && res.record) S.syncs[s.id] = res.record;
+    let msg;
+    if (res.ok) {
+      msg = `${plural(res.files, "file")} written and checked byte for byte`;
+      msg += res.ejected ? ", and the stick was ejected. You can unplug it." : ".";
+    } else msg = res.error || "The sync stopped.";
+    S.sync = { setId: s.id, done: true, ok: !!res.ok, cancelled: !!res.cancelled, msg, notes: res.notes || [] };
+    if (res.ok) toast(`Synced ${s.name}.`);
+    refreshSticks(true);
     renderAll();
   }
 
   // ---- player -----------------------------------------------------------------------------------
-  let audio = null;
-  let simTimer = null;
-  let actx = null;
-  let gainNode = null;
-  function stopAudio() {
-    clearInterval(simTimer);
-    simTimer = null;
-    if (audio) { audio.pause(); audio.removeAttribute("src"); audio = null; }
-    gainNode = null;
+  // The app's own player decodes with the bundled ffmpeg; this side sends
+  // commands and follows its events. "As on the stick" plays the prepared
+  // file when it's in the cache, or the source with the planned gain.
+  function stickItem(plId, entryId) {
+    const p = pl(plId);
+    const s = p && setsFor(p.id)[0];
+    if (!s) return null;
+    return planPlaylist(p, prof(s.profileId)).items.find((x) => x.entry.id === entryId) || null;
   }
   function stopPlayback() {
-    stopAudio();
-    Object.assign(S.player, { entryId: null, playlistId: null, playing: false, pos: 0, dur: 0, silent: true, error: null });
+    api.stop().catch(() => {});
+    Object.assign(S.player, { entryId: null, playlistId: null, playing: false, pos: 0, dur: 0, silent: false, error: null });
     renderPlayer();
     markPlaying();
     renderDisplay();
   }
-  function playEntry(entryId, plId = S.current) {
+  async function playEntry(entryId, plId = S.current, from = 0) {
     const p = pl(plId);
     const e = p && p.entries.find((x) => x.id === entryId);
     if (!e) return;
     const t = track(e.trackId);
     if (!t.exists) { toast(`${t.title || t.filename} can't play: the file isn't where the playlist says. Use Locate to find it.`); return; }
-    stopAudio();
-    Object.assign(S.player, { entryId, playlistId: plId, playing: true, pos: 0, dur: t.duration, silent: !t.url, error: null });
-    if (t.url) {
-      audio = new Audio(t.url);
-      audio.volume = S.player.volume;
-      audio.addEventListener("loadedmetadata", () => { if (Number.isFinite(audio.duration)) S.player.dur = audio.duration; tickPlayerUI(); });
-      audio.addEventListener("timeupdate", () => { if (audio) { S.player.pos = audio.currentTime; tickPlayerUI(); } });
-      audio.addEventListener("ended", () => nextTrack(true));
-      applyGain();
-      audio.play().catch(() => {
-        S.player.silent = true;
-        S.player.error = "This browser can't play this format; the app plays everything through its own ffmpeg.";
-        startSim();
-        renderPlayer();
-      });
-    } else startSim();
+    const args = { trackId: t.id, token: entryId, from, gainDb: 0, recipe: null };
+    if (S.player.asOnStick) {
+      const it = stickItem(plId, entryId);
+      if (it && it.recipe && it.recipe.kind !== "copy") {
+        args.recipe = it.recipe;
+        args.gainDb = it.recipe.kind === "gain" ? it.recipe.steps * R.STEP : it.recipe.gainDb || 0;
+      }
+    }
+    Object.assign(S.player, { entryId, playlistId: plId, playing: true, pos: from, dur: t.duration, error: null, silent: DEMO && !t.url, from: "source" });
     renderPlayer();
     markPlaying();
     renderDisplay();
-  }
-  function startSim() {
-    clearInterval(simTimer);
-    simTimer = setInterval(() => {
-      const pp = S.player;
-      if (!pp.playing) return;
-      pp.pos += 0.25;
-      if (pp.pos >= pp.dur) { nextTrack(true); return; }
-      tickPlayerUI();
-    }, 250);
-  }
-  function applyGain() {
-    if (!audio) return;
-    const pp = S.player;
-    let gdb = 0;
-    if (pp.asOnStick) {
-      const p = pl(pp.playlistId);
-      const s = setsFor(p.id)[0];
-      if (s) {
-        const it = planPlaylist(p, prof(s.profileId)).items.find((x) => x.entry.id === pp.entryId);
-        if (it && it.g && it.g.db) gdb = it.g.db;
-      }
-    }
-    if (!gdb && !gainNode) return;
     try {
-      if (!actx) actx = new AudioContext();
-      if (!gainNode) {
-        const src = actx.createMediaElementSource(audio);
-        gainNode = actx.createGain();
-        src.connect(gainNode).connect(actx.destination);
-      }
-      gainNode.gain.value = Math.pow(10, gdb / 20);
+      const r = await api.play(args);
+      if (S.player.entryId === entryId) { S.player.from = r.from; renderPlayer(); }
     } catch (err) {
-      console.warn("gain preview unavailable", err);
+      toast(String(err));
+      stopPlayback();
     }
+  }
+  function onPlayer(ev) {
+    const pp = S.player;
+    if (!pp.entryId || ev.token !== pp.entryId) return;
+    if (ev.state === "ended") { nextTrack(true); return; }
+    if (ev.state === "error") { toast(ev.error || "Playback stopped."); stopPlayback(); return; }
+    if (ev.state === "stopped") return;
+    pp.pos = ev.pos;
+    if (ev.dur) pp.dur = ev.dur;
+    const was = pp.playing;
+    pp.playing = ev.state === "playing";
+    if (was !== pp.playing) { renderPlayer(); markPlaying(); }
+    tickPlayerUI();
   }
   function togglePlay() {
     const pp = S.player;
@@ -1464,7 +1621,7 @@
       return;
     }
     pp.playing = !pp.playing;
-    if (audio) { if (pp.playing) audio.play().catch(() => {}); else audio.pause(); }
+    (pp.playing ? api.resume() : api.pause()).catch(() => {});
     renderPlayer();
     markPlaying();
     renderDisplay();
@@ -1491,7 +1648,7 @@
   }
   function seekTo(sec) {
     S.player.pos = sec;
-    if (audio) audio.currentTime = sec;
+    api.seek(sec).catch(() => {});
     tickPlayerUI();
   }
   function markPlaying() {
@@ -1499,93 +1656,111 @@
   }
 
   // ---- adding files ------------------------------------------------------------------------------
-  function trackFromPath(path, extra = {}) {
-    const name = path.split(/[\\/]/).pop();
-    const codec = P.sniff.codecFor(name) || "mp3";
-    const id = newId("t");
-    const t = {
-      id, title: extra.title || "", artist: "", album: "", albumartist: "", year: null, track: null, disc: null, genre: "",
-      codec, bitrate: codec === "mp3" ? 320 : 256, peakBitrate: codec === "mp3" ? 320 : 256, vbr: false, sampleRate: 44100, bits: 16, channels: 2,
-      duration: extra.duration_secs || 0, size: extra.size || 0, cover: false, exists: extra.exists !== false, drm: false,
-      lufs: null, truePeak: null, filename: P.sniff.stem(name), path, guessed: true,
-    };
-    S.tracks.set(id, t);
-    return id;
-  }
   function sortDropped(ts) {
     return ts.sort((a, b) => (a.disc || 0) - (b.disc || 0) || (a.track || 0) - (b.track || 0) || collator.compare(a.path, b.path));
   }
+  /** The demo in a browser: dropped File objects, read in the page. */
   async function addFileObjects(files, target) {
     const audioFiles = files.filter((f) => P.sniff.isAudio(f.name));
     const lists = files.filter((f) => P.sniff.isPlaylist(f.name));
     if (lists.length) toast("Playlist files open in the desktop app; a browser can't follow the paths inside them.");
     if (!audioFiles.length) { if (!lists.length) toast("Those aren't audio files this app reads."); return; }
     toast(`Reading ${plural(audioFiles.length, "file")}…`);
-    const ts = [];
-    for (const f of audioFiles) {
-      const t = await P.sniff.fromFile(f, newId("t"));
-      if (t) { S.tracks.set(t.id, t); ts.push(t); }
-    }
+    const ts = await api.addFileObjects(audioFiles);
+    for (const t of ts) S.tracks.set(t.id, t);
     sortDropped(ts);
     insertTracks(ts.map((t) => t.id), target);
   }
-  function insertTracks(ids, target) {
+  function insertTracks(ids, target, name = "Dropped files") {
     if (!ids.length) return;
     if (target && target.kind === "playlist") {
       addTracks(ids, target.id);
       toast(`Added ${plural(ids.length, "track")} to ${pl(target.id).name}.`, { label: "Undo", run: undo });
     } else if (target && target.kind === "new") {
-      newPlaylist("Dropped files", ids);
+      newPlaylist(name, ids);
       toast(`Made a playlist from ${plural(ids.length, "file")}.`, { label: "Undo", run: undo });
     } else {
       addTracks(ids, S.current, target ? target.index : null);
       toast(`Added ${plural(ids.length, "track")} to ${pl().name}. The files stay where they are.`, { label: "Undo", run: undo });
     }
   }
+  /** The app: files, folders and playlist files by path, read by the library. */
   async function addPaths(paths, target) {
-    const audioPaths = paths.filter(B.isAudioPath);
-    for (const p of paths.filter(B.isPlaylistPath)) {
-      try {
-        const v = await B.loadPlaylist(p);
-        const ids = v.tracks.map((t) => trackFromPath(t.path, t));
-        if (target && target.kind === "list") insertTracks(ids, target);
-        else { newPlaylist(v.name, ids); toast(`Imported ${v.name}: ${plural(ids.length, "track")}.`, { label: "Undo", run: undo }); }
-      } catch (e) {
-        toast(`Couldn't read ${p}: ${e}`);
+    if (S.ffmpegError) { toast("Files can't be read: ffmpeg wasn't found. Reinstall Playlist2USB to get it back."); return; }
+    S.scan = { done: 0, total: 0 };
+    renderDisplay();
+    let r;
+    try {
+      r = await api.addPaths(paths);
+    } catch (e) {
+      toast(`Couldn't add those: ${e}`);
+      return;
+    } finally {
+      S.scan = null;
+      renderDisplay();
+    }
+    for (const t of r.tracks) S.tracks.set(t.id, t);
+    // A new playlist made from one folder takes the folder's name.
+    const one = paths.length === 1 && paths[0].replace(/[\\/]+$/, "");
+    const folderName = one && r.trackIds.some((id) => track(id).path !== one) ? one.split(/[\\/]/).pop() : null;
+    if (r.trackIds.length) insertTracks(r.trackIds, target, folderName || undefined);
+    for (const imp of r.playlists) {
+      if (target && target.kind === "list" && !r.trackIds.length && r.playlists.length === 1) insertTracks(imp.trackIds, target);
+      else {
+        newPlaylist(imp.name, imp.trackIds);
+        const missing = imp.trackIds.filter((id) => !track(id).exists).length;
+        toast(`Imported ${imp.name}: ${plural(imp.trackIds.length, "track")}${missing ? `, ${missing} not found` : ""}. The playlist file isn't changed.`, { label: "Undo", run: undo });
       }
+      if (imp.skipped.length) toast(`${imp.name}: ${plural(imp.skipped.length, "stream")} left out; only files can go on a stick.`);
     }
-    if (audioPaths.length) {
-      insertTracks(audioPaths.map((p) => trackFromPath(p)), target);
-    }
-    const other = paths.length - audioPaths.length - paths.filter(B.isPlaylistPath).length;
-    if (other) toast("Folders are read by the library backend, the next step in the build order. Drop the files themselves for now.");
+    if (r.failed.length) toast(`${plural(r.failed.length, "file")} couldn't be read: ${r.failed[0]}`);
+    else if (!r.trackIds.length && !r.playlists.length) toast("No audio files there.");
+    scheduleWork();
   }
   async function addFiles(folder) {
-    if (B.kind === "tauri") {
-      const paths = await B.pickFiles(folder);
-      if (paths.length) addPaths(paths, { kind: "list", index: null });
+    if (DEMO) {
+      const input = folder ? $("folder-in") : $("file-in");
+      input.onchange = () => {
+        const files = [...input.files];
+        input.value = "";
+        addFileObjects(files, { kind: "list", index: null });
+      };
+      input.click();
       return;
     }
-    const input = folder ? $("folder-in") : $("file-in");
-    input.onchange = () => {
-      const files = [...input.files];
-      input.value = "";
-      addFileObjects(files, { kind: "list", index: null });
-    };
-    input.click();
+    const paths = await api.pickFiles({ folder });
+    if (paths.length) addPaths(paths, { kind: "list", index: null });
   }
   async function importPlaylist() {
-    if (B.kind === "tauri") {
-      const paths = (await B.pickFiles(false)).filter(B.isPlaylistPath);
-      if (paths.length) addPaths(paths, { kind: "new" });
-      return;
-    }
-    toast("Importing M3U, XSPF and PLS files works in the desktop app, where the paths inside them can be opened.");
+    if (DEMO) { toast("Importing M3U, XSPF and PLS files works in the desktop app, where the paths inside them can be opened."); return; }
+    const paths = await api.pickFiles({ playlists: true });
+    if (paths.length) addPaths(paths, { kind: "new" });
   }
-  async function refreshSticks() {
-    S.sticks = await B.sticks();
-    renderStick();
-    toast(`${plural(S.sticks.length, "stick")} found.`);
+  async function exportPlaylist() {
+    const p = pl();
+    if (!p || !p.entries.length) { toast("This playlist is empty; there's nothing to export."); return; }
+    if (DEMO) { toast("Exporting works in the desktop app."); return; }
+    const path = await api.pickSavePath(`${p.name.replace(/[\\/:*?"<>|]/g, "_")}.m3u8`);
+    if (!path) return;
+    try {
+      await api.exportPlaylist(p.entries.map((e) => e.trackId), p.name, path, true);
+      toast(`Exported ${p.name} to ${path}.`);
+    } catch (e) {
+      toast(`Couldn't export: ${e}`);
+    }
+  }
+  let stickPoll = null;
+  async function refreshSticks(quiet) {
+    try {
+      const r = await api.listSticks();
+      const changedSticks = JSON.stringify(r.sticks) !== JSON.stringify(S.sticks);
+      S.sticks = r.sticks;
+      S.stickError = r.error;
+      if (changedSticks || !quiet) { renderStick(); renderSide(); }
+      if (!quiet) toast(r.sticks.length ? `${plural(r.sticks.length, "stick")} found.` : "No USB stick found.");
+    } catch (e) {
+      if (!quiet) toast(`Couldn't look for sticks: ${e}`);
+    }
   }
 
   // ---- pointer drag sorting -----------------------------------------------------------------------
@@ -1749,8 +1924,8 @@
     }
   }
   function wireFileDrops() {
-    if (B.kind === "tauri") {
-      B.onFileDrop(({ type, paths, pos }) => {
+    if (!DEMO) {
+      api.onFileDrop(({ type, paths, pos }) => {
         if (type === "over" || type === "enter") { if (pos) fileHover(pos.x, pos.y); }
         else if (type === "drop") { const t = pos ? targetAt(pos.x, pos.y) : null; clearFileHover(); addPaths(paths, t || { kind: "list", index: null }); }
         else clearFileHover();
@@ -1836,63 +2011,73 @@
     ]);
   }
 
-  // ---- look, theme and shell (prototype controls) ------------------------------------------------------
-  function loadPrefs() {
-    try {
-      const v = JSON.parse(localStorage.getItem("p2u-proto") || "{}");
-      if (LOOKS[v.look]) S.look = v.look;
-      if (["system", "light", "dark"].includes(v.theme)) S.theme = v.theme;
-      if (SHELLS[v.shell]) S.shell = v.shell;
-    } catch { /* storage may be unavailable */ }
-  }
-  function savePrefs() {
-    try { localStorage.setItem("p2u-proto", JSON.stringify({ look: S.look, theme: S.theme, shell: S.shell })); } catch { /* ignore */ }
-  }
-  function applyLook() {
+  // ---- theme and the app menu -----------------------------------------------------------------------
+  function applyTheme() {
     const root = document.documentElement;
-    root.dataset.look = S.look;
     if (S.theme === "system") { if (hostTheme) root.setAttribute("data-theme", hostTheme); else root.removeAttribute("data-theme"); }
     else root.setAttribute("data-theme", S.theme);
-    const sh = SHELLS[S.shell];
-    root.style.setProperty("--shell", sh.color);
-    root.style.setProperty("--shell-ink", sh.ink);
-    for (const b of document.querySelectorAll("#looks button")) b.setAttribute("aria-checked", String(b.dataset.look === S.look));
-    const shells = $("shells");
-    shells.hidden = S.look !== "clip";
-    for (const b of shells.children) b.setAttribute("aria-checked", String(Number(b.dataset.i) === S.shell));
-    const tb = $("theme-btn");
-    tb.textContent = S.look === "night" ? "Always dark" : { system: "Theme: system", light: "Theme: light", dark: "Theme: dark" }[S.theme];
-    tb.disabled = S.look === "night";
-    savePrefs();
   }
-  function buildProto() {
-    for (const b of document.querySelectorAll("#looks button")) b.addEventListener("click", () => { S.look = b.dataset.look; applyLook(); });
-    $("shells").replaceChildren(...SHELLS.map((sh, i) => h("button", {
-      type: "button", role: "radio", title: sh.name, "aria-label": sh.name, dataset: { i: String(i) }, style: { "--swatch": sh.color },
-      onclick: () => { S.shell = i; applyLook(); },
-    })));
-    $("theme-btn").addEventListener("click", () => {
-      S.theme = { system: "light", light: "dark", dark: "system" }[S.theme];
-      applyLook();
+  function appMenu(anchor) {
+    const theme = (v, label) => ({ label, checked: S.theme === v, action: () => { S.theme = v; applyTheme(); saveSetting("theme", v); } });
+    menu(anchor, [
+      { label: "Add files…", key: "Ctrl+O", action: () => addFiles(false) },
+      { label: "Add a folder…", action: () => addFiles(true) },
+      { label: "Import a playlist file…", action: importPlaylist },
+      { label: "Export this playlist…", action: exportPlaylist, disabled: !pl() },
+      "-",
+      { heading: "Theme" },
+      theme("system", "Same as the system"),
+      theme("light", "Light"),
+      theme("dark", "Dark"),
+      "-",
+      { label: "Clear the cache…", action: clearCacheDialog },
+      { label: "About Playlist2USB", action: aboutDialog },
+    ]);
+  }
+  async function clearCacheDialog() {
+    const c = await api.cacheInfo();
+    modal({
+      title: "Clear the cache?",
+      body: [h("p", { text: `The cache holds ${plural(c.files, "prepared file")} (${bytes(c.bytes)}): encodes and gain-adjusted copies. Clearing it is always safe; the next sync prepares them again, which takes longer.` })],
+      buttons: [
+        h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal, "data-autofocus": "" }),
+        h("button", {
+          type: "button", class: "btn primary", text: "Clear the cache",
+          onclick: async () => {
+            closeModal();
+            await api.clearCache();
+            S.cache.clear();
+            lastQueue = null;
+            renderPrep();
+            scheduleWork();
+            toast("Cleared the cache.");
+          },
+        }),
+      ],
+    });
+  }
+  async function aboutDialog() {
+    const a = await api.about();
+    modal({
+      title: "About Playlist2USB",
+      body: [
+        h("p", { text: "Writes playlists onto USB sticks in FAT order, the order cheap MP3 players and car stereos actually play." }),
+        h("dl", { class: "kv" },
+          h("dt", { text: "Version" }), h("dd", { text: a.version }),
+          h("dt", { text: "Media engine" }), h("dd", { text: a.ffmpeg || S.ffmpegError || "not found" }),
+          a.ffmpegPath ? [h("dt", { text: "ffmpeg" }), h("dd", { text: a.ffmpegPath })] : null,
+          a.dataDir ? [h("dt", { text: "Library" }), h("dd", { text: a.dataDir })] : null,
+          h("dt", { text: "Cache" }), h("dd", { text: `${plural(a.cache.files, "file")}, ${bytes(a.cache.bytes)}${a.cache.dir ? ` in ${a.cache.dir}` : ""}` })),
+        h("p", { class: "st-note", text: "Free software under the GNU General Public License, version 3 or later. It includes FFmpeg (LGPL 2.1 or later) built with LAME (LGPL), and the fonts DSEG14 and Barlow (SIL Open Font License). The licence texts and the source code for every bundled part come with the app." }),
+      ],
+      buttons: [h("button", { type: "button", class: "btn primary", text: "Close", onclick: closeModal })],
     });
   }
 
   // ---- start -------------------------------------------------------------------------------------------
   async function init() {
-    loadPrefs();
-    buildProto();
-    applyLook();
     buildStick();
-    S.sticks = await B.sticks();
-    // The demo's car stick was synced three days ago: what it got then is in the
-    // cache already, and its record matches today's settings.
-    for (const s of S.sets) {
-      if (!s.lastSync) continue;
-      const plan = planSet(s);
-      s.lastSync.recipe = recipeOf(plan);
-      const synced = new Set(s.lastSync.content.flat());
-      for (const it of plan.all) if (it.key && synced.has(it.t.id)) S.cache.add(it.key);
-    }
+    $("app-menu").addEventListener("click", (e) => appMenu(e.currentTarget));
     const list = $("list");
     list.addEventListener("pointerdown", onListPointerDown);
     list.addEventListener("pointermove", onListPointerMove);
@@ -1900,9 +2085,47 @@
     list.addEventListener("pointercancel", () => endDrag(false));
     list.addEventListener("lostpointercapture", () => { if (drag) endDrag(true); });
     list.addEventListener("contextmenu", rowMenu);
-    list.addEventListener("focus", () => { if (!S.focus && pl().entries[0]) { S.focus = pl().entries[0].id; syncSelection(); } });
+    list.addEventListener("focus", () => { if (pl() && !S.focus && pl().entries[0]) { S.focus = pl().entries[0].id; syncSelection(); } });
     document.addEventListener("keydown", onKey);
     wireFileDrops();
+    api.on("prepared", onPrepared);
+    api.on("analyzed", onAnalyzed);
+    api.on("player", onPlayer);
+    api.on("sync-progress", onSyncProgress);
+    api.on("scan-progress", (p) => { S.scan = p; renderDisplay(); });
+
+    let d;
+    try {
+      d = await api.init();
+    } catch (e) {
+      $("disp-text").textContent = "ERROR".padEnd(16, " ");
+      $("disp-sub").textContent = `The library couldn't be opened: ${e}`;
+      return;
+    }
+    S.version = d.version;
+    S.ffmpegError = d.ffmpegError;
+    const st = d.settings || {};
+    if (["system", "light", "dark"].includes(st.theme)) S.theme = st.theme;
+    applyTheme();
+    try { Object.assign(S.cols, JSON.parse(st.columns || "{}")); } catch { /* keep the defaults */ }
+    if (st.volume) S.player.volume = Number(st.volume) || 0.8;
+    for (const t of d.tracks) S.tracks.set(t.id, { ...t });
+    S.playlists = clone(d.playlists);
+    S.profiles = clone(d.profiles);
+    S.sets = clone(d.sets);
+    remember("playlist", S.playlists);
+    remember("profile", S.profiles);
+    remember("set", S.sets);
+    // First run: the generic profile, one empty playlist and one stick.
+    if (!S.profiles.length) S.profiles.push(clone(GENERIC));
+    if (!S.playlists.length) S.playlists.push({ id: newId("p-"), name: "Playlist 1", entries: [], norm: { on: false, target: -18, mode: "track" } });
+    if (!S.sets.length) S.sets.push({ id: newId("set-"), name: "My stick", profileId: S.profiles[0].id, playlistIds: [S.playlists[0].id], stickId: null, label: "" });
+    for (const r of d.syncs) S.syncs[r.setId] = r;
+    S.current = pl(st.currentPlaylist) ? st.currentPlaylist : S.playlists[0].id;
+    S.setId = stickSet(st.currentSet) ? st.currentSet : (setsFor(S.current)[0] || S.sets[0]).id;
+    await refreshSticks(true);
+    // The demo's sync records predate its settings: they count as current.
+    for (const s of S.sets) if (S.syncs[s.id] && S.syncs[s.id].recipe == null) S.syncs[s.id].recipe = recipeOf(planSet(s));
     const ro = new ResizeObserver(() => {
       const w = $("list-wrap").clientWidth;
       const before = visibleCols(pl()).join();
@@ -1911,8 +2134,25 @@
     });
     ro.observe($("list-wrap"));
     S.listWidth = $("list-wrap").clientWidth || 800;
+    api.volume(S.player.volume).catch(() => {});
     renderAll();
-    prepLoop();
+    persist();
+    scheduleWork();
+    // For the app's self-test (tests/app_e2e.py) and for poking around in the inspector.
+    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, stopPlayback, refreshSticks, ready: true };
+    if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Playlist2USB to get it back.");
+    if (!DEMO) {
+      stickPoll = setInterval(() => { if (!(S.sync && S.sync.running)) refreshSticks(true); }, 3000);
+      api.refreshTracks().then((ts) => {
+        for (const t of ts) {
+          const old = S.tracks.get(t.id);
+          S.tracks.set(t.id, old && old.analysisError ? { ...t, analysisError: old.analysisError } : t);
+        }
+        scheduleRender();
+        scheduleWork();
+      }).catch(() => {});
+      if (d.openPaths && d.openPaths.length) addPaths(d.openPaths, { kind: "new" });
+    }
   }
   init();
 })();

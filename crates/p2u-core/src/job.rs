@@ -1,23 +1,22 @@
 //! The one privileged operation, packaged so the GUI, the CLI and the elevated
 //! helper all run exactly the same code: erase the stick, write a fresh FAT32
-//! file system with the playlist in FAT order and in one unbroken run of
-//! clusters, then read it all back from the medium.
+//! file system with the playlists in FAT order and every file in one unbroken
+//! run of clusters, then read it all back from the medium.
 //!
 //! "Written OK" is only ever reported from that read-back, never from what the
 //! OS says about the stick.
 
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 
 use serde::{Deserialize, Serialize};
 
-use crate::fat::stick::{plan_stick, verify_stick, write_stick, StickOptions, StickResult, StickVerification, WriteItem, WriteProgress};
-use crate::fat::Device;
+use crate::fat::stick::{plan_content, verify_stick, write_stick, StickContent, StickResult, StickVerification, WriteProgress};
+use crate::fat::{Device, FatError};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StickJob {
-    pub items: Vec<WriteItem>,
-    #[serde(default)]
-    pub options: StickOptions,
+    pub content: StickContent,
     /// Compare every byte with its source after writing (default on).
     #[serde(default = "yes")]
     pub verify_data: bool,
@@ -38,6 +37,9 @@ pub struct StickOutcome {
     /// Set once the first write happened: the stick's old contents are gone.
     #[serde(default)]
     pub erased: bool,
+    /// The write was cancelled; the stick reads as blank.
+    #[serde(default)]
+    pub cancelled: bool,
     pub result: Option<StickResult>,
     pub verification: Option<StickVerification>,
 }
@@ -49,7 +51,12 @@ impl StickOutcome {
 }
 
 /// Plan, erase and write, then verify from the medium. `dev` is the whole disk.
-pub fn run_stick<D: Device>(dev: &mut D, job: &StickJob, progress: &mut dyn FnMut(&WriteProgress)) -> StickOutcome {
+pub fn run_stick<D: Device>(
+    dev: &mut D,
+    job: &StickJob,
+    progress: &mut dyn FnMut(&WriteProgress),
+    cancel: Option<&AtomicBool>,
+) -> StickOutcome {
     let size = match dev.disk_size() {
         Ok(s) => s,
         Err(e) => return StickOutcome::fail(format!("could not read the stick's size: {e}")),
@@ -58,12 +65,21 @@ pub fn run_stick<D: Device>(dev: &mut D, job: &StickJob, progress: &mut dyn FnMu
         Ok(s) => s,
         Err(e) => return StickOutcome::fail(format!("could not read the stick's sector size: {e}")),
     };
-    let plan = match plan_stick(size, sector, &job.items, &job.options) {
+    let plan = match plan_content(size, sector, &job.content) {
         Ok(p) => p,
         Err(e) => return StickOutcome::fail(format!("nothing was written: {e}")),
     };
-    let result = match write_stick(dev, &plan, &job.items, progress) {
+    let result = match write_stick(dev, &plan, progress, cancel) {
         Ok(r) => r,
+        Err(FatError::Cancelled) => {
+            return StickOutcome {
+                ok: false,
+                error: Some("cancelled while writing. The stick is blank now; sync again to fill it.".into()),
+                erased: true,
+                cancelled: true,
+                ..Default::default()
+            }
+        }
         Err(e) => {
             return StickOutcome {
                 ok: false,
@@ -74,7 +90,7 @@ pub fn run_stick<D: Device>(dev: &mut D, job: &StickJob, progress: &mut dyn FnMu
         }
     };
     let mut o = StickOutcome { erased: true, result: Some(result), ..Default::default() };
-    match verify_stick(dev, &plan, &job.items, job.verify_data, progress) {
+    match verify_stick(dev, &plan, job.verify_data, progress) {
         Ok(v) => {
             o.ok = v.ok();
             if !o.ok {

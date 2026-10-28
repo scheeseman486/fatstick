@@ -1,0 +1,90 @@
+/* Backlit: the pocket player's reflective LCD over a quiet utility window.
+   Light by default, dark when the system (or the View menu) says so. Every
+   token is defined on :root first, then redefined for dark. */
+
+:root {
+  --bg: #c9d1d8;
+  --pane: #e8ecef;
+  --sheet: #f7f9fa;
+  --ink: #1e252d;
+  --ink-2: #56606b;
+  --ink-3: #7f8993;
+  --rule: #d3dae0;
+  --accent: #2e5b8a;
+  --accent-ink: #ffffff;
+  --accent-text: #285381;
+  --accent-soft: #dce6f0;
+  --accent-strong: #234a73;
+  --sel: #d3e0ed;
+  --sel-ink: #1e252d;
+  --hover: #edf1f4;
+  --focus: #2e5b8a;
+  --warn: #8a5300;
+  --warn-bg: #f6e9d2;
+  --error: #b3261e;
+  --ok: #2c6e3a;
+  --ok-bg: #dcebdd;
+  --chip-bg: #e4e9ed;
+  --chassis: #2b3138;
+  --chassis-2: #3c444d;
+  --chassis-ink: #d0d6dc;
+  --chassis-ink-2: #939ea8;
+  --disp-bg: #b4c49c;
+  --disp-ink: #27331f;
+  --disp-ghost: rgba(39, 51, 31, 0.09);
+  --disp-glow: none;
+  --glass-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  --btn-bg: #ffffff;
+  --btn-border: #b5bec6;
+  --btn-ink: #1e252d;
+  --btn-hover: #f1f4f6;
+  --input-bg: #ffffff;
+  --input-border: #b5bec6;
+  --map-a: #2e5b8a;
+  --map-b: #6a90b6;
+  --map-c: #9bb5cf;
+  --map-free: #dde3e8;
+  --map-hatch: rgba(255, 255, 255, 0.5);
+  --scrim: rgba(20, 26, 32, 0.45);
+  --shadow: 0 10px 30px rgba(20, 28, 36, 0.24);
+  --font-ui: "Barlow", "Segoe UI", system-ui, sans-serif;
+  --font-disp: "DSEG14", ui-monospace, monospace;
+  --disp-weight: 700;
+  --disp-track: 0.04em;
+  --disp-size: 26px;
+  --r-s: 5px;
+  --r-btn: 5px;
+  --r-row: 4px;
+  --r-chip: 3px;
+  --r-glass: 6px;
+  --r-pane: 0px;
+  --gap: 1px;
+  --row-h: 32px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+  --bg: #0b0e11; --pane: #191e23; --sheet: #1e242a; --ink: #e1e6ea; --ink-2: #9ca7b1; --ink-3: #727d88; --rule: #2d343b;
+  --accent: #86b0da; --accent-ink: #0d1824; --accent-text: #9fc2e6; --accent-soft: #22354a; --accent-strong: #a9c9ea;
+  --sel: #29405a; --sel-ink: #f0f4f8; --hover: #242b31; --focus: #86b0da;
+  --warn: #e7ae58; --warn-bg: #392e1c; --error: #f1938b; --ok: #8fcf9a; --ok-bg: #1e3324; --chip-bg: #2a3138;
+  --chassis: #121519; --chassis-2: #272e35; --chassis-ink: #b4bec7; --chassis-ink-2: #7b8691;
+  --disp-bg: #a3bb88; --disp-ink: #1b2615;
+  --btn-bg: #252c33; --btn-border: #3b444d; --btn-ink: #e1e6ea; --btn-hover: #2d353d; --input-bg: #14181c; --input-border: #3b444d;
+  --map-a: #86b0da; --map-b: #5d84ab; --map-c: #44617f; --map-free: #29313a; --map-hatch: rgba(0, 0, 0, 0.35);
+  --scrim: rgba(0, 0, 0, 0.6); --shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b0e11; --pane: #191e23; --sheet: #1e242a; --ink: #e1e6ea; --ink-2: #9ca7b1; --ink-3: #727d88; --rule: #2d343b;
+  --accent: #86b0da; --accent-ink: #0d1824; --accent-text: #9fc2e6; --accent-soft: #22354a; --accent-strong: #a9c9ea;
+  --sel: #29405a; --sel-ink: #f0f4f8; --hover: #242b31; --focus: #86b0da;
+  --warn: #e7ae58; --warn-bg: #392e1c; --error: #f1938b; --ok: #8fcf9a; --ok-bg: #1e3324; --chip-bg: #2a3138;
+  --chassis: #121519; --chassis-2: #272e35; --chassis-ink: #b4bec7; --chassis-ink-2: #7b8691;
+  --disp-bg: #a3bb88; --disp-ink: #1b2615;
+  --btn-bg: #252c33; --btn-border: #3b444d; --btn-ink: #e1e6ea; --btn-hover: #2d353d; --input-bg: #14181c; --input-border: #3b444d;
+  --map-a: #86b0da; --map-b: #5d84ab; --map-c: #44617f; --map-free: #29313a; --map-hatch: rgba(0, 0, 0, 0.35);
+  --scrim: rgba(0, 0, 0, 0.6); --shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}

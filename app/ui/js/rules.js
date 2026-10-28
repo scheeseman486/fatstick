@@ -1,7 +1,8 @@
 // What a sync will do with each track (copy or encode, and the gain), how big
-// the result is, and whether it fits a FAT32 stick. Mirrors the rules in the
-// design doc; the real decisions will come from p2u-audio, this is the
-// front end's model of them for the prototype. Pure functions, no DOM.
+// the result is, and whether it fits a FAT32 stick: the rules from the design
+// doc, so the window can show them as you edit. The app's sync checks every
+// copy against every frame header again and encodes anything the profile
+// can't take. Pure functions, no DOM.
 "use strict";
 (function (P2U) {
   const LOSSLESS = new Set(["flac", "alac", "wav", "aiff", "wavpack", "ape", "wmalossless"]);
@@ -14,6 +15,7 @@
   const COVER_BYTES = 60 * 1024; // a small baseline JPEG, typical
 
   function formatLabel(t) {
+    if (!t.codec) return t.exists === false ? "" : "Not read";
     const name = CODEC_NAME[t.codec] || t.codec.toUpperCase();
     if (LOSSLESS.has(t.codec)) return `${name} ${t.bits || 16}/${trimKHz(t.sampleRate)}`;
     if (t.codec === "mp3" && t.vbr) return `MP3 VBR ${t.bitrate}`;
@@ -28,6 +30,7 @@
   function decide(t, profile) {
     if (!t.exists) return { action: "skip", reason: "File not found" };
     if (t.drm) return { action: "skip", reason: "Copy-protected, can't be decoded" };
+    if (!t.codec) return { action: "skip", reason: t.error ? `Couldn't be read: ${t.error}` : "Not read yet" };
     const cap = profile.bitrateCap;
     const notes = [];
     if (t.channels > 2) notes.push(`downmixed from ${t.channels} channels`);
@@ -84,11 +87,39 @@
     });
   }
 
+  /** Output sample rate for an encode: kept if allowed and MPEG-1 can carry it, else 44.1 kHz. */
+  function outputRate(source, allowed) {
+    if ([44100, 48000, 32000].includes(source) && allowed.includes(source)) return source;
+    return allowed.includes(44100) || !allowed.length ? 44100 : allowed[0];
+  }
+
+  /**
+   * The recipe the app's preparation and sync take: a plain copy, a copy with
+   * lossless gain steps, or an encode (with the exact gain).
+   */
+  function recipe(t, d, g, profile) {
+    if (d.action === "skip") return null;
+    if (d.action === "copy") {
+      const steps = g && g.db ? Math.round(g.db / STEP) : 0;
+      return steps ? { kind: "gain", steps } : { kind: "copy" };
+    }
+    return {
+      kind: "encode", cap: profile.bitrateCap, vbr: profile.mode === "vbr",
+      sampleRate: outputRate(t.sampleRate, profile.sampleRates), gainDb: g && g.db ? Math.round(g.db * 10) / 10 : 0,
+    };
+  }
+  function describe(r) {
+    if (!r) return "";
+    if (r.kind === "copy") return "copy";
+    if (r.kind === "gain") return `gain${r.steps > 0 ? "+" : ""}${r.steps}`;
+    return `${r.vbr ? "vbr" : "cbr"}${r.cap}/${r.sampleRate}/${r.gainDb}`;
+  }
+
   /** Bytes the file takes on the stick: tag, cover, audio. */
   function outBytes(t, d, profile) {
     const tag = TAG_BYTES + (profile.cover === "none" || !t.cover ? 0 : COVER_BYTES) + (profile.id3v1 ? 128 : 0);
     if (d.action === "skip") return 0;
-    if (d.action === "copy") return Math.round(t.size * 0.985) + tag; // the source's own tags are dropped
+    if (d.action === "copy") return Math.round(t.size * 0.985) + tag; // the source's own tags are dropped (estimate)
     return Math.round((profile.bitrateCap * 1000 / 8) * t.duration) + tag;
   }
 
@@ -125,5 +156,5 @@
     return { ...g, used, free: g.dataBytes - used, fits: used <= g.dataBytes, runs };
   }
 
-  P2U.rules = { LOSSLESS, CODEC_NAME, formatLabel, decide, gains, outBytes, geometry, layout, STEP };
+  P2U.rules = { LOSSLESS, CODEC_NAME, formatLabel, decide, gains, outBytes, geometry, layout, outputRate, recipe, describe, STEP };
 })(typeof window !== "undefined" ? (window.P2U = window.P2U || {}) : (globalThis.P2U = globalThis.P2U || {}));

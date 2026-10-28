@@ -10,6 +10,8 @@
 //! Disk images (and whole-disk device nodes you can open yourself) work too:
 //!   truncate -s 1G stick.img && p2u write stick.img --playlist trip.xspf --yes
 //!   p2u ls stick.img --dir "/Road Trip"
+//! The app's sync (several folders, tagged and converted files) is a job:
+//!   p2u write-job stick.img --job job.json --yes
 
 use std::fs::OpenOptions;
 use std::io::{BufRead, IsTerminal, Write};
@@ -17,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
-use p2u_core::fat::stick::{plan_stick, StickOptions, WriteItem, WriteProgress};
+use p2u_core::fat::stick::{plan_content, StickContent, StickOptions, WriteItem, WriteProgress};
 use p2u_core::fat::{check_order, normalize_name, Device, EntryKind, FaultInjector, Volume};
 use p2u_core::job::{run_stick, StickJob, StickOutcome};
 use p2u_core::plan::{make_plan, Plan, PlanOptions};
@@ -105,6 +107,21 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// ERASE a stick and write a prepared job: several folders, files made of
+    /// parts (what the app's sync hands over). Same checks as `write`.
+    WriteJob {
+        /// A stick from `p2u sticks`, or a disk image or whole-disk device node
+        target: String,
+        /// A StickJob as JSON
+        #[arg(long)]
+        job: PathBuf,
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Show a stick's FAT32 geometry and health flags
     Inspect {
         device: PathBuf,
@@ -184,16 +201,16 @@ fn summarize(out: &StickOutcome) {
     let p = &r.plan;
     let f = &p.format;
     let mb = p.total_bytes as f64 / 1e6;
-    let last = p.files.iter().rev().find(|x| x.clusters > 0).map(|x| x.first_cluster + x.clusters - 1).unwrap_or(0);
+    let last = p.files().filter(|x| x.clusters > 0).last().map(|x| x.first_cluster + x.clusters - 1).unwrap_or(0);
     println!(
         "Wrote {} tracks ({mb:.1} MB) to {} on a fresh FAT32 partition ({} clusters of {} bytes, label {:?}).",
-        p.files.len(),
-        p.target_dir(),
+        p.file_count(),
+        p.folder_paths().join(", "),
         f.cluster_count,
         f.cluster_bytes(),
         f.label.trim_end()
     );
-    println!("Placement: clusters {}-{last}, each track in one unbroken run, back to back in playlist order.", 2 + p.root_clusters + p.folder_clusters);
+    println!("Placement: clusters {}-{last}, each track in one unbroken run, back to back in stick order.", p.first_data_cluster());
     if let Some(v) = &out.verification {
         let tick = |b: bool| if b { "ok" } else { "FAILED" };
         println!(
@@ -216,6 +233,75 @@ fn summarize(out: &StickOutcome) {
             println!("  problem: {p}");
         }
     }
+}
+
+/// Plan, confirm, then erase and write a job to a listed stick or an image.
+fn run_job(target: &str, job: &StickJob, yes: bool, dry_run: bool, json: bool) -> Result<bool, String> {
+    let mut prog = |p: &WriteProgress| {
+        if p.bytes_done == 0 && !json {
+            match p.stage.as_str() {
+                "erase" => eprintln!("[erase] clearing the stick"),
+                s => eprintln!("[{s} {}/{}] {}", p.index + 1, p.total, p.name),
+            }
+        }
+    };
+    let listed = p2u_device::list_sticks().ok().and_then(|v| v.into_iter().find(|s| s.id == target || s.device == target));
+    let out = match listed {
+        Some(stick) => {
+            // Catch "doesn't fit" and bad names before the stick is touched.
+            let st = plan_content(stick.size_bytes, 512, &job.content).map_err(|e| format!("nothing was written: {e}"))?;
+            if dry_run {
+                print_json(&st);
+                return Ok(true);
+            }
+            if !yes {
+                confirm_erase(&describe(&stick))?;
+            }
+            match p2u_device::acquire(&stick) {
+                Ok(mut raw) => {
+                    let mut o = run_stick(&mut raw, job, &mut prog, None);
+                    if o.ok {
+                        if let Err(e) = raw.finish() {
+                            o.error = Some(e.to_string());
+                        } else if !json {
+                            eprintln!("The stick has been ejected: unplug it.");
+                        }
+                    }
+                    o
+                }
+                Err(p2u_device::DeviceError::NeedsElevation) | Err(p2u_device::DeviceError::NoBroker(_)) => {
+                    p2u_device::write_via_helper(&stick, job).map_err(|e| e.to_string())?
+                }
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        None => {
+            let path = Path::new(target);
+            let mounted = p2u_device::mounted_on(path);
+            if !mounted.is_empty() {
+                return Err(format!("{target} is mounted at {}; unmount it first", mounted[0].display()));
+            }
+            let mut f = OpenOptions::new().read(true).write(true).open(path).map_err(|e| format!("{target}: {e}"))?;
+            let size = f.disk_size().map_err(|e| e.to_string())?;
+            let st = plan_content(size, 512, &job.content).map_err(|e| format!("nothing was written: {e}"))?;
+            if dry_run {
+                print_json(&st);
+                return Ok(true);
+            }
+            if !yes {
+                confirm_erase(&format!("{target} ({})", human_size(size)))?;
+            }
+            // Test hook: simulate the stick being pulled after N writes.
+            let fault = std::env::var("P2U_FAIL_AFTER_WRITES").ok().and_then(|v| v.parse().ok());
+            run_stick(&mut FaultInjector::new(f, fault), job, &mut prog, None)
+        }
+    };
+    if json {
+        print_json(&out);
+    } else {
+        summarize(&out);
+    }
+    Ok(out.ok)
 }
 
 fn run(cli: Cli) -> Result<bool, String> {
@@ -256,77 +342,15 @@ fn run(cli: Cli) -> Result<bool, String> {
             for m in &plan.missing {
                 eprintln!("warning: missing, skipped: {m}");
             }
-            let job = StickJob {
-                items: plan.items.iter().map(|i| WriteItem { source: i.source.clone(), name: i.target_name.clone() }).collect(),
-                options: StickOptions { folder: plan.folder_name.clone(), label: label.unwrap_or_default() },
-                verify_data: !no_verify_data,
-                eject: true,
-            };
-            let mut prog = |p: &WriteProgress| {
-                if p.bytes_done == 0 && !json {
-                    match p.stage.as_str() {
-                        "erase" => eprintln!("[erase] clearing the stick"),
-                        s => eprintln!("[{s} {}/{}] {}", p.index + 1, p.total, p.name),
-                    }
-                }
-            };
-            let listed = p2u_device::list_sticks().ok().and_then(|v| v.into_iter().find(|s| s.id == target || s.device == target));
-            let out = match listed {
-                Some(stick) => {
-                    // Catch "doesn't fit" and bad names before the stick is touched.
-                    let st = plan_stick(stick.size_bytes, 512, &job.items, &job.options).map_err(|e| format!("nothing was written: {e}"))?;
-                    if dry_run {
-                        print_json(&st);
-                        return Ok(true);
-                    }
-                    if !yes {
-                        confirm_erase(&describe(&stick))?;
-                    }
-                    match p2u_device::acquire(&stick) {
-                        Ok(mut raw) => {
-                            let mut o = run_stick(&mut raw, &job, &mut prog);
-                            if o.ok {
-                                if let Err(e) = raw.finish() {
-                                    o.error = Some(e.to_string());
-                                } else if !json {
-                                    eprintln!("The stick has been ejected: unplug it.");
-                                }
-                            }
-                            o
-                        }
-                        Err(p2u_device::DeviceError::NeedsElevation) | Err(p2u_device::DeviceError::NoBroker(_)) => {
-                            p2u_device::write_via_helper(&stick, &job).map_err(|e| e.to_string())?
-                        }
-                        Err(e) => return Err(e.to_string()),
-                    }
-                }
-                None => {
-                    let path = Path::new(&target);
-                    let mounted = p2u_device::mounted_on(path);
-                    if !mounted.is_empty() {
-                        return Err(format!("{target} is mounted at {}; unmount it first", mounted[0].display()));
-                    }
-                    let mut f = OpenOptions::new().read(true).write(true).open(path).map_err(|e| format!("{target}: {e}"))?;
-                    let size = f.disk_size().map_err(|e| e.to_string())?;
-                    let st = plan_stick(size, 512, &job.items, &job.options).map_err(|e| format!("nothing was written: {e}"))?;
-                    if dry_run {
-                        print_json(&st);
-                        return Ok(true);
-                    }
-                    if !yes {
-                        confirm_erase(&format!("{target} ({})", human_size(size)))?;
-                    }
-                    // Test hook: simulate the stick being pulled after N writes.
-                    let fault = std::env::var("P2U_FAIL_AFTER_WRITES").ok().and_then(|v| v.parse().ok());
-                    run_stick(&mut FaultInjector::new(f, fault), &job, &mut prog)
-                }
-            };
-            if json {
-                print_json(&out);
-            } else {
-                summarize(&out);
-            }
-            Ok(out.ok)
+            let items = plan.items.iter().map(|i| WriteItem::file(i.source.clone(), i.target_name.clone())).collect();
+            let opts = StickOptions { folder: plan.folder_name.clone(), label: label.unwrap_or_default() };
+            let job = StickJob { content: StickContent::single(items, &opts), verify_data: !no_verify_data, eject: true };
+            run_job(&target, &job, yes, dry_run, json)
+        }
+        Cmd::WriteJob { target, job, yes, dry_run, json } => {
+            let bytes = std::fs::read(&job).map_err(|e| format!("{}: {e}", job.display()))?;
+            let job: StickJob = serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", job.display()))?;
+            run_job(&target, &job, yes, dry_run, json)
         }
         Cmd::Inspect { device, compare_fats } => {
             let mut vol = Volume::open(open_ro(&device)?).map_err(|e| e.to_string())?;

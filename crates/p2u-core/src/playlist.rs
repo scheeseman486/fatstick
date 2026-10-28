@@ -280,7 +280,14 @@ fn parse_xspf(text: &str, base: &Path) -> Result<Vec<PlaylistEntry>, PlaylistErr
                     in_track = false;
                     if let Some(l) = loc.take() {
                         let title = title.take().map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
-                        out.push(PlaylistEntry { source: resolve_location(l.trim(), base), title, duration_secs: dur.take() });
+                        // XSPF locations are URIs: a relative one is percent-encoded too.
+                        let loc = l.trim();
+                        let loc = if loc.contains("://") || strip_prefix_ci(loc, "file:").is_some() {
+                            loc.to_string()
+                        } else {
+                            percent_decode_str(loc).decode_utf8_lossy().into_owned()
+                        };
+                        out.push(PlaylistEntry { source: resolve_location(&loc, base), title, duration_secs: dur.take() });
                     }
                 } else if in_track {
                     depth_in_track = depth_in_track.saturating_sub(1);

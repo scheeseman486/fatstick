@@ -3,7 +3,7 @@ name = "playlist2usb"
 description = "Copy a playlist to a FAT32 USB stick in the order cheap players use"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0-or-later"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -15,6 +15,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 p2u-core = { path = "../../crates/p2u-core" }
 p2u-device = { path = "../../crates/p2u-device" }
+p2u-audio = { path = "../../crates/p2u-audio" }
+p2u-library = { path = "../../crates/p2u-library" }
+cpal = "0.16"
+
+[dev-dependencies]
+tempfile = "3"
+id3 = "1.17"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
 [profile.release]
 opt-level = "s"

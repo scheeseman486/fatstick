@@ -106,6 +106,8 @@ pub enum FatError {
     Invalid(String),
     #[error("corrupt file system: {0}")]
     Corrupt(String),
+    #[error("cancelled")]
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, FatError>;

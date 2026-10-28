@@ -80,20 +80,6 @@ html.framed .top { padding-inline: 2px; }
 .disp-unit { font-size: 11px; opacity: 0.8; }
 .disp-sub { margin: 0; font-size: 13px; color: var(--chassis-ink); min-width: 0; flex: 1 1 220px; max-width: 52ch; }
 
-.proto { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.proto-tag { font-size: 12px; color: var(--chassis-ink-2); }
-.segmented { display: inline-flex; padding: 2px; border-radius: calc(var(--r-btn) + 2px); background: var(--chassis-2); }
-.segmented button {
-  border: 0; background: transparent; color: var(--chassis-ink);
-  height: 26px; padding: 0 10px; border-radius: var(--r-btn); cursor: pointer; font-size: 13px; font-weight: 500;
-}
-.segmented button[aria-checked="true"] { background: var(--chassis-ink); color: var(--chassis); }
-.shells { display: inline-flex; gap: 4px; }
-.shells button {
-  width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--chassis-2); cursor: pointer; padding: 0;
-  background: var(--swatch);
-}
-.shells button[aria-checked="true"] { border-color: var(--chassis-ink); }
 .ghost-btn {
   height: 28px; padding: 0 10px; border-radius: var(--r-btn); border: 1px solid var(--chassis-2);
   background: transparent; color: var(--chassis-ink); cursor: pointer; font-size: 13px;
@@ -332,7 +318,7 @@ input[type="range"] { accent-color: var(--accent); }
 .erase strong { font-weight: 600; }
 .sync .btn.primary { height: 38px; font-size: 15px; font-weight: 600; }
 .why-not { margin: 0; font-size: 12.5px; color: var(--error); }
-.proto-note { margin: 0; font-size: 12px; color: var(--ink-3); }
+.sync-note { margin: 0; font-size: 12px; color: var(--ink-3); }
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 13px; }
 .steps li { display: grid; grid-template-columns: 16px 1fr; gap: 8px; align-items: center; color: var(--ink-3); }
 .steps li::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid currentColor; justify-self: center; }

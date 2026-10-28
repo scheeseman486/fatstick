@@ -1,8 +1,14 @@
 {
   "bundle": {
-    "externalBin": ["binaries/p2u-helper"],
+    "externalBin": [
+      "binaries/p2u-helper",
+      "binaries/ffmpeg",
+      "binaries/ffprobe"
+    ],
     "windows": {
-      "nsis": { "installMode": "currentUser" }
+      "nsis": {
+        "installMode": "currentUser"
+      }
     }
   }
 }

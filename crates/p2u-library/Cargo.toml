@@ -1,0 +1,19 @@
+[package]
+name = "p2u-library"
+description = "Playlist2USB's library: tracks, analysis, playlists, profiles, sticks and sync records in one SQLite database"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+p2u-core.workspace = true
+p2u-audio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+rusqlite = { version = "0.37", features = ["bundled"] }
+percent-encoding = "2"
+
+[dev-dependencies]
+tempfile = "3"

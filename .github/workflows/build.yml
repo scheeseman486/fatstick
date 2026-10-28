@@ -1,6 +1,10 @@
 # Linux and Windows are built on Linux; macOS needs a macOS runner because the
 # Apple SDK licence forbids using it on other hardware. Untested draft: the
 # commands mirror what was run locally (see README "Build").
+#
+# The bundled ffmpeg (packaging/ffmpeg/build-ffmpeg.sh) takes a few minutes per
+# target, so it is cached, keyed on the script: a new FFmpeg or LAME version
+# changes the script and so rebuilds it.
 name: build
 
 on:
@@ -17,12 +21,44 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: FAT tools for the end-to-end tests
-        run: sudo apt-get update && sudo apt-get install -y dosfstools mtools fatsort fdisk gdisk exfatprogs ntfs-3g e2fsprogs
+      - name: System packages (FAT tools, ffmpeg for fixtures and checks, Xvfb, Tauri, ALSA)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dosfstools mtools fatsort fdisk gdisk exfatprogs ntfs-3g e2fsprogs \
+            ffmpeg xvfb nasm libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libayatana-appindicator3-dev libxdo-dev libasound2-dev
+      - uses: actions/cache@v4
+        with:
+          path: app/src-tauri/binaries/ff*-x86_64-unknown-linux-gnu
+          key: ffmpeg-linux-${{ hashFiles('packaging/ffmpeg/build-ffmpeg.sh') }}
+      - name: Bundled ffmpeg (Linux)
+        run: |
+          [ -x app/src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu ] ||
+            packaging/ffmpeg/build-ffmpeg.sh x86_64-unknown-linux-gnu
+      # The tests find the bundled ffmpeg in app/src-tauri/binaries, as the app does.
       - run: cargo test --workspace
+      - name: The audio engine against the distribution's ffmpeg too (people may swap theirs in)
+        run: P2U_FFMPEG_DIR=/usr/bin cargo test -p p2u-audio
       - run: cargo build --workspace
       - name: End-to-end tests on disk images with awkward prior layouts
         run: python3 tests/stick_e2e.py
+      - name: Helper sidecar (the app's build needs it present)
+        run: cp target/debug/p2u-helper app/src-tauri/binaries/p2u-helper-x86_64-unknown-linux-gnu
+      - name: The app's backend tests (a sync to a disk image, the player)
+        run: cargo test --manifest-path app/src-tauri/Cargo.toml
+      - name: The app end to end (a debug build under Xvfb, then the image read by fsck.fat, mtools, ffprobe)
+        run: |
+          cargo build --manifest-path app/src-tauri/Cargo.toml
+          python3 tests/app_e2e.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The window's own tests (name rules; the UI in headless Chromium)
+        run: |
+          node tests/ui_names.js
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+          node tests/ui_check.js
 
   linux-and-windows:
     needs: test
@@ -32,15 +68,26 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-gnu,x86_64-pc-windows-msvc
-      - name: System packages (Tauri on Linux; mingw, NSIS and LLVM for Windows)
+      - name: System packages (Tauri on Linux; mingw, NSIS and LLVM for Windows; nasm for ffmpeg)
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-            libayatana-appindicator3-dev libxdo-dev gcc-mingw-w64-x86-64 nsis lld llvm clang
+            libayatana-appindicator3-dev libxdo-dev libasound2-dev gcc-mingw-w64-x86-64 nsis lld llvm clang nasm
           cargo install --locked cargo-xwin
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: actions/cache@v4
+        with:
+          path: |
+            app/src-tauri/binaries/ff*-x86_64-unknown-linux-gnu
+            app/src-tauri/binaries/ff*-x86_64-pc-windows-*.exe
+          key: ffmpeg-linux-windows-${{ hashFiles('packaging/ffmpeg/build-ffmpeg.sh') }}
+      - name: Bundled ffmpeg (Linux, and Windows with mingw)
+        run: |
+          B=app/src-tauri/binaries
+          [ -x $B/ffmpeg-x86_64-unknown-linux-gnu ] || packaging/ffmpeg/build-ffmpeg.sh x86_64-unknown-linux-gnu
+          [ -f $B/ffmpeg-x86_64-pc-windows-msvc.exe ] || packaging/ffmpeg/build-ffmpeg.sh x86_64-pc-windows-gnu
       - name: Helper sidecars
         run: |
           cargo build --release -p p2u-helper
@@ -55,12 +102,20 @@ jobs:
       - name: Windows installer (NSIS) from Linux, Tauri's documented cargo-xwin route
         working-directory: app/src-tauri
         run: npx --yes @tauri-apps/cli@^2 build --runner cargo-xwin --target x86_64-pc-windows-msvc
+      - name: The FFmpeg and LAME sources, for the LGPL source offer
+        run: |
+          mkdir -p sources
+          git -C target/ffmpeg-build/x86_64-unknown-linux-gnu/ffmpeg archive --prefix=ffmpeg-n9.0.2/ -o "$PWD/sources/ffmpeg-n9.0.2.tar.gz" HEAD
+          cp target/ffmpeg-build/x86_64-unknown-linux-gnu/lame-3.100.tar.gz sources/
+        # On a cache hit the sources weren't fetched; the build script fetches them.
+        continue-on-error: true
       - uses: actions/upload-artifact@v4
         with:
           name: linux-windows
           path: |
             app/src-tauri/target/release/bundle/
             app/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/
+            sources/
 
   macos:
     needs: test
@@ -73,6 +128,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - run: brew install nasm
+      - uses: actions/cache@v4
+        with:
+          path: app/src-tauri/binaries/ff*-universal-apple-darwin
+          key: ffmpeg-macos-${{ hashFiles('packaging/ffmpeg/build-ffmpeg.sh') }}
+      - name: Bundled ffmpeg (arm64 and x86_64, joined)
+        run: |
+          [ -x app/src-tauri/binaries/ffmpeg-universal-apple-darwin ] ||
+            packaging/ffmpeg/build-ffmpeg.sh universal-apple-darwin
       - name: Universal .app and .dmg
         working-directory: app/src-tauri
         run: npx --yes @tauri-apps/cli@^2 build --target universal-apple-darwin

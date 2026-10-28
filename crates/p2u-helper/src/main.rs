@@ -12,7 +12,7 @@
 //!   `StickOutcome`.
 //!
 //! The job erases the stick and writes a fresh FAT32 file system holding the
-//! playlist, then reads it all back (see p2u_core::fat::stick).
+//! playlists, then reads it all back (see p2u_core::fat::stick).
 
 use std::io::Write;
 use std::path::Path;
@@ -52,7 +52,7 @@ fn main() -> ExitCode {
             Ok(r) => r,
             Err(e) => return StickOutcome::fail(format!("nothing was written: {e}")),
         };
-        let mut outcome = run_stick(&mut raw, &job, &mut |_| {});
+        let mut outcome = run_stick(&mut raw, &job, &mut |_| {}, None);
         // Keep the OS from mounting (and writing to) the verified stick.
         if outcome.ok && job.eject {
             if let Err(e) = raw.finish() {
