@@ -141,12 +141,25 @@ fn open_output(shared: &Arc<Shared>) -> Result<(Output, u32), String> {
         }
     }
     // A clock that consumes samples in real time, silently (tests, headless).
+    // It goes by the time that has passed, not by how often it wakes: macOS
+    // stretches short sleeps a lot when the machine is busy.
     let s = shared.clone();
     let h = std::thread::spawn(move || {
-        let mut buf = vec![0f32; 2 * 441];
+        const RATE: u64 = 44100;
+        let start = std::time::Instant::now();
+        let mut consumed = 0u64;
+        let mut buf = Vec::new();
         loop {
             std::thread::sleep(Duration::from_millis(10));
-            s.take(&mut buf, 2);
+            let due = (start.elapsed().as_secs_f64() * RATE as f64) as u64;
+            // After a long stall (a suspended machine), don't race to catch up.
+            consumed = consumed.max(due.saturating_sub(RATE / 4));
+            let n = (due - consumed) as usize;
+            if n > 0 {
+                buf.resize(2 * n, 0.0);
+                s.take(&mut buf, 2);
+                consumed = due;
+            }
             if Arc::strong_count(&s) == 1 {
                 break;
             }
