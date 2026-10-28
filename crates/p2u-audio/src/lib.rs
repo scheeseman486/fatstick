@@ -6,6 +6,9 @@
 //! * [`loudness`]: BS.1770 integrated loudness and true peak;
 //! * [`prepare`]: a track's audio for the stick, copied, gain-adjusted in
 //!   lossless 1.5 dB steps (mp3rgain) or encoded (LAME), via the [`cache`];
+//! * [`render`]: one file from stretches of audio and silence: a track cut
+//!   or padded at its ends, silence between playlists, a playlist joined
+//!   into one track;
 //! * [`tags`] and [`cover`]: what goes in front of (and after) the audio;
 //! * [`decode`]: PCM for the player.
 //!
@@ -19,6 +22,7 @@ pub mod loudness;
 pub mod mp3;
 pub mod prepare;
 pub mod probe;
+pub mod render;
 pub mod tags;
 pub mod tools;
 

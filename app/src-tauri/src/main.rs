@@ -331,9 +331,13 @@ fn player_play(st: State<AppState>, args: PlayArgs) -> Res<Playing> {
         (PathBuf::from(&t.path), t.duration)
     };
     let cached = args.recipe.as_ref().and_then(|r| work::cached_for(&st.lib, &st.cache, &args.track_id, r));
-    let (path, gain, from) = match cached {
-        Some(p) => (p, 0.0, "cache"),
-        None => (path, args.gain_db, "source"),
+    let (path, gain, from, dur) = match cached {
+        // A prepared file can be longer or shorter than its source (cut, padded).
+        Some(p) => {
+            let d = p2u_audio::mp3::scan(&p).ok().flatten().map(|i| i.duration).unwrap_or(dur);
+            (p, 0.0, "cache", d)
+        }
+        None => (path, args.gain_db, "source", dur),
     };
     st.player.send(player::Cmd::Play { path, from: args.from, gain_db: gain, duration: dur, token: args.token });
     Ok(Playing { from: from.into() })
@@ -358,6 +362,32 @@ fn player_stop(st: State<AppState>) {
 #[tauri::command]
 fn player_volume(st: State<AppState>, volume: f32) {
     st.player.send(player::Cmd::Volume(volume));
+}
+
+// ---- stick layout windows -------------------------------------------------------------------
+
+/// A stick's layout in a window of its own, or the one already open brought
+/// forward. The window gets its data from the main window over events.
+/// (Async: making a window in a synchronous command can hang on Windows.)
+#[tauri::command]
+async fn open_layout(app: AppHandle, set_id: String, title: String) -> Res<()> {
+    let id: String = set_id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    if id.is_empty() {
+        return Err("That stick has no id.".into());
+    }
+    let label = format!("layout-{id}");
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::App(format!("layout.html?set={id}").into()))
+        .title(title)
+        .inner_size(640.0, 780.0)
+        .min_inner_size(380.0, 420.0)
+        .build()
+        .map_err(err)?;
+    Ok(())
 }
 
 // ---- about ---------------------------------------------------------------------------------
@@ -457,6 +487,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             init,
+            open_layout,
             save_docs,
             set_setting,
             add_paths,

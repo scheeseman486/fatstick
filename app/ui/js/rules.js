@@ -93,34 +93,77 @@
     return allowed.includes(44100) || !allowed.length ? 44100 : allowed[0];
   }
 
+  /** A track's cut and silence at either end on the stick (seconds), from its playlist entry. */
+  function edges(e) {
+    const n = (x) => (Number.isFinite(+x) && +x > 0 ? Math.round(+x * 1000) / 1000 : 0);
+    return { cutStart: n(e && e.cutStart), cutEnd: n(e && e.cutEnd), padStart: n(e && e.padStart), padEnd: n(e && e.padEnd) };
+  }
+  function hasEdges(e) {
+    const x = edges(e);
+    return !!(x.cutStart || x.cutEnd || x.padStart || x.padEnd);
+  }
+  /** How long a track is on the stick: cut at its ends, then padded. */
+  function stickSeconds(t, e) {
+    const x = edges(e);
+    return Math.max(0, (t.duration || 0) - x.cutStart - x.cutEnd) + x.padStart + x.padEnd;
+  }
+  /** One part of a rendered file: a track with its gain, cuts and silences. */
+  function part(t, e, g) {
+    return { trackId: t.id, gainDb: g && g.db ? Math.round(g.db * 10) / 10 : 0, ...edges(e) };
+  }
+  /** A file rendered from parts: a cut or padded track, silence, a joined playlist. */
+  function render(parts, profile, rate) {
+    return { kind: "render", cap: profile.bitrateCap, vbr: profile.mode === "vbr", sampleRate: rate || outputRate(44100, profile.sampleRates), parts };
+  }
+
   /**
    * The recipe the app's preparation and sync take: a plain copy, a copy with
-   * lossless gain steps, or an encode (with the exact gain).
+   * lossless gain steps, an encode (with the exact gain), or, for a track cut
+   * or padded at its ends (entry `e`), a render.
    */
-  function recipe(t, d, g, profile) {
+  function recipe(t, d, g, profile, e) {
     if (d.action === "skip") return null;
     if (d.action === "copy") {
       const steps = g && g.db ? Math.round(g.db / STEP) : 0;
       return steps ? { kind: "gain", steps } : { kind: "copy" };
     }
+    const rate = outputRate(t.sampleRate, profile.sampleRates);
+    if (e && hasEdges(e)) return render([part(t, e, g)], profile, rate);
     return {
       kind: "encode", cap: profile.bitrateCap, vbr: profile.mode === "vbr",
-      sampleRate: outputRate(t.sampleRate, profile.sampleRates), gainDb: g && g.db ? Math.round(g.db * 10) / 10 : 0,
+      sampleRate: rate, gainDb: g && g.db ? Math.round(g.db * 10) / 10 : 0,
     };
   }
   function describe(r) {
     if (!r) return "";
     if (r.kind === "copy") return "copy";
     if (r.kind === "gain") return `gain${r.steps > 0 ? "+" : ""}${r.steps}`;
+    if (r.kind === "render") {
+      const ps = r.parts.map((x) => `${x.trackId || "-"}:${x.gainDb || 0}:${x.cutStart || 0}:${x.cutEnd || 0}:${x.padStart || 0}:${x.padEnd || 0}`).join(",");
+      return `render/${r.vbr ? "vbr" : "cbr"}${r.cap}/${r.sampleRate}/${hash(ps)}`;
+    }
     return `${r.vbr ? "vbr" : "cbr"}${r.cap}/${r.sampleRate}/${r.gainDb}`;
   }
+  /** A short, stable hash of a string (cyrb53), for keys. */
+  function hash(str) {
+    let h1 = 0xdeadbeef;
+    let h2 = 0x41c6ce57;
+    for (let i = 0; i < str.length; i++) {
+      const ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  }
 
-  /** Bytes the file takes on the stick: tag, cover, audio. */
-  function outBytes(t, d, profile) {
+  /** Bytes the file takes on the stick: tag, cover, audio (`secs`: its length on the stick). */
+  function outBytes(t, d, profile, secs) {
     const tag = TAG_BYTES + (profile.cover === "none" || !t.cover ? 0 : COVER_BYTES) + (profile.id3v1 ? 128 : 0);
     if (d.action === "skip") return 0;
     if (d.action === "copy") return Math.round(t.size * 0.985) + tag; // the source's own tags are dropped (estimate)
-    return Math.round((profile.bitrateCap * 1000 / 8) * t.duration) + tag;
+    return Math.round((profile.bitrateCap * 1000 / 8) * (secs == null ? t.duration : secs)) + tag;
   }
 
   // FAT32 geometry, as the stick writer lays it out (Microsoft's cluster table,
@@ -156,5 +199,8 @@
     return { ...g, used, free: g.dataBytes - used, fits: used <= g.dataBytes, runs };
   }
 
-  P2U.rules = { LOSSLESS, CODEC_NAME, formatLabel, decide, gains, outBytes, geometry, layout, outputRate, recipe, describe, STEP };
+  P2U.rules = {
+    LOSSLESS, CODEC_NAME, formatLabel, decide, gains, outBytes, geometry, layout, outputRate, recipe, describe, STEP,
+    edges, hasEdges, stickSeconds, part, render, hash,
+  };
 })(typeof window !== "undefined" ? (window.P2U = window.P2U || {}) : (globalThis.P2U = globalThis.P2U || {}));

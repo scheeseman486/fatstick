@@ -10,6 +10,7 @@ use std::sync::Mutex;
 
 use p2u_audio::encode::EncodeSpec;
 use p2u_audio::prepare::Recipe;
+use p2u_audio::render::{RenderPart, RenderSpec};
 use p2u_audio::{mp3, probe, Cache, Tools};
 use p2u_core::fat::{DirRef, EntryKind, Volume};
 use p2u_library::{scan, Library};
@@ -95,7 +96,16 @@ fn sync_to_a_disk_image() {
     std::fs::File::create(&img).unwrap().set_len(256 << 20).unwrap();
     std::env::set_var("P2U_TEST_STICKS", &img);
     let enc = |gain_db: f64, rate: u32| Recipe::Encode(EncodeSpec { cap: 320, vbr: false, sample_rate: rate, gain_db });
-    let file = |name: &str, i: usize, recipe: Recipe, position: u32, total: u32| FilePlan { name: name.into(), track_id: ids[i].clone(), recipe, position, total };
+    let file = |name: &str, i: usize, recipe: Recipe, position: u32, total: u32| FilePlan {
+        name: name.into(),
+        track_id: ids[i].clone(),
+        recipe,
+        position,
+        total,
+        title: None,
+        artist: None,
+        album: None,
+    };
     let plan = SyncPlan {
         set_id: "set-car".into(),
         set_name: "Car stick".into(),
@@ -233,7 +243,7 @@ fn sync_to_a_disk_image() {
     let mut p4 = plan.clone();
     p4.stick_id = format!("{}{}", crate::sticks::IMAGE_PREFIX, small.display());
     p4.stick_size = Some(40 << 20);
-    p4.folders = vec![FolderPlan { name: String::new(), files: vec![FilePlan { name: "big.mp3".into(), track_id: big_id, recipe: enc(0.0, 44100), position: 1, total: 1 }] }];
+    p4.folders = vec![FolderPlan { name: String::new(), files: vec![FilePlan { name: "big.mp3".into(), track_id: big_id, recipe: enc(0.0, 44100), position: 1, total: 1, title: None, artist: None, album: None }] }];
     let r4 = run(&lib, Some(&tools), &cache, &p4, &AtomicBool::new(false), &|_| {});
     assert!(!r4.ok && !r4.erased && r4.error.as_deref().unwrap_or("").contains("needs"), "{r4:?}");
     assert!(std::fs::read(&small).unwrap().iter().all(|&b| b == 0x5A), "untouched");
@@ -244,6 +254,48 @@ fn sync_to_a_disk_image() {
     let r5 = run(&lib, Some(&tools), &cache, &p5, &AtomicBool::new(false), &|_| {});
     assert!(!r5.ok && !r5.erased && r5.error.as_deref().unwrap_or("").contains("different stick"), "{r5:?}");
     assert!(std::fs::read(&small).unwrap().iter().all(|&b| b == 0x5A), "untouched");
+
+    // Rendered files: a track cut and padded, silence between playlists, and
+    // a playlist joined into one track (with tags of its own).
+    let part = |i: Option<usize>| RenderPart { track_id: i.map(|i| ids[i].clone()), ..Default::default() };
+    let render = |parts: Vec<RenderPart>| Recipe::Render(RenderSpec { cap: 320, vbr: false, sample_rate: 44100, parts });
+    let own = |name: &str, recipe: Recipe, title: &str, album: Option<&str>| FilePlan {
+        name: name.into(),
+        track_id: String::new(),
+        recipe,
+        position: 1,
+        total: 1,
+        title: Some(title.into()),
+        artist: None,
+        album: album.map(String::from),
+    };
+    let mut p6 = plan.clone();
+    p6.folders = vec![
+        // Dreams is 5 s: 1 s cut from the start, 0.5 s of silence after.
+        FolderPlan { name: "01 Trimmed".into(), files: vec![file("01 - Dreams.mp3", 2, render(vec![RenderPart { cut_start: 1.0, pad_end: 0.5, ..part(Some(2)) }]), 1, 1)] },
+        FolderPlan { name: "02 Silence".into(), files: vec![own("01 - Silence.mp3", render(vec![RenderPart { pad_start: 2.0, ..part(None) }]), "Silence", None)] },
+        // Teardrop (4 s) and Hoppípolla (3 s), joined: 7 s.
+        FolderPlan { name: "03 Joined".into(), files: vec![own("01 - Joined.mp3", render(vec![part(Some(0)), part(Some(3))]), "Joined", Some("Joined"))] },
+    ];
+    let r6 = run(&lib, Some(&tools), &cache, &p6, &AtomicBool::new(false), &|_| {});
+    assert!(r6.ok, "{r6:?}");
+    let files = read_back(&img);
+    let names: Vec<String> = files.iter().map(|(d, n, _)| format!("{d}/{n}")).collect();
+    assert_eq!(names, ["01 Trimmed/01 - Dreams.mp3", "02 Silence/01 - Silence.mp3", "03 Joined/01 - Joined.mp3"]);
+    let mut got = Vec::new();
+    for (i, (_, _, data)) in files.iter().enumerate() {
+        let p = out.join(format!("r{i}.mp3"));
+        std::fs::write(&p, data).unwrap();
+        got.push(probe(&tools, &p).unwrap());
+    }
+    let secs: Vec<f64> = got.iter().map(|p| p.duration).collect();
+    for (have, want) in secs.iter().zip([4.5, 2.0, 7.0]) {
+        assert!((have - want).abs() < 0.1, "lengths {secs:?}");
+    }
+    assert_eq!(got[0].tags.title, "Dreams", "a trimmed track keeps its tags");
+    assert_eq!((got[1].tags.title.as_str(), got[1].tags.artist.as_str(), got[1].cover), ("Silence", "", false));
+    assert_eq!((got[2].tags.title.as_str(), got[2].tags.album.as_str(), got[2].tags.artist.as_str()), ("Joined", "Joined", ""));
+    assert!(got[2].cover, "the joined track takes the first track's cover");
 }
 
 #[test]

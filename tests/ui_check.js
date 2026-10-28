@@ -170,9 +170,11 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   check('it opens on the tab last used', (await p.getByRole('tab', { selected: true }).textContent()) === 'Tags and cover art');
   await p.getByRole('tab', { name: 'Files and folders' }).click();
   await p.keyboard.press('Escape');
-  await p.getByRole('button', { name: 'List all' }).click();
-  await p.screenshot({ path: `${out}/allnames.png` });
-  await p.keyboard.press('Escape');
+  // "List all" opens the stick's layout window.
+  const [lay0] = await Promise.all([p.waitForEvent('popup'), p.getByRole('button', { name: 'List all' }).click()]);
+  await lay0.waitForSelector('.lay-folder', { timeout: 5000 });
+  check('"List all" opens the layout window', (await lay0.locator('.lay-folder').count()) === 2);
+  await lay0.close();
 
   // 12. Real files dropped onto the list.
   const files = ['tone.mp3', 'fixture.flac'].map(n => ({ n, b64: fs.readFileSync(path.join(work, n)).toString('base64') }));
@@ -219,7 +221,60 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   await p.keyboard.press('Control+z');
   await p.locator('[data-set="set-car"]').click();
 
-  // 14. Sync flow.
+  // 14. A track's start and end: cut 2 s from the start of row 2 and add
+  // 1.5 s of silence at its end. It's encoded rather than copied.
+  await p.locator('#list .row').nth(1).click();
+  await p.keyboard.press('e');
+  await p.locator('#edge-cutStart').fill('2');
+  await p.locator('#edge-padEnd').fill('1.5');
+  await p.getByRole('button', { name: 'Apply' }).click();
+  const edgeCell = await p.locator('#list .row').nth(1).locator('.c-edges').textContent();
+  check('the start / end column shows the cut and the silence', edgeCell === '−2 / +1.5 s', edgeCell);
+  const r2 = await p.evaluate(() => { const A = window.P2U.app; const it = A.planSet(A.stickSet()).folders[0].files[1]; return [it.recipe.kind, it.recipe.parts[0].cutStart, it.recipe.parts[0].padEnd, it.d.action]; });
+  check('a cut track is rendered (encoded) on the stick', JSON.stringify(r2) === JSON.stringify(['render', 2, 1.5, 'encode']), JSON.stringify(r2));
+
+  // 15. Silence between playlists, 10 s.
+  await p.locator('#stick select[aria-label="Add a playlist to this stick"]').selectOption('__gap');
+  await p.locator('#stick input[aria-label="Seconds of silence"]').fill('10');
+  await p.locator('#stick input[aria-label="Seconds of silence"]').press('Enter');
+  await p.locator('#stick input[aria-label="Seconds of silence"]').blur();
+  const gapPlan = await p.evaluate(() => { const A = window.P2U.app; const f = A.planSet(A.stickSet()).folders.at(-1); return [f.folder, f.files.length, f.files[0].name, f.files[0].secs]; });
+  check('silence gets a folder of its own, with one file', JSON.stringify(gapPlan) === JSON.stringify(["03 Silence", 1, "01 - Silence.mp3", 10]), JSON.stringify(gapPlan));
+
+  // 16. Kids' car joined into one track: still a playlist here, one file on the stick.
+  await p.locator('[data-pl="p-kids"]').click();
+  await p.locator('#join-btn').click();
+  await p.locator('#join-on').check();
+  await p.keyboard.press('Escape');
+  const chips = await p.locator('#list .c-stick .chip').allTextContents();
+  check('every track shows where it starts in the joined track', chips.length === 12 && chips[0] === 'Joined, 0:00' && chips.every((c) => c.startsWith('Joined, ')), chips.slice(0, 3).join(' | '));
+  check('the sidebar says the playlist goes on as one track', /12 tracks as one/.test(await p.locator('[data-pl="p-kids"] .mt').textContent()));
+  const joinPlan = await p.evaluate(() => { const A = window.P2U.app; const f = A.planSet(A.stickSet()).folders[1]; return [f.files.length, f.present.length, f.files[0].name, f.files[0].recipe ? f.files[0].recipe.parts.length : -1]; });
+  check('the stick gets one file for it, made of its 12 tracks', JSON.stringify(joinPlan) === JSON.stringify([1, 12, "01 - Kids' car.mp3", 12]), JSON.stringify(joinPlan));
+  check("the stick panel counts it as joined", /12 tracks joined into one/.test(await p.locator('#stick .folders').textContent()));
+
+  // 17. The stick's layout in a window of its own, from a double-click in the
+  // sidebar: every folder, collapsible, kept up to date.
+  const [lay] = await Promise.all([p.waitForEvent('popup'), p.locator('[data-set="set-car"]').dblclick()]);
+  lay.on('pageerror', (e) => errs.push(`layout window: ${e.message}`));
+  await lay.waitForSelector('.lay-folder', { timeout: 5000 });
+  const heads = await lay.locator('.lay-folder > summary').allTextContents();
+  check('the layout window lists the folders in stick order', heads.length === 3 && /^01 Road Trip\//.test(heads[0]) && /12 tracks joined into one file/.test(heads[1]) && /^03 Silence\/10 s of silence/.test(heads[2]), heads.join(' | '));
+  check('a joined track lists its tracks with their start times', (await lay.locator('.lay-folder.k-joined .lay-parts li').count()) === 12);
+  await lay.setViewportSize({ width: 640, height: 780 });
+  await lay.screenshot({ path: `${out}/layout-window.png` });
+  await lay.locator('.lay-folder > summary').first().click();
+  check('folders collapse', !(await lay.locator('.lay-folder').first().evaluate((d) => d.open)));
+  await p.locator('[data-pl="p-kids"]').click();
+  await p.locator('#join-btn').click();
+  await p.locator('#join-on').uncheck();
+  await p.keyboard.press('Escape');
+  await lay.waitForFunction(() => /12 files/.test(document.querySelectorAll('.lay-folder > summary')[1].textContent), null, { timeout: 5000 }).catch(() => {});
+  check('the layout window follows edits', /^02 Kids' car\/12 files/.test(await lay.locator('.lay-folder > summary').nth(1).textContent()));
+  await lay.close();
+  await p.locator('[data-pl="p-road"]').click();
+
+  // 18. Sync flow.
   await p.locator('#sync-btn').click();
   check('confirmation dialog', /Erase .* and sync/.test(await p.locator('#modal-title').textContent()));
   await p.screenshot({ path: `${out}/confirm.png` });

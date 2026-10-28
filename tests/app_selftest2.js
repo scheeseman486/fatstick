@@ -33,7 +33,8 @@
     check("the volume setting was kept", p.norm.on === true);
     check("loudness was kept", p.entries.every((e) => A.track(e.trackId).lufs != null));
     const set = S.sets[0];
-    check("the stick kept its playlists and its stick", set.playlistIds.length === 2 && (set.stickId || "").startsWith("image:"));
+    check("the stick kept its playlists, its silence and its stick", set.playlistIds.length === 3 && set.gaps.length === 1 && set.gaps[0].seconds === 3 && (set.stickId || "").startsWith("image:"));
+    check("the joined playlist and the cut track were kept", S.playlists[1].join === true && S.playlists[0].entries[0].cutStart === 2 && S.playlists[0].entries[0].padEnd === 1);
     check("the sync record was kept: up to date", A.staleness(A.planSet(set)).current, JSON.stringify(A.staleness(A.planSet(set)).parts));
     const ready = await until(() => A.planSet(set).pending.length === 0 && A.planSet(set).keys.length > 0, 10000);
     check("the cache still holds every prepared file", !!ready, `${A.planSet(set).pending.length} pending`);

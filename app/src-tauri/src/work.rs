@@ -13,6 +13,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use p2u_audio::prepare::{prepare, ready, Recipe};
+use p2u_audio::render::{self, RenderSpec, Source};
 use p2u_audio::{loudness, Cache, Tools};
 use p2u_library::{scan, Library};
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,8 @@ use serde::{Deserialize, Serialize};
 pub struct PrepJob {
     /// The window's own name for this job, echoed back in events.
     pub key: String,
+    /// The track (empty for a render, whose parts name their tracks).
+    #[serde(default)]
     pub track_id: String,
     pub recipe: Recipe,
 }
@@ -105,14 +108,18 @@ impl Work {
     pub fn set_queue(&self, lib: &Mutex<Library>, cache: &Cache, jobs: Vec<PrepJob>) -> Vec<String> {
         let mut done = Vec::new();
         let mut todo = VecDeque::new();
-        {
-            let l = lib.lock().unwrap();
-            for j in jobs {
-                let r = l.probe_of(&j.track_id).ok().flatten();
-                match r {
-                    Some((path, key, probe)) if ready(cache, &path, &probe, &key, &j.recipe).is_some() => done.push(j.key),
-                    _ => todo.push_back(j),
+        for j in jobs {
+            let is_ready = match &j.recipe {
+                Recipe::Render(spec) => render_sources(lib, None, spec).is_ok_and(|s| render::ready(cache, spec, &s).is_some()),
+                r => {
+                    let found = lib.lock().unwrap().probe_of(&j.track_id).ok().flatten();
+                    found.is_some_and(|(path, key, probe)| ready(cache, &path, &probe, &key, r).is_some())
                 }
+            };
+            if is_ready {
+                done.push(j.key);
+            } else {
+                todo.push_back(j);
             }
         }
         self.q.lock().unwrap().prepare = todo;
@@ -148,8 +155,31 @@ pub fn current_probe(lib: &Mutex<Library>, tools: &Tools, track_id: &str) -> Res
     lib.lock().unwrap().probe_of(track_id).map_err(|e| e.to_string())?.ok_or_else(|| format!("{} couldn't be read", path.display()))
 }
 
+/// A render's sources: each part's file, re-read first if it changed when
+/// `tools` is given (before doing the work), or as last read (to look in the
+/// cache). Silence has none.
+pub fn render_sources(lib: &Mutex<Library>, tools: Option<&Tools>, spec: &RenderSpec) -> Result<Vec<Option<Source>>, String> {
+    spec.parts
+        .iter()
+        .map(|p| {
+            let Some(id) = &p.track_id else { return Ok(None) };
+            let (path, key, probe) = match tools {
+                Some(t) => current_probe(lib, t, id)?,
+                None => lib.lock().unwrap().probe_of(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("{id} hasn't been read yet"))?,
+            };
+            if probe.drm || probe.codec.is_empty() {
+                return Err(format!("{} can't be decoded", path.display()));
+            }
+            Ok(Some(Source { path, content_key: key }))
+        })
+        .collect()
+}
+
 fn prepare_one(lib: &Mutex<Library>, tools: &Tools, cache: &Cache, j: &PrepJob) -> Prepared {
-    let r = current_probe(lib, tools, &j.track_id).and_then(|(path, key, probe)| prepare(tools, cache, &path, &probe, &key, &j.recipe).map_err(|e| e.to_string()));
+    let r = match &j.recipe {
+        Recipe::Render(spec) => render_sources(lib, Some(tools), spec).and_then(|s| render::prepare(tools, cache, spec, &s).map_err(|e| e.to_string())),
+        r => current_probe(lib, tools, &j.track_id).and_then(|(path, key, probe)| prepare(tools, cache, &path, &probe, &key, r).map_err(|e| e.to_string())),
+    };
     match r {
         Ok(p) => Prepared { key: j.key.clone(), ok: true, error: None, bytes: p.len },
         Err(e) => Prepared { key: j.key.clone(), ok: false, error: Some(e), bytes: 0 },
@@ -176,8 +206,10 @@ fn analyze_one(lib: &Mutex<Library>, tools: &Tools, id: &str) -> Analyzed {
 
 /// For the player: the prepared file if the recipe's result is in the cache.
 pub fn cached_for(lib: &Mutex<Library>, cache: &Cache, track_id: &str, recipe: &Recipe) -> Option<std::path::PathBuf> {
-    if matches!(recipe, Recipe::Copy) {
-        return None;
+    match recipe {
+        Recipe::Copy => return None,
+        Recipe::Render(spec) => return render::ready(cache, spec, &render_sources(lib, None, spec).ok()?).map(|p| p.path),
+        _ => {}
     }
     let (path, key, probe) = lib.lock().unwrap().probe_of(track_id).ok().flatten()?;
     ready(cache, &path, &probe, &key, recipe).map(|p| p.path)

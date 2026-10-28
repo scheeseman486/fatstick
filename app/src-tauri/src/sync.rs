@@ -20,8 +20,9 @@ use std::sync::Mutex;
 
 use p2u_audio::encode::{output_rate, EncodeSpec};
 use p2u_audio::prepare::{copy_allowed, prepare, Prepared, Recipe};
+use p2u_audio::render::{self, RenderSpec};
 use p2u_audio::tags::{id3v1, id3v2, TagSpec};
-use p2u_audio::{cover, Cache, Probe, Tools};
+use p2u_audio::{cover, Cache, Probe, Tags, Tools};
 use p2u_core::fat::stick::{plan_content, Part, StickContent, StickFolder, WriteItem, WriteProgress};
 use p2u_core::fat::Device;
 use p2u_core::job::{run_stick, StickJob, StickOutcome};
@@ -29,7 +30,7 @@ use p2u_library::Library;
 use serde::{Deserialize, Serialize};
 
 use crate::sticks::{self, Target};
-use crate::work::current_probe;
+use crate::work::{current_probe, render_sources};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,10 +59,19 @@ fn yes() -> bool {
 #[serde(rename_all = "camelCase")]
 pub struct FilePlan {
     pub name: String,
+    /// The track whose tags the file gets; empty for a joined playlist or
+    /// silence, which get `title`, `artist` and `album` instead.
+    #[serde(default)]
     pub track_id: String,
     pub recipe: Recipe,
     pub position: u32,
     pub total: u32,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub artist: Option<String>,
+    #[serde(default)]
+    pub album: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -138,18 +148,30 @@ fn effective(probe: &Probe, recipe: &Recipe, p: &ProfilePlan) -> (Recipe, bool) 
     let enc = |gain_db: f64| {
         Recipe::Encode(EncodeSpec { cap: p.bitrate_cap, vbr: p.mode == "vbr", sample_rate: output_rate(probe.sample_rate, &rates), gain_db })
     };
-    match *recipe {
+    match recipe {
         Recipe::Copy if !copy_allowed(probe, p.bitrate_cap, &rates) => (enc(0.0), true),
-        Recipe::Gain { steps } if !copy_allowed(probe, p.bitrate_cap, &rates) => (enc(steps as f64 * 1.5), true),
-        Recipe::Encode(mut s) => {
+        &Recipe::Gain { steps } if !copy_allowed(probe, p.bitrate_cap, &rates) => (enc(steps as f64 * 1.5), true),
+        Recipe::Encode(s) => {
+            let mut s = *s;
             s.cap = s.cap.min(p.bitrate_cap);
             if !rates.contains(&s.sample_rate) {
                 s.sample_rate = output_rate(probe.sample_rate, &rates);
             }
             (Recipe::Encode(s), false)
         }
-        r => (r, false),
+        r => (r.clone(), false),
     }
+}
+
+/// A render within the profile's limits.
+fn effective_render(spec: &RenderSpec, p: &ProfilePlan) -> RenderSpec {
+    let rates = if p.sample_rates.is_empty() { vec![44100, 48000] } else { p.sample_rates.clone() };
+    let mut s = spec.clone();
+    s.cap = s.cap.min(p.bitrate_cap);
+    if !rates.contains(&s.sample_rate) {
+        s.sample_rate = output_rate(44100, &rates);
+    }
+    s
 }
 
 /// The front cover for the stick, made once per source content and kept.
@@ -177,7 +199,8 @@ fn cover_for(tools: &Tools, cache: &Cache, src: &Path, content_key: &str) -> Opt
 }
 
 struct Ready {
-    probe: Probe,
+    /// The file whose tags (and cover) it gets; none for silence.
+    probe: Option<Probe>,
     content_key: String,
     path: PathBuf,
     audio: Prepared,
@@ -228,14 +251,31 @@ pub fn run(
                     break;
                 }
                 let f = files[i];
-                let r = current_probe(lib, tools, &f.track_id).and_then(|(path, key, probe)| {
-                    if probe.drm || probe.codec.is_empty() {
-                        return Err(format!("{} can't be decoded", path.display()));
-                    }
-                    let (recipe, switched) = effective(&probe, &f.recipe, &plan.profile);
-                    let audio = prepare(tools, cache, &path, &probe, &key, &recipe).map_err(|e| format!("{}: {e}", path.display()))?;
-                    Ok(Ready { probe, content_key: key, path, audio, switched })
-                });
+                let r = match &f.recipe {
+                    Recipe::Render(spec) => (|| {
+                        let spec = effective_render(spec, &plan.profile);
+                        let srcs = render_sources(lib, Some(tools), &spec)?;
+                        let audio = render::prepare(tools, cache, &spec, &srcs).map_err(|e| e.to_string())?;
+                        // Tags from the file's own track, else the first part's (cover art).
+                        let tagged = if f.track_id.is_empty() { spec.parts.iter().find_map(|p| p.track_id.clone()) } else { Some(f.track_id.clone()) };
+                        let (path, content_key, probe) = match tagged {
+                            Some(id) => {
+                                let (path, key, probe) = current_probe(lib, tools, &id)?;
+                                (path, key, Some(probe))
+                            }
+                            None => (PathBuf::new(), String::new(), None),
+                        };
+                        Ok(Ready { probe, content_key, path, audio, switched: false })
+                    })(),
+                    _ => current_probe(lib, tools, &f.track_id).and_then(|(path, key, probe)| {
+                        if probe.drm || probe.codec.is_empty() {
+                            return Err(format!("{} can't be decoded", path.display()));
+                        }
+                        let (recipe, switched) = effective(&probe, &f.recipe, &plan.profile);
+                        let audio = prepare(tools, cache, &path, &probe, &key, &recipe).map_err(|e| format!("{}: {e}", path.display()))?;
+                        Ok(Ready { probe: Some(probe), content_key: key, path, audio, switched })
+                    }),
+                };
                 results.lock().unwrap()[i] = Some(r);
                 let d = done.fetch_add(1, Ordering::Relaxed) + 1;
                 say("prepare", d as u64, n as u64, &f.name, format!("Prepared {d} of {n}: {}", f.name));
@@ -285,23 +325,28 @@ pub fn run(
         for f in &folder.files {
             let r = &ready[k];
             k += 1;
-            let t = &r.probe.tags;
-            let title = if p.number_in_title && !t.title.is_empty() {
-                format!("{:0w$} {}", f.position, t.title, w = f.total.to_string().len().max(2))
+            // A joined playlist or silence has tags of its own; a track has its source's.
+            let own = f.title.is_some();
+            let blank = Tags::default();
+            let t = if own { &blank } else { r.probe.as_ref().map(|x| &x.tags).unwrap_or(&blank) };
+            let base = f.title.clone().unwrap_or_else(|| t.title.clone());
+            let title = if p.number_in_title && !base.is_empty() {
+                format!("{:0w$} {}", f.position, base, w = f.total.to_string().len().max(2))
             } else {
-                t.title.clone()
+                base
             };
+            let has_cover = r.probe.as_ref().is_some_and(|x| x.cover);
             let spec = TagSpec {
                 title,
-                artist: t.artist.clone(),
-                album: t.album.clone(),
+                artist: f.artist.clone().unwrap_or_else(|| t.artist.clone()),
+                album: f.album.clone().unwrap_or_else(|| t.album.clone()),
                 albumartist: t.albumartist.clone(),
                 year: t.year,
-                track: if p.track_tag_is_position { Some(f.position) } else { t.track },
-                track_total: if p.track_tag_is_position { Some(f.total) } else { None },
+                track: if p.track_tag_is_position || own { Some(f.position) } else { t.track },
+                track_total: if p.track_tag_is_position || own { Some(f.total) } else { None },
                 disc: if p.track_tag_is_position { None } else { t.disc },
                 genre: t.genre.clone(),
-                cover_jpeg: if p.cover == "none" || !r.probe.cover { None } else { cover_for(tools, cache, &r.path, &r.content_key) },
+                cover_jpeg: if p.cover == "none" || !has_cover { None } else { cover_for(tools, cache, &r.path, &r.content_key) },
             };
             let mut parts = Vec::with_capacity(3);
             let v2 = id3v2(&spec, p.tags == "id3v24");

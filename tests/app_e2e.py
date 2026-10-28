@@ -5,7 +5,9 @@ Makes real audio (FLAC, Opus, MP3s at 320 kbps and at 22.05 kHz, WAV), then
 runs a debug build of the app twice under Xvfb with P2U_SELFTEST:
 
 1. tests/app_selftest.js drives the window from an empty library to a
-   finished sync of two playlists (see that file).
+   finished sync of two playlists, with silence between them, the first
+   track cut and padded and the second playlist joined into one track (see
+   that file), then opens the stick's layout window.
 2. tests/app_selftest2.js restarts on the same library and checks that
    everything was kept.
 
@@ -117,7 +119,7 @@ def main():
     menv = mtools_env(work)
     top = subprocess.run(["mdir", "-b", "-i", part, "::/"], capture_output=True, text=True, env=menv).stdout.splitlines()
     want_folders = [f[0] for f in names]
-    record("the top level holds the two folders, in stick order", [os.path.basename(x.rstrip("/")) for x in top] == want_folders, f"{top} vs {want_folders}")
+    record("the top level holds the three folders, in stick order", [os.path.basename(x.rstrip("/")) for x in top] == want_folders and len(want_folders) == 3, f"{top} vs {want_folders}")
     out = os.path.join(work, "out")
     os.makedirs(out)
     all_ok_order = True
@@ -144,8 +146,9 @@ def main():
         probes.append((folder, n, path, a, tags, pic))
     record("every file is MP3 at 44.1 or 48 kHz, stereo", all(a["codec_name"] == "mp3" and a["sample_rate"] in ("44100", "48000") and a["channels"] == 2 for *_, a, _, _ in probes))
     tracks = [t.get("track") for *_, t, _ in probes]
-    record("the track tag is the position in the playlist", tracks == ["1/4", "2/4", "3/4", "4/4", "1/2", "2/2"], str(tracks))
-    record("titles come from the source tags", [t.get("title") for *_, t, _ in probes] == cfg["titles"] + cfg["titles2"])
+    record("the track tag is the position in the folder", tracks == ["1/4", "2/4", "3/4", "4/4", "1/1", "1/1"], str(tracks))
+    titles = [t.get("title") for *_, t, _ in probes]
+    record("titles come from the source tags (and the joined track is named after its playlist)", titles == cfg["titles"] + ["Silence", "Live"], str(titles))
     record("the 320 kbps MP3 kept its cover (as a small JPEG)", probes[2][5] and not probes[0][5])
     with open(probes[2][2], "rb") as f:
         head = f.read(200_000)
@@ -156,10 +159,27 @@ def main():
         r = subprocess.run(["ffmpeg", "-nostats", "-hide_banner", "-i", path, "-af", "ebur128", "-f", "null", "-"], capture_output=True, text=True)
         m = re.findall(r"I:\s+(-?[\d.]+) LUFS", r.stderr)
         louds.append(float(m[-1]) if m else 0.0)
-    # The first playlist evens out the volume; the second one doesn't, so its
-    # tracks keep their levels (about -28 and -41 LUFS as made).
+    # The first playlist evens out the volume (the padding's silence doesn't
+    # count: the meter gates it out).
     record("the first playlist's tracks measure -18 LUFS within 0.8 LU", all(abs(l + 18) <= 0.8 for l in louds[:4]), ", ".join(f"{l:.1f}" for l in louds[:4]))
-    record("the second playlist's tracks keep their own levels", louds[4] < -25 and louds[5] < -35, ", ".join(f"{l:.1f}" for l in louds[4:]))
+
+    # Lengths and silences, measured with ffprobe and ffmpeg's volumedetect.
+    def length(path):
+        return float(json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", path], capture_output=True, text=True).stdout)["format"]["duration"])
+
+    def peak(path, start=0.0, dur=None):
+        args = ["ffmpeg", "-hide_banner", "-nostats", "-ss", str(start)] + (["-t", str(dur)] if dur else []) + ["-i", path, "-af", "volumedetect", "-f", "null", "-"]
+        m = re.search(r"max_volume: (-?[\d.]+|-inf) dB", subprocess.run(args, capture_output=True, text=True).stderr)
+        return -200.0 if not m or m.group(1) == "-inf" else float(m.group(1))
+
+    first, gap, joined = probes[0][2], probes[4][2], probes[5][2]
+    lens = [length(x) for x in (first, gap, joined)]
+    record("the first track: 2 s cut, 1 s of silence added (8 s became 7 s)", abs(lens[0] - 7.0) < 0.12, f"{lens[0]:.2f} s")
+    record("it ends in a second of silence", peak(first, 6.15) < -70 and peak(first, 5.0, 0.8) > -40, f"{peak(first, 6.15):.0f} dB after 6.15 s")
+    record("the silence between the playlists: 3 s, silent", abs(lens[1] - 3.0) < 0.12 and peak(gap) < -80, f"{lens[1]:.2f} s, peak {peak(gap):.0f} dB")
+    record("the second playlist joined into one track of 16 s, both tracks audible", abs(lens[2] - 16.0) < 0.15 and peak(joined, 1, 6) > -30 and peak(joined, 9, 6) > -45,
+           f"{lens[2]:.2f} s; {peak(joined, 1, 6):.0f} and {peak(joined, 9, 6):.0f} dB")
+    record("the joined track takes the playlist's name and the shared artist", probes[5][4].get("album") == "Live" and probes[5][4].get("artist") == "Live Band", str(probes[5][4]))
 
     run_app("phase 2", "app_selftest2.js", cfg, env)
 

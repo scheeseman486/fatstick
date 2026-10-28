@@ -13,17 +13,17 @@
     {
       "name": "64 MiB blank: sfdisk sees one FAT32 (LBA) partition from 1 MiB to the end",
       "ok": true,
-      "detail": "[{\"node\": \"/tmp/p2u-stick-r2ib5idr/blank.img1\", \"start\": 2048, \"size\": 129024, \"type\": \"c\"}]"
+      "detail": "[{\"node\": \"/tmp/p2u-stick-d2lpv6b9/blank.img1\", \"start\": 2048, \"size\": 129024, \"type\": \"c\"}]"
     },
     {
       "name": "64 MiB blank: blkid on the whole disk finds only the MBR",
       "ok": true,
-      "detail": "{'DEVNAME': '/tmp/p2u-stick-r2ib5idr/blank.img', 'PTUUID': '86e1f7d9', 'PTTYPE': 'dos'} "
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-d2lpv6b9/blank.img', 'PTUUID': 'e8fa9347', 'PTTYPE': 'dos'} "
     },
     {
       "name": "64 MiB blank: blkid on the partition finds exactly one FAT32 file system",
       "ok": true,
-      "detail": "{'DEVNAME': '/tmp/p2u-stick-r2ib5idr/blank.img', 'LABEL_FATBOOT': 'BLANK', 'LABEL': 'BLANK', 'UUID': '24A0-0779', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '512', 'BLOCK_SIZE': '512', 'FSSIZE': '66060288', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-d2lpv6b9/blank.img', 'LABEL_FATBOOT': 'BLANK', 'LABEL': 'BLANK', 'UUID': '78F4-7BAB', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '512', 'BLOCK_SIZE': '512', 'FSSIZE': '66060288', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
     },
     {
       "name": "64 MiB blank: wipefs finds no stale signature on the disk",
@@ -38,7 +38,7 @@
     {
       "name": "64 MiB blank: fsck.fat -n finds nothing to fix",
       "ok": true,
-      "detail": "/tmp/p2u-stick-r2ib5idr/blank.img.fs: 27 files, 9100/126976 clusters"
+      "detail": "/tmp/p2u-stick-d2lpv6b9/blank.img.fs: 27 files, 9100/126976 clusters"
     },
     {
       "name": "64 MiB blank: fatsort -l lists the folder in playlist order; the folder is alone at the top",
@@ -68,17 +68,17 @@
     {
       "name": "300 MiB of junk with stale signatures: sfdisk sees one FAT32 (LBA) partition from 1 MiB to the end",
       "ok": true,
-      "detail": "[{\"node\": \"/tmp/p2u-stick-r2ib5idr/junk.img1\", \"start\": 2048, \"size\": 612352, \"type\": \"c\"}]"
+      "detail": "[{\"node\": \"/tmp/p2u-stick-d2lpv6b9/junk.img1\", \"start\": 2048, \"size\": 612352, \"type\": \"c\"}]"
     },
     {
       "name": "300 MiB of junk with stale signatures: blkid on the whole disk finds only the MBR",
       "ok": true,
-      "detail": "{'DEVNAME': '/tmp/p2u-stick-r2ib5idr/junk.img', 'PTUUID': '84bef140', 'PTTYPE': 'dos'} "
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-d2lpv6b9/junk.img', 'PTUUID': '5ed8c139', 'PTTYPE': 'dos'} "
     },
     {
       "name": "300 MiB of junk with stale signatures: blkid on the partition finds exactly one FAT32 file system",
       "ok": true,
-      "detail": "{'DEVNAME': '/tmp/p2u-stick-r2ib5idr/junk.img', 'LABEL_FATBOOT': 'JUNK', 'LABEL': 'JUNK', 'UUID': 'F8ED-8325', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '4096', 'BLOCK_SIZE': '512', 'FSSIZE': '313524224', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-d2lpv6b9/junk.img', 'LABEL_FATBOOT': 'JUNK', 'LABEL': 'JUNK', 'UUID': '160E-F24B', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '4096', 'BLOCK_SIZE': '512', 'FSSIZE': '313524224', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
     },
     {
       "name": "300 MiB of junk with stale signatures: wipefs finds no stale signature on the disk",
@@ -93,7 +93,7 @@
     {
       "name": "300 MiB of junk with stale signatures: fsck.fat -n finds nothing to fix",
       "ok": true,
-      "detail": "/tmp/p2u-stick-r2ib5idr/junk.img.fs: 27 files, 1041/76288 clusters"
+      "detail": "/tmp/p2u-stick-d2lpv6b9/junk.img.fs: 27 files, 1041/76288 clusters"
     },
     {
       "name": "300 MiB of junk with stale signatures: fatsort -l lists the folder in playlist order; the folder is alone at the top",
@@ -123,17 +123,17 @@
     {
       "name": "1 GiB used FAT32 stick: sfdisk sees one FAT32 (LBA) partition from 1 MiB to the end",
       "ok": true,
-      "detail": "[{\"node\": \"/tmp/p2u-stick-r2ib5idr/fat32_used.img1\", \"start\": 2048, \"size\": 2095104, \"type\": \"c\"}]"
+      "detail": "[{\"node\": \"/tmp/p2u-stick-d2lpv6b9/fat32_used.img1\", \"start\": 2048, \"size\": 2095104, \"type\": \"c\"}]"
     },
     {
       "name": "1 GiB used FAT32 stick: blkid on the whole disk finds only the MBR",
       "ok": true,
-      "detail": "{'DEVNAME': '/tmp/p2u-stick-r2ib5idr/fat32_used.img', 'PTUUID': '5be555e8', 'PTTYPE': 'dos'} "
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-d2lpv6b9/fat32_used.img', 'PTUUID': '28a559e2', 'PTTYPE': 'dos'} "
     },
     {
       "name": "1 GiB used FAT32 stick: blkid on the partition finds exactly one FAT32 file system",
       "ok": true,
-      "detail": "{'DEVNAME': '/tmp/p2u-stick-r2ib5idr/fat32_used.img', 'LABEL_FATBOOT': 'FAT32_US', 'LABEL': 'FAT32_US', 'UUID': 'C23F-BE8B', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '4096', 'BLOCK_SIZE': '512', 'FSSIZE': '1072693248', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-d2lpv6b9/fat32_used.img', 'LABEL_FATBOOT': 'FAT32_US', 'LABEL': 'FAT32_US', 'UUID': 'F3E3-F8ED', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '4096', 'BLOCK_SIZE': '512', 'FSSIZE': '1072693248', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
     },
     {
       "name": "1 GiB used FAT32 stick: wipefs finds no stale signature on the disk",
@@ -148,7 +148,7 @@
     {
       "name": "1 GiB used FAT32 stick: fsck.fat -n finds nothing to fix",
       "ok": true,
-      "detail": "/tmp/p2u-stick-r2ib5idr/fat32_used.img.fs: 27 files, 1136/261120 clusters"
+      "detail": "/tmp/p2u-stick-d2lpv6b9/fat32_used.img.fs: 27 files, 1136/261120 clusters"
     },
     {
       "name": "1 GiB used FAT32 stick: fatsort -l lists the folder in playlist order; the folder is alone at the top",
@@ -178,17 +178,17 @@
     {
       "name": "256 MiB superfloppy FAT16: sfdisk sees one FAT32 (LBA) partition from 1 MiB to the end",
       "ok": true,
-      "detail": "[{\"node\": \"/tmp/p2u-stick-r2ib5idr/superfloppy_fat16.img1\", \"start\": 2048, \"size\": 522240, \"type\": \"c\"}]"
+      "detail": "[{\"node\": \"/tmp/p2u-stick-d2lpv6b9/superfloppy_fat16.img1\", \"start\": 2048, \"size\": 522240, \"type\": \"c\"}]"
     },
     {
       "name": "256 MiB superfloppy FAT16: blkid on the whole disk finds only the MBR",
       "ok": true,
-      "detail": "{'DEVNAME': '/tmp/p2u-stick-r2ib5idr/superfloppy_fat16.img', 'PTUUID': '464e112c', 'PTTYPE': 'dos'} "
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-d2lpv6b9/superfloppy_fat16.img', 'PTUUID': 'c4f0c984', 'PTTYPE': 'dos'} "
     },
     {
       "name": "256 MiB superfloppy FAT16: blkid on the partition finds exactly one FAT32 file system",
       "ok": true,
-      "detail": "{'DEVNAME': '/tmp/p2u-stick-r2ib5idr/superfloppy_fat16.img', 'LABEL_FATBOOT': 'PLAYLIST', 'LABEL': 'PLAYLIST', 'UUID': 'CB38-C27D', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '512', 'BLOCK_SIZE': '512', 'FSSIZE': '267386880', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-d2lpv6b9/superfloppy_fat16.img', 'LABEL_FATBOOT': 'PLAYLIST', 'LABEL': 'PLAYLIST', 'UUID': '3835-5491', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '512', 'BLOCK_SIZE': '512', 'FSSIZE': '267386880', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
     },
     {
       "name": "256 MiB superfloppy FAT16: wipefs finds no stale signature on the disk",
@@ -203,7 +203,7 @@
     {
       "name": "256 MiB superfloppy FAT16: fsck.fat -n finds nothing to fix",
       "ok": true,
-      "detail": "/tmp/p2u-stick-r2ib5idr/superfloppy_fat16.img.fs: 26 files, 8752/514048 clusters"
+      "detail": "/tmp/p2u-stick-d2lpv6b9/superfloppy_fat16.img.fs: 26 files, 8752/514048 clusters"
     },
     {
       "name": "256 MiB superfloppy FAT16: fatsort -l lists the top level in playlist order, nothing else there",
@@ -233,17 +233,17 @@
     {
       "name": "8 GiB GPT + exFAT: sfdisk sees one FAT32 (LBA) partition from 1 MiB to the end",
       "ok": true,
-      "detail": "[{\"node\": \"/tmp/p2u-stick-r2ib5idr/gpt_exfat.img1\", \"start\": 2048, \"size\": 16775168, \"type\": \"c\"}]"
+      "detail": "[{\"node\": \"/tmp/p2u-stick-d2lpv6b9/gpt_exfat.img1\", \"start\": 2048, \"size\": 16775168, \"type\": \"c\"}]"
     },
     {
       "name": "8 GiB GPT + exFAT: blkid on the whole disk finds only the MBR",
       "ok": true,
-      "detail": "{'DEVNAME': '/tmp/p2u-stick-r2ib5idr/gpt_exfat.img', 'PTUUID': '7762d389', 'PTTYPE': 'dos'} "
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-d2lpv6b9/gpt_exfat.img', 'PTUUID': 'a90839b6', 'PTTYPE': 'dos'} "
     },
     {
       "name": "8 GiB GPT + exFAT: blkid on the partition finds exactly one FAT32 file system",
       "ok": true,
-      "detail": "{'DEVNAME': '/tmp/p2u-stick-r2ib5idr/gpt_exfat.img', 'LABEL_FATBOOT': 'GPT_EXFA', 'LABEL': 'GPT_EXFA', 'UUID': '5634-36C9', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '4096', 'BLOCK_SIZE': '512', 'FSSIZE': '8588886016', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-d2lpv6b9/gpt_exfat.img', 'LABEL_FATBOOT': 'GPT_EXFA', 'LABEL': 'GPT_EXFA', 'UUID': 'BC15-9363', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '4096', 'BLOCK_SIZE': '512', 'FSSIZE': '8588886016', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
     },
     {
       "name": "8 GiB GPT + exFAT: wipefs finds no stale signature on the disk",
@@ -258,7 +258,7 @@
     {
       "name": "8 GiB GPT + exFAT: fsck.fat -n finds nothing to fix",
       "ok": true,
-      "detail": "/tmp/p2u-stick-r2ib5idr/gpt_exfat.img.fs: 27 files, 1103/2092032 clusters"
+      "detail": "/tmp/p2u-stick-d2lpv6b9/gpt_exfat.img.fs: 27 files, 1103/2092032 clusters"
     },
     {
       "name": "8 GiB GPT + exFAT: fatsort -l lists the folder in playlist order; the folder is alone at the top",
@@ -288,17 +288,17 @@
     {
       "name": "16.5 GiB MBR with NTFS and ext4: sfdisk sees one FAT32 (LBA) partition from 1 MiB to the end",
       "ok": true,
-      "detail": "[{\"node\": \"/tmp/p2u-stick-r2ib5idr/mbr_ntfs_ext4.img1\", \"start\": 2048, \"size\": 34600960, \"type\": \"c\"}]"
+      "detail": "[{\"node\": \"/tmp/p2u-stick-d2lpv6b9/mbr_ntfs_ext4.img1\", \"start\": 2048, \"size\": 34600960, \"type\": \"c\"}]"
     },
     {
       "name": "16.5 GiB MBR with NTFS and ext4: blkid on the whole disk finds only the MBR",
       "ok": true,
-      "detail": "{'DEVNAME': '/tmp/p2u-stick-r2ib5idr/mbr_ntfs_ext4.img', 'PTUUID': 'bd52a1d7', 'PTTYPE': 'dos'} "
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-d2lpv6b9/mbr_ntfs_ext4.img', 'PTUUID': '6fdb6fdd', 'PTTYPE': 'dos'} "
     },
     {
       "name": "16.5 GiB MBR with NTFS and ext4: blkid on the partition finds exactly one FAT32 file system",
       "ok": true,
-      "detail": "{'DEVNAME': '/tmp/p2u-stick-r2ib5idr/mbr_ntfs_ext4.img', 'LABEL_FATBOOT': 'MBR_NTFS', 'LABEL': 'MBR_NTFS', 'UUID': 'EED0-B9FB', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '16384', 'BLOCK_SIZE': '512', 'FSSIZE': '17715691520', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-d2lpv6b9/mbr_ntfs_ext4.img', 'LABEL_FATBOOT': 'MBR_NTFS', 'LABEL': 'MBR_NTFS', 'UUID': '3F0F-8E13', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '16384', 'BLOCK_SIZE': '512', 'FSSIZE': '17715691520', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
     },
     {
       "name": "16.5 GiB MBR with NTFS and ext4: wipefs finds no stale signature on the disk",
@@ -313,7 +313,7 @@
     {
       "name": "16.5 GiB MBR with NTFS and ext4: fsck.fat -n finds nothing to fix",
       "ok": true,
-      "detail": "/tmp/p2u-stick-r2ib5idr/mbr_ntfs_ext4.img.fs: 27 files, 322/1080576 clusters"
+      "detail": "/tmp/p2u-stick-d2lpv6b9/mbr_ntfs_ext4.img.fs: 27 files, 322/1080576 clusters"
     },
     {
       "name": "16.5 GiB MBR with NTFS and ext4: fatsort -l lists the folder in playlist order; the folder is alone at the top",
@@ -343,17 +343,17 @@
     {
       "name": "40 GiB whole-disk ext4: sfdisk sees one FAT32 (LBA) partition from 1 MiB to the end",
       "ok": true,
-      "detail": "[{\"node\": \"/tmp/p2u-stick-r2ib5idr/ext4_whole.img1\", \"start\": 2048, \"size\": 83884032, \"type\": \"c\"}]"
+      "detail": "[{\"node\": \"/tmp/p2u-stick-d2lpv6b9/ext4_whole.img1\", \"start\": 2048, \"size\": 83884032, \"type\": \"c\"}]"
     },
     {
       "name": "40 GiB whole-disk ext4: blkid on the whole disk finds only the MBR",
       "ok": true,
-      "detail": "{'DEVNAME': '/tmp/p2u-stick-r2ib5idr/ext4_whole.img', 'PTUUID': '8e1f0de3', 'PTTYPE': 'dos'} "
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-d2lpv6b9/ext4_whole.img', 'PTUUID': 'b05fa9aa', 'PTTYPE': 'dos'} "
     },
     {
       "name": "40 GiB whole-disk ext4: blkid on the partition finds exactly one FAT32 file system",
       "ok": true,
-      "detail": "{'DEVNAME': '/tmp/p2u-stick-r2ib5idr/ext4_whole.img', 'LABEL_FATBOOT': 'PLAYLIST', 'LABEL': 'PLAYLIST', 'UUID': 'AC83-C171', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '32768', 'BLOCK_SIZE': '512', 'FSSIZE': '42948624384', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
+      "detail": "{'DEVNAME': '/tmp/p2u-stick-d2lpv6b9/ext4_whole.img', 'LABEL_FATBOOT': 'PLAYLIST', 'LABEL': 'PLAYLIST', 'UUID': 'AF1E-418B', 'VERSION': 'FAT32', 'FSBLOCKSIZE': '32768', 'BLOCK_SIZE': '512', 'FSSIZE': '42948624384', 'TYPE': 'vfat', 'USAGE': 'filesystem'} "
     },
     {
       "name": "40 GiB whole-disk ext4: wipefs finds no stale signature on the disk",
@@ -368,7 +368,7 @@
     {
       "name": "40 GiB whole-disk ext4: fsck.fat -n finds nothing to fix",
       "ok": true,
-      "detail": "/tmp/p2u-stick-r2ib5idr/ext4_whole.img.fs: 26 files, 181/1310336 clusters"
+      "detail": "/tmp/p2u-stick-d2lpv6b9/ext4_whole.img.fs: 26 files, 181/1310336 clusters"
     },
     {
       "name": "40 GiB whole-disk ext4: fatsort -l lists the top level in playlist order, nothing else there",

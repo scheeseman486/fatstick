@@ -9,12 +9,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::cache::Cache;
 use crate::encode::{encode, EncodeSpec};
+use crate::render::RenderSpec;
 use crate::probe::Probe;
 use crate::tools::Tools;
 use crate::{mp3, AudioError, Result};
 
 /// What to do with a track.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Recipe {
     /// The MP3's audio frames, bit for bit.
@@ -23,6 +24,10 @@ pub enum Recipe {
     Gain { steps: i32 },
     /// Encoded with LAME.
     Encode(EncodeSpec),
+    /// Rendered from parts (cut, padded, joined, or silence) and encoded with
+    /// LAME. Its sources are the parts' tracks, so it goes through
+    /// [`crate::render`] rather than [`prepare`].
+    Render(RenderSpec),
 }
 
 impl Recipe {
@@ -31,6 +36,7 @@ impl Recipe {
             Recipe::Copy => "copy".into(),
             Recipe::Gain { steps } => format!("gain/{steps:+}"),
             Recipe::Encode(e) => e.recipe(),
+            Recipe::Render(r) => format!("render/{}parts", r.parts.len()),
         }
     }
     /// Whether this needs work in the cache (a plain copy streams from the source).
@@ -63,6 +69,7 @@ pub fn cache_key(content_key: &str, recipe: &Recipe) -> String {
 pub fn ready(cache: &Cache, src: &Path, probe: &Probe, content_key: &str, recipe: &Recipe) -> Option<Prepared> {
     match recipe {
         Recipe::Copy => probe.mp3.as_ref().map(|m| Prepared { path: src.to_path_buf(), offset: m.audio_start, len: m.audio_len }),
+        Recipe::Render(_) => None,
         r => cache.get(&cache_key(content_key, r)).and_then(|p| {
             let len = std::fs::metadata(&p).ok()?.len();
             Some(Prepared { path: p, offset: 0, len })
@@ -88,9 +95,10 @@ pub fn prepare(tools: &Tools, cache: &Cache, src: &Path, probe: &Probe, content_
         return Ok(p);
     }
     let key = cache_key(content_key, recipe);
-    let path = match *recipe {
+    let path = match recipe {
         Recipe::Copy => return Err(AudioError::Invalid(format!("{} has no MP3 frames to copy", src.display()))),
-        Recipe::Gain { steps } => {
+        Recipe::Render(_) => return Err(AudioError::Invalid("a render takes its parts' sources: use render::prepare".into())),
+        &Recipe::Gain { steps } => {
             let m = probe.mp3.as_ref().ok_or_else(|| AudioError::Invalid("not an MP3".into()))?;
             cache.get_or_make(&key, |tmp| {
                 let raw = cache.temp("raw.mp3");
@@ -106,7 +114,7 @@ pub fn prepare(tools: &Tools, cache: &Cache, src: &Path, probe: &Probe, content_
                 Ok(())
             })?
         }
-        Recipe::Encode(spec) => cache.get_or_make(&key, |tmp| encode(tools, src, tmp, &spec).map(|_| ()))?,
+        Recipe::Encode(spec) => cache.get_or_make(&key, |tmp| encode(tools, src, tmp, spec).map(|_| ()))?,
     };
     let len = std::fs::metadata(&path)?.len();
     Ok(Prepared { path, offset: 0, len })

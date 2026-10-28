@@ -8,6 +8,7 @@ use std::process::Command;
 
 use p2u_audio::encode::EncodeSpec;
 use p2u_audio::prepare::{copy_allowed, prepare, Recipe};
+use p2u_audio::render::{self, RenderPart, RenderSpec, Source};
 use p2u_audio::tags::{id3v1, id3v2, TagSpec};
 use p2u_audio::{cover, loudness, mp3, probe, Cache, Tools};
 
@@ -143,4 +144,75 @@ fn engine_end_to_end() {
     assert_eq!(cache.stats().files, 7);
     cache.clear();
     assert_eq!(cache.stats().files, 0);
+}
+
+/// RMS of interleaved stereo samples between two times.
+fn rms(s: &[f32], from: f64, to: f64) -> f64 {
+    let a = ((from * 44100.0) as usize * 2).min(s.len());
+    let b = ((to * 44100.0) as usize * 2).min(s.len());
+    if b <= a {
+        return 0.0;
+    }
+    (s[a..b].iter().map(|x| (*x as f64) * (*x as f64)).sum::<f64>() / (b - a) as f64).sqrt()
+}
+
+#[test]
+fn render_cuts_pads_and_joins() {
+    let Some(t) = tools() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let p = |n: &str| dir.path().join(n);
+    ff(&["-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-ac", "2", "-c:a", "flac", &p("a.flac").display().to_string()]);
+    ff(&["-f", "lavfi", "-i", "sine=frequency=660:duration=2", "-ac", "2", "-c:a", "libmp3lame", "-b:a", "192k", &p("b.mp3").display().to_string()]);
+    let src = |n: &str| Some(Source { path: p(n), content_key: probe::content_key(&p(n)).unwrap() });
+    let cache = Cache::open(dir.path().join("cache")).unwrap();
+    let part = |id: Option<&str>| RenderPart { track_id: id.map(String::from), ..Default::default() };
+
+    // One track, cut at both ends and padded: 3 - 0.5 - 1.0 + 1.0 + 0.5 = 3 s.
+    let one = RenderSpec {
+        cap: 320,
+        vbr: false,
+        sample_rate: 44100,
+        parts: vec![RenderPart { cut_start: 0.5, cut_end: 1.0, pad_start: 1.0, pad_end: 0.5, ..part(Some("a")) }],
+    };
+    let out = render::prepare(&t, &cache, &one, &[src("a.flac")]).unwrap();
+    let info = mp3::scan(&out.path).unwrap().unwrap();
+    assert!((info.duration - 3.0).abs() < 0.08, "3 s: {}", info.duration);
+    assert_eq!((info.peak_bitrate, info.vbr), (320, false));
+    let s = pcm(&out.path);
+    assert!((s.len() as f64 / 88200.0 - 3.0).abs() < 0.08, "decoded length {}", s.len() as f64 / 88200.0);
+    assert!(rms(&s, 0.05, 0.9) < 1e-3, "silence first");
+    let tone = rms(&s, 1.2, 2.3);
+    assert!(tone > 0.05, "then the tone: {tone}");
+    assert!(rms(&s, 2.62, 3.0) < 1e-3, "silence last");
+    // Done once: asking again finds it in the cache.
+    assert_eq!(render::prepare(&t, &cache, &one, &[src("a.flac")]).unwrap().path, out.path);
+
+    // Two tracks joined, with a second of silence between and a gain on the
+    // first: 3 + 1 + 2 = 6 s.
+    let joined = RenderSpec {
+        cap: 256,
+        vbr: false,
+        sample_rate: 48000,
+        parts: vec![RenderPart { gain_db: -6.0, ..part(Some("a")) }, RenderPart { pad_start: 1.0, ..part(None) }, part(Some("b"))],
+    };
+    let srcs = [src("a.flac"), None, src("b.mp3")];
+    let out2 = render::prepare(&t, &cache, &joined, &srcs).unwrap();
+    let info2 = mp3::scan(&out2.path).unwrap().unwrap();
+    assert!((info2.duration - 6.0).abs() < 0.08, "6 s: {}", info2.duration);
+    assert_eq!((info2.sample_rate, info2.peak_bitrate), (48000, 256));
+    let s2 = pcm(&out2.path);
+    let a = rms(&s2, 0.3, 2.7);
+    assert!((a / tone - 0.5).abs() < 0.05, "-6 dB on the first track: {a} vs {tone}");
+    assert!(rms(&s2, 3.1, 3.9) < 1e-3, "the silence between");
+    assert!(rms(&s2, 4.2, 5.8) > 0.05, "then the second track");
+    // The cache key follows the content and the settings.
+    assert_ne!(render::cache_key(&one, &[src("a.flac")]), render::cache_key(&RenderSpec { cap: 256, ..one.clone() }, &[src("a.flac")]));
+    // Silence alone.
+    let gap = RenderSpec { cap: 320, vbr: false, sample_rate: 44100, parts: vec![RenderPart { pad_start: 2.5, ..part(None) }] };
+    let g = render::prepare(&t, &cache, &gap, &[None]).unwrap();
+    let gi = mp3::scan(&g.path).unwrap().unwrap();
+    assert!((gi.duration - 2.5).abs() < 0.08, "2.5 s of silence: {}", gi.duration);
+    assert!(rms(&pcm(&g.path), 0.0, 2.5) < 1e-4);
+    // A part whose track has no source is refused.
+    assert!(render::prepare(&t, &cache, &one, &[None]).is_err());
 }

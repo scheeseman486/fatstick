@@ -32,9 +32,26 @@ GPL version 3 or later.
 - **Copy or convert.** An MP3 the player can take is copied as it is.
   Everything else (FLAC, ALAC, WAV, AIFF, AAC, Ogg Vorbis, Opus, WMA, WavPack,
   APE, and MP3s over the cap or at odd sample rates) is encoded with LAME to
-  constant-bitrate MP3 at 320 or 256 kbps. Tags are written fresh: ID3v2.3 or
+  constant-bitrate MP3 at 320 or 256 kbps. A track that's cut or padded, a
+  joined playlist and silence are rendered: decoded, cut, padded and joined
+  as raw audio, then encoded once. Tags are written fresh: ID3v2.3 or
   2.4, optional ID3v1, the track number as the position in the playlist, and a
   small baseline JPEG cover (at most 500 px and 100 KB).
+- **A track's start and end.** Cut seconds away, or add silence, at either
+  end of a track: select it and press E, or "Start and end…" in its
+  right-click menu. Only the stick's copy changes, never your file.
+- **Silence between playlists.** A stick's list can hold stretches of
+  silence (30 s unless you change it) between its playlists. Each gets a
+  folder of its own holding one silent MP3.
+- **A playlist as one track.** "One track" in a playlist's header joins it
+  into a single long MP3 on the stick, in order, with each track's volume
+  and start and end settings. In the app it stays a playlist you edit as
+  usual; the list shows where each track starts in the joined track.
+- **The stick's layout.** Double-click a stick in the sidebar (or "Show the
+  stick's layout" in its right-click menu, or "List all") for a window with
+  every folder and file in the order a player reads them. Folders and joined
+  tracks fold away, and the window follows your edits. Rename a stick from
+  its right-click menu.
 - **Even volume, per playlist.** Loudness is measured with EBU R128. A copied
   MP3 gets a lossless gain change in 1.5 dB steps (the global gain field of
   each frame, as mp3gain does); an encoded track gets the exact gain. No
@@ -211,15 +228,17 @@ python3 tests/kernel_stick.py --kroot <kernel dir> --p2u target/x86_64-unknown-l
 
 `tests/app_e2e.py` runs the real app under Xvfb, twice. The first run starts
 from an empty library: it adds two folders of real audio (FLAC, Opus, WAV,
-MP3s at 320 kbps and at 22.05 kHz mono), turns on even volume, puts both
-playlists on a disk image standing in for a stick, syncs through the button
-and its confirmation, and plays a track. The second run checks that all of it
+MP3s at 320 kbps and at 22.05 kHz mono), turns on even volume, cuts and pads
+a track, joins the second playlist into one track and puts silence between
+the two, picks a disk image standing in for a stick, syncs through the button
+and its confirmation, opens the stick's layout window and plays a track. The second run checks that all of it
 was kept, that an edit makes the stick out of date, that the stick is
 recognized from its note, and that syncing another stick's playlists onto it
 asks first. Then the image is
 read with tools that aren't ours: fsck.fat, mtools (the order a player sees),
-ffprobe (codec, sample rate, tags, cover) and ffmpeg's EBU R128 meter (−18 LUFS
-where the volume was evened out).
+ffprobe (codec, sample rate, tags, cover, lengths), and ffmpeg's EBU R128
+meter and volumedetect (−18 LUFS where the volume was evened out; silence
+where it was added).
 
 ## Status
 

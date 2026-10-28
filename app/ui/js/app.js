@@ -51,7 +51,7 @@
     sel: new Set(),
     anchor: null,
     focus: null,
-    cols: { album: true, format: true, stick: true, gain: true, name: false },
+    cols: { album: true, format: true, stick: true, gain: true, name: false, edges: true },
     listWidth: 800,
     undo: [],
     redo: [],
@@ -121,47 +121,117 @@
   const listProfile = () => (listSet() ? prof(listSet().profileId) : prof(GENERIC.id));
 
   // ---- planning: what a sync would write ------------------------------------------
+  // A playlist plans to `items` (every entry), `present` (the tracks that go
+  // on the stick) and `files` (what the stick gets: one file per track, or
+  // one file for a joined playlist). A stick's list can also hold silence,
+  // which plans to one file of its own in its own folder.
+  const isGap = (id) => typeof id === "string" && id.startsWith("gap-");
+  /** The track a file's tags come from: none for a joined playlist or silence. */
+  const fileTrack = (it) => (it.own ? "" : it.t.id);
+  const gapOf = (s, id) => (s.gaps || []).find((g) => g.id === id);
+  /** A stick's list, as playlists: silences become stand-ins with no tracks. */
+  function stickLists(s) {
+    return s.playlistIds.map((id) => {
+      if (!isGap(id)) return pl(id);
+      const g = gapOf(s, id);
+      return g ? { id, name: "Silence", gap: g.seconds, entries: [], norm: { on: false } } : null;
+    }).filter(Boolean);
+  }
+  /** "Road Trip", or a common artist when every track has the same one. */
+  function commonArtist(ts) {
+    const a = ts.map((t) => t.artist || "");
+    return a.length && a.every((x) => x && x === a[0]) ? a[0] : "";
+  }
+
   function planPlaylist(p, profile) {
+    const cap = profile.bitrateCap;
     const items = p.entries.map((e) => ({ entry: e, t: track(e.trackId) }));
-    const ds = items.map((it) => R.decide(it.t, profile));
+    // A track cut or padded at its ends is encoded, as is every track of a joined playlist.
+    const ds = items.map((it) => {
+      const d = R.decide(it.t, profile);
+      if (d.action !== "copy" || !(p.join || R.hasEdges(it.entry))) return d;
+      return { ...d, action: "encode", reason: p.join ? `Joined into one track, encoded at ${cap} kbps` : `Cut or padded at its ends, so encoded at ${cap} kbps` };
+    });
     const gs = R.gains(items.map((i) => i.t), ds, p.norm);
+    let at = 0;
     items.forEach((it, i) => {
       it.d = ds[i];
       it.g = gs[i];
-      it.bytes = R.outBytes(it.t, it.d, profile);
+      it.secs = R.stickSeconds(it.t, it.entry);
+      it.bytes = R.outBytes(it.t, it.d, profile, it.secs);
       // Loudness not measured yet: the gain (and so the recipe) isn't known.
       it.waiting = !!(it.g && it.g.unknown);
-      it.recipe = R.recipe(it.t, it.d, it.waiting ? null : it.g, profile);
+      it.recipe = R.recipe(it.t, it.d, it.waiting ? null : it.g, profile, it.entry);
       it.key = it.recipe && it.recipe.kind !== "copy" && !it.waiting ? `${it.t.id}|${R.describe(it.recipe)}` : null;
+      if (it.d.action !== "skip") {
+        it.at = at;
+        at += it.secs;
+      }
     });
     const present = items.filter((it) => it.d.action !== "skip");
-    const nm = N.fileNames(present.map((it) => ({ tags: it.t, filename: it.t.filename })), {
+    let files = present;
+    if (p.join && present.length) {
+      // One file: every track in order, each with its gain, cuts and silences.
+      const ts = present.map((it) => it.t);
+      const t = {
+        id: "", title: p.name, artist: commonArtist(ts), album: p.name, filename: p.name, duration: at, exists: true,
+        cover: present.some((it) => it.t.cover), codec: "joined",
+      };
+      const waiting = present.some((it) => it.waiting);
+      const recipe = waiting ? null : R.render(present.map((it) => R.part(it.t, it.entry, it.g)), profile);
+      files = [{
+        entry: { id: `${p.id}:joined`, trackId: "" }, t, joined: true, parts: present, secs: at, waiting,
+        d: { action: "encode", reason: `${plural(present.length, "track")} joined into one, encoded at ${cap} kbps` },
+        g: null, recipe, key: recipe ? `join|${R.describe(recipe)}` : null,
+        bytes: R.outBytes(t, { action: "encode" }, profile, at),
+        own: { title: p.name, artist: t.artist, album: p.name },
+      }];
+    }
+    const nm = N.fileNames(files.map((it) => ({ tags: it.t, filename: it.t.filename })), {
       template: profile.fileTemplate, ascii: profile.ascii, maxLen: profile.maxLen, playlist: p.name,
     });
-    present.forEach((it, i) => {
+    files.forEach((it, i) => {
       it.name = nm.names[i].name;
       it.notes = nm.names[i].notes;
     });
-    return { p, items, present, errors: nm.errors, numbered: nm.numbered };
+    return { p, items, present, files, errors: nm.errors, numbered: nm.numbered };
+  }
+
+  /** Silence between playlists: one file, in a folder of its own. */
+  function planGap(p, profile) {
+    const secs = p.gap;
+    const t = { id: p.id, title: "Silence", artist: "", album: "", filename: "Silence", duration: secs, exists: true, codec: "silence" };
+    const recipe = R.render([{ trackId: null, padStart: secs }], profile);
+    const it = {
+      entry: { id: `${p.id}:silence`, trackId: "" }, t, gap: true, secs, waiting: false, at: 0,
+      d: { action: "encode", reason: `${clock(secs)} of silence, encoded at ${profile.bitrateCap} kbps` },
+      g: null, recipe, key: `gap|${R.describe(recipe)}`, bytes: R.outBytes(t, { action: "encode" }, profile, secs),
+      own: { title: "Silence", artist: "", album: "" },
+    };
+    const nm = N.fileNames([{ tags: t, filename: t.filename }], { template: profile.fileTemplate, ascii: profile.ascii, maxLen: profile.maxLen, playlist: p.name });
+    it.name = nm.names[0].name;
+    it.notes = nm.names[0].notes;
+    return { p, items: [it], present: [it], files: [it], errors: nm.errors, numbered: true };
   }
 
   function planSet(s) {
     if (!s) return null;
     const profile = prof(s.profileId);
-    const pls = s.playlistIds.map((id) => pl(id)).filter(Boolean);
+    const lists = stickLists(s);
     const single = profile.layout === "single";
-    const used = single ? pls.slice(0, 1) : pls;
+    const used = single ? lists.filter((p) => p.gap == null).slice(0, 1) : lists;
     const fnames = N.folderNames(used, { template: used.length > 1 ? profile.folderTemplate : "{playlist}", ascii: profile.ascii }).names;
-    const folders = used.map((p, i) => ({ ...planPlaylist(p, profile), folder: single ? null : fnames[i].name }));
+    const folders = used.map((p, i) => ({ ...(p.gap != null ? planGap(p, profile) : planPlaylist(p, profile)), folder: single ? null : fnames[i].name }));
     const dev = chosen(s);
     const lay = dev
-      ? R.layout(dev.sizeBytes, folders.map((f, i) => ({ index: i, top: single, files: f.present.map((it) => ({ bytes: it.bytes, entry: it.entry.id })) })))
+      ? R.layout(dev.sizeBytes, folders.map((f, i) => ({ index: i, top: single, files: f.files.map((it) => ({ bytes: it.bytes, entry: it.entry.id })) })))
       : null;
-    const all = folders.flatMap((f) => f.present);
+    // `all`: every file the stick gets, in stick order.
+    const all = folders.flatMap((f) => f.files);
     const keys = [...new Set(all.map((it) => it.key).filter(Boolean))];
     return {
       s, profile, single, folders, dev, lay, all, keys,
-      ignored: single ? pls.slice(1) : [],
+      ignored: single ? lists.filter((p) => !used.includes(p)) : [],
       pending: keys.filter((k) => !S.cache.has(k)),
       failed: keys.filter((k) => S.prepFailed.has(k)),
       waiting: all.filter((it) => it.waiting),
@@ -176,7 +246,15 @@
   function recipeOf(plan) {
     const pr = plan.profile;
     const norm = plan.folders.map((f) => (f.p.norm.on ? `${f.p.norm.target}${f.p.norm.mode}` : "off")).join(",");
-    return [pr.bitrateCap, pr.mode, pr.layout, pr.fileTemplate, pr.folderTemplate, pr.ascii, pr.maxLen, pr.tags, pr.cover, pr.id3v1, pr.trackTagIsPosition, pr.numberInTitle, norm].join("|");
+    const base = [pr.bitrateCap, pr.mode, pr.layout, pr.fileTemplate, pr.folderTemplate, pr.ascii, pr.maxLen, pr.tags, pr.cover, pr.id3v1, pr.trackTagIsPosition, pr.numberInTitle, norm].join("|");
+    // Joined playlists, cuts and silences (left out when there are none, so
+    // sticks synced before these existed stay up to date).
+    const edge = (e) => {
+      const x = R.edges(e);
+      return R.hasEdges(e) ? `[${x.cutStart},${x.cutEnd},${x.padStart},${x.padEnd}]` : "";
+    };
+    const shape = plan.folders.map((f) => (f.p.gap != null ? `S${f.p.gap}` : `${f.p.join ? "J" : ""}${f.present.map((it) => edge(it.entry)).join("")}`));
+    return shape.join("") ? `${base}|${shape.join(",")}` : base;
   }
 
   function staleness(plan) {
@@ -473,7 +551,7 @@
         onclick: () => openPlaylist(p.id),
         ondblclick: () => startRename("playlist", p.id),
         oncontextmenu: (e) => { e.preventDefault(); playlistMenu(p, { x: e.clientX, y: e.clientY }); },
-      }, h("span", { class: "nm", text: p.name }), h("span", { class: "mt", text: `${plural(p.entries.length, "track")}, ${length(dur)}` })));
+      }, h("span", { class: "nm", text: p.name }), h("span", { class: "mt", text: `${plural(p.entries.length, "track")}${p.join ? " as one" : ""}, ${length(dur)}` })));
     });
     const plugged = new Set(S.sticks.map(holder).filter((x) => x && x.set).map((x) => x.set.id));
     const setItems = S.sets.map((s) => {
@@ -486,7 +564,8 @@
       return h("li", null, h("button", {
         type: "button", class: `side-item${s.id === S.setId ? " current" : ""}${inNow ? " plugged" : ""}`, dataset: { set: s.id },
         onclick: () => selectSet(s.id),
-        ondblclick: () => startRename("set", s.id),
+        ondblclick: () => openLayout(s.id),
+        title: "Double-click to see everything on this stick",
         oncontextmenu: (e) => { e.preventDefault(); setMenu(s, { x: e.clientX, y: e.clientY }); },
       }, h("span", { class: "nm", text: s.name }), flag,
       h("span", { class: "mt", text: `${plural(plan.folders.length, "playlist")}, ${plan.profile.name}` })));
@@ -563,6 +642,8 @@
   }
   function setMenu(s, at) {
     menu(at, [
+      { label: "Show the stick's layout", action: () => openLayout(s.id) },
+      "-",
       { label: "Rename", action: () => startRename("set", s.id) },
       {
         label: "Remove from the list", disabled: S.sets.length < 2,
@@ -592,6 +673,7 @@
     format: { label: "Format", w: "7.2em" },
     stick: { label: "On the stick", w: "7.6em" },
     gain: { label: "Gain", w: "4.6em" },
+    edges: { label: "Start / end", w: "7.4em" },
     name: { label: "Name on the stick", w: "minmax(9em, 2fr)" },
   };
   function visibleCols(p) {
@@ -603,6 +685,7 @@
     if (w >= 600 && S.cols.format) k.push("format");
     if (w >= 500 && S.cols.stick) k.push("stick");
     if (w >= 660 && S.cols.gain && p.norm.on) k.push("gain");
+    if (w >= 560 && S.cols.edges && p.entries.some((e) => R.hasEdges(e))) k.push("edges");
     if (w >= 700 && S.cols.name) k.push("name");
     return k;
   }
@@ -621,10 +704,12 @@
         h("p", { class: "pl-meta" },
           `${plural(plan.items.length, "track")}, ${length(dur)}`,
           missing ? h("span", { class: "warn", text: `, ${missing} missing` }) : null,
-          s ? `. On ${s.name}.` : ". Not on a stick yet.")),
+          s ? `. On ${s.name}${p.join ? ", joined into one track" : ""}.` : `. Not on a stick yet${p.join ? "; it goes on joined into one track" : ""}.`)),
       h("div", { class: "tools" },
         h("button", { type: "button", class: `btn small${norm.on ? " tool-on" : ""}`, "data-menu-anchor": "", "aria-haspopup": "dialog", onclick: anchor(volumePopover) },
           norm.on ? `Even volume, ${String(norm.target).replace("-", "−")} LUFS` : "Even volume: off"),
+        h("button", { type: "button", class: `btn small${p.join ? " tool-on" : ""}`, id: "join-btn", "data-menu-anchor": "", "aria-haspopup": "dialog", onclick: anchor(joinPopover) },
+          p.join ? "As one track" : "One track: off"),
         h("button", { type: "button", class: "btn small", "data-menu-anchor": "", "aria-haspopup": "menu", onclick: anchor(orderMenu) }, "Order", h("span", { class: "caret" }, icon("caret"))),
         h("button", { type: "button", class: "btn small", "data-menu-anchor": "", "aria-haspopup": "menu", onclick: anchor(columnsMenu) }, "Columns", h("span", { class: "caret" }, icon("caret"))),
         h("button", { type: "button", class: "btn small", "data-menu-anchor": "", "aria-haspopup": "menu", onclick: anchor(addMenu) }, icon("plus"), "Add", h("span", { class: "caret" }, icon("caret")))),
@@ -650,6 +735,7 @@
       { label: "Format", checked: S.cols.format, action: t("format") },
       { label: "On the stick", checked: S.cols.stick, action: t("stick") },
       { label: "Gain (when evening the volume)", checked: S.cols.gain, action: t("gain") },
+      { label: "Start / end (when cut or padded)", checked: S.cols.edges, action: t("edges") },
       { label: "Name on the stick", checked: S.cols.name, action: t("name") },
     ]);
   }
@@ -690,6 +776,103 @@
       h("fieldset", null, h("legend", { text: "Gain" }), radios.map((r, i) => h("label", { class: "check" }, r, h("span", { text: MODES[i][1] })))),
     ));
     show();
+  }
+
+  function joinPopover(a) {
+    const p = pl();
+    const on = h("input", { type: "checkbox", checked: !!p.join, id: "join-on" });
+    const sum = h("p", { class: "st-note" });
+    const show = () => {
+      const plan = planPlaylist(p, listProfile());
+      const secs = plan.present.reduce((x, it) => x + it.secs, 0);
+      sum.textContent = p.join
+        ? `On the stick: one file of ${length(secs)} holding ${plural(plan.present.length, "track")}, about ${bytes(plan.files.reduce((x, it) => x + it.bytes, 0))}.`
+        : `On the stick: ${plural(plan.present.length, "file")}, one per track.`;
+    };
+    on.addEventListener("change", () => {
+      edit(on.checked ? `Join ${p.name} into one track` : `Keep the tracks of ${p.name} separate`, () => { p.join = on.checked; });
+      show();
+    });
+    popover(a, h("div", { style: { display: "grid", gap: "10px" } },
+      h("label", { class: "check" }, on, h("span", null, h("strong", { text: "Join into one track on the stick" }), h("br"), h("span", { text: `For ${p.name}, on every stick it goes on.` }))),
+      h("p", { text: `The stick gets a single MP3 for this playlist: every track in this order, each with its volume and its start and end settings, encoded at ${listProfile().bitrateCap} kbps. Here it stays a playlist you can edit as usual.` }),
+      sum,
+    ));
+    show();
+  }
+
+  /** "−2", "+1.5", "−2+1" or "–": seconds cut (−) or added (+) at one end of a track. */
+  function edgeText(cut, pad) {
+    const f = (x) => `${Math.round(x * 10) / 10}`;
+    if (cut && pad) return `−${f(cut)}+${f(pad)}`;
+    if (cut) return `−${f(cut)}`;
+    if (pad) return `+${f(pad)}`;
+    return "–";
+  }
+  function edgeTitle(e) {
+    const x = R.edges(e);
+    const side = (cut, pad, where) => [cut ? `${cut} s cut from the ${where}` : "", pad ? `${pad} s of silence added at the ${where}` : ""].filter(Boolean).join(", ");
+    return [side(x.cutStart, x.padStart, "start"), side(x.cutEnd, x.padEnd, "end")].filter(Boolean).join("; ") || "As it is";
+  }
+
+  /** Cut or pad the selected tracks at their start and end, on the stick. */
+  function edgesDialog(ids) {
+    const p = pl();
+    const es = p.entries.filter((e) => ids.includes(e.id));
+    if (!es.length) return;
+    const first = R.edges(es[0]);
+    const same = (k) => es.every((e) => R.edges(e)[k] === first[k]);
+    const field = (k, label) => {
+      const i = h("input", { type: "number", class: "input secs", min: "0", max: "3600", step: "0.1", id: `edge-${k}`, value: same(k) ? String(first[k]) : "", placeholder: same(k) ? "" : "mixed", "aria-label": label });
+      return i;
+    };
+    const f = {
+      cutStart: field("cutStart", "Seconds to cut from the start"), padStart: field("padStart", "Seconds of silence before"),
+      cutEnd: field("cutEnd", "Seconds to cut from the end"), padEnd: field("padEnd", "Seconds of silence after"),
+    };
+    const err = h("p", { class: "st-note err", role: "alert" });
+    const shortest = Math.min(...es.map((e) => track(e.trackId).duration || 0));
+    const apply = () => {
+      const v = {};
+      for (const [k, input] of Object.entries(f)) {
+        if (input.value === "") continue; // "mixed", left as it is
+        const n = Number(input.value);
+        if (!Number.isFinite(n) || n < 0 || n > 3600) { err.textContent = "Seconds from 0 to 3600."; input.focus(); return; }
+        v[k] = Math.round(n * 1000) / 1000;
+      }
+      const cuts = (v.cutStart ?? first.cutStart) + (v.cutEnd ?? first.cutEnd);
+      if (shortest && cuts >= shortest - 0.5) { err.textContent = `That cuts away the whole of a ${clock(shortest)} track.`; return; }
+      closeModal();
+      edit(es.length === 1 ? "Change the start and end" : `Change the start and end of ${plural(es.length, "track")}`, () => {
+        for (const e of es) {
+          const live = p.entries.find((x) => x.id === e.id);
+          for (const [k, n] of Object.entries(v)) {
+            if (n) live[k] = n;
+            else delete live[k];
+          }
+        }
+      });
+    };
+    const reset = () => { for (const input of Object.values(f)) input.value = "0"; };
+    const t0 = track(es[0].trackId);
+    modal({
+      title: es.length === 1 ? `Start and end of ${t0.title || t0.filename}` : `Start and end of ${plural(es.length, "track")}`,
+      body: [
+        h("p", { text: "Cut audio away, or add silence, at either end of the track on the stick. The file itself isn't changed. A track that would be copied is encoded instead." }),
+        h("div", { class: "edges-form" },
+          h("span"), h("span", { class: "lbl", text: "Cut (s)" }), h("span", { class: "lbl", text: "Add silence (s)" }),
+          h("span", { class: "lbl", text: "Start" }), f.cutStart, f.padStart,
+          h("span", { class: "lbl", text: "End" }), f.cutEnd, f.padEnd),
+        err,
+      ],
+      buttons: [
+        h("button", { type: "button", class: "btn left", text: "Back to as it is", onclick: reset }),
+        h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal }),
+        h("button", { type: "button", class: "btn primary", text: "Apply", onclick: apply }),
+      ],
+    });
+    f.cutStart.focus();
+    for (const input of Object.values(f)) input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } });
   }
 
   function renderList() {
@@ -754,6 +937,7 @@
             : h("button", { type: "button", class: "btn quiet small", text: "Locate…", onclick: () => locate(t) }));
         }
         const why = [d.reason, ...(d.notes || [])].join("; ");
+        if (pl().join) return h("div", { class: "c c-stick" }, h("span", { class: "chip join", title: `${why}. Starts at ${clock(it.at || 0)} in the joined track.`, text: `Joined, ${clock(it.at || 0)}` }));
         if (d.action === "copy") return h("div", { class: "c c-stick" }, h("span", { class: "chip", title: why, text: "Copy" }));
         return h("div", { class: "c c-stick" }, h("span", { class: `chip ${d.lossy ? "lossy" : "enc"}`, title: why, text: `MP3 ${prf.bitrateCap}` }));
       }
@@ -764,9 +948,23 @@
         const tip = `${g.exact ? "Exact gain, applied while encoding" : "Lossless 1.5 dB steps"}${g.limited ? `. Wanted ${db(g.want)}, stopped short of the peaks` : ""}`;
         return h("div", { class: `c c-gain${g.limited ? " lim" : ""}`, title: tip }, h("span", { class: g.limited ? "lim" : null, text: g.db === 0 ? "0 dB" : db(g.db) }));
       }
-      case "name":
+      case "edges": {
+        const x = R.edges(it.entry);
+        if (!R.hasEdges(it.entry)) return h("div", { class: "c c-edges" });
+        return h("div", { class: "c c-edges" }, h("button", {
+          type: "button", class: "edge-btn", title: `${edgeTitle(it.entry)}. Click to change.`,
+          text: `${edgeText(x.cutStart, x.padStart)} / ${edgeText(x.cutEnd, x.padEnd)} s`,
+          onclick: (ev) => { ev.stopPropagation(); if (!S.sel.has(it.entry.id)) { selectOnly(it.entry.id); syncSelection(); } edgesDialog([...S.sel]); },
+        }));
+      }
+      case "name": {
+        if (pl().join) {
+          const f = planPlaylist(pl(), prf).files[0];
+          return h("div", { class: "c c-name", title: "Joined into one track" }, f ? `${f.name}, at ${clock(it.at || 0)}` : "");
+        }
         return h("div", { class: "c c-name", title: it.notes && it.notes.length ? it.notes.join("; ") : null },
           it.name ? it.name : "", it.notes && it.notes.length ? h("span", { class: "note", text: " •" }) : null);
+      }
       default: return h("div", { class: "c" });
     }
   }
@@ -817,6 +1015,7 @@
     renderDevices(plan);
     renderSpace(plan);
     renderSyncBar(plan);
+    sendLayouts();
   }
 
   function renderStickHead(plan) {
@@ -848,40 +1047,74 @@
     const s = plan.s;
     const single = plan.single;
     const rows = s.playlistIds.map((id, i) => {
-      const p = pl(id);
-      if (!p) return null;
+      const gap = isGap(id) ? gapOf(s, id) : null;
+      const p = gap ? { id, name: "Silence" } : pl(id);
+      if (!p || (isGap(id) && !gap)) return null;
       const f = plan.folders.find((x) => x.p.id === id);
       const off = !f;
-      const bytesF = f ? f.present.reduce((a, it) => a + it.bytes, 0) : 0;
+      const bytesF = f ? f.files.reduce((a, it) => a + it.bytes, 0) : 0;
       const name = f ? (f.folder ? `${f.folder}/` : "Top level of the stick") : p.name;
-      const meta = off ? "Not written: this profile puts one playlist on a stick" : `${f.folder && f.folder.includes(p.name) ? "" : `${p.name}, `}${plural(f.present.length, "track")}, ${bytes(bytesF)}`;
-      const mv = (d) => edit(`Move ${p.name} ${d < 0 ? "up" : "down"}`, () => {
+      const what = gap ? "silence" : p.name;
+      let meta;
+      if (off) meta = gap ? "Not written: this profile puts one playlist on a stick" : "Not written: this profile puts one playlist on a stick";
+      else if (gap) meta = null;
+      else {
+        const n = f.present.length;
+        const counted = pl(id).join ? `${plural(n, "track")} joined into one` : plural(n, "track");
+        meta = `${f.folder && f.folder.includes(p.name) ? "" : `${p.name}, `}${counted}, ${bytes(bytesF)}`;
+      }
+      const mv = (d) => edit(`Move ${what} ${d < 0 ? "up" : "down"}`, () => {
         const a = s.playlistIds;
         [a[i], a[i + d]] = [a[i + d], a[i]];
       });
-      return h("li", { class: off ? "off" : null },
+      const remove = () => edit(`Take ${what} off ${s.name}`, () => {
+        s.playlistIds.splice(i, 1);
+        if (gap) s.gaps = s.gaps.filter((g) => g.id !== id);
+      });
+      let metaEl;
+      if (gap) {
+        const secs = h("input", { type: "number", class: "input secs", min: "1", max: "600", step: "1", value: String(gap.seconds), "aria-label": "Seconds of silence" });
+        secs.addEventListener("change", () => {
+          const v = Math.round(Number(secs.value));
+          if (!(v >= 1 && v <= 600)) { secs.value = String(gap.seconds); return; }
+          edit(`Silence of ${v} s`, () => { gapOf(s, id).seconds = v; });
+        });
+        metaEl = h("span", { class: "fmeta gap-meta" }, secs, h("span", { text: ` seconds of silence${f ? `, ${bytes(bytesF)}` : ""}` }));
+      } else metaEl = h("span", { class: "fmeta", text: meta });
+      return h("li", { class: `${off ? "off" : ""}${gap ? " gap" : ""}`.trim() || null, dataset: { item: id } },
         h("span", { class: "fn", text: String(i + 1) }),
-        h("button", { type: "button", class: "fname btn quiet small", style: { "justify-content": "flex-start", padding: "0", height: "auto", color: "inherit" }, text: name, title: `Show ${p.name}`, onclick: () => openPlaylist(id) }),
+        gap
+          ? h("span", { class: "fname", text: name })
+          : h("button", { type: "button", class: "fname btn quiet small", style: { "justify-content": "flex-start", padding: "0", height: "auto", color: "inherit" }, text: name, title: `Show ${p.name}`, onclick: () => openPlaylist(id) }),
         h("span", { class: "fbtns" },
-          h("button", { type: "button", class: "btn quiet small icon", title: "Move up", "aria-label": `Move ${p.name} up`, disabled: i === 0, onclick: () => mv(-1) }, icon("up")),
-          h("button", { type: "button", class: "btn quiet small icon", title: "Move down", "aria-label": `Move ${p.name} down`, disabled: i === s.playlistIds.length - 1, onclick: () => mv(1) }, icon("down")),
-          h("button", { type: "button", class: "btn quiet small icon", title: "Take off this stick", "aria-label": `Take ${p.name} off this stick`, onclick: () => edit(`Take ${p.name} off ${s.name}`, () => { s.playlistIds.splice(i, 1); }) }, icon("close"))),
-        h("span", { class: "fmeta", text: meta }));
+          h("button", { type: "button", class: "btn quiet small icon", title: "Move up", "aria-label": `Move ${what} up`, disabled: i === 0, onclick: () => mv(-1) }, icon("up")),
+          h("button", { type: "button", class: "btn quiet small icon", title: "Move down", "aria-label": `Move ${what} down`, disabled: i === s.playlistIds.length - 1, onclick: () => mv(1) }, icon("down")),
+          h("button", { type: "button", class: "btn quiet small icon", title: "Take off this stick", "aria-label": `Take ${what} off this stick`, onclick: remove }, icon("close"))),
+        metaEl);
     });
     const addable = S.playlists.filter((p) => !s.playlistIds.includes(p.id));
     const add = h("select", { class: "input", "aria-label": "Add a playlist to this stick" },
-      h("option", { value: "", text: addable.length ? "Add a playlist…" : "Every playlist is on it" }),
-      addable.map((p) => h("option", { value: p.id, text: p.name })));
-    add.disabled = !addable.length;
+      h("option", { value: "", text: "Add a playlist or silence…" }),
+      addable.map((p) => h("option", { value: p.id, text: p.name })),
+      single ? null : h("option", { value: "__gap", text: "Silence between playlists (30 s)" }));
     add.addEventListener("change", () => {
+      if (add.value === "__gap") {
+        const id = newId("gap-");
+        edit(`Put silence on ${s.name}`, () => {
+          s.gaps = [...(s.gaps || []), { id, seconds: 30 }];
+          s.playlistIds.push(id);
+        });
+        return;
+      }
       const p = pl(add.value);
       if (p) edit(`Put ${p.name} on ${s.name}`, () => { s.playlistIds.push(p.id); });
     });
-    fill(ST.folders, 
+    const realCount = s.playlistIds.filter((id) => !isGap(id)).length;
+    fill(ST.folders,
       h("h3", null, single ? "Playlist on this stick" : "Playlists on this stick", h("span", { class: "aside", text: single ? "tracks at the top level" : "one folder each, in this order" })),
-      rows.length ? h("ol", { class: "folders" }, rows) : h("p", { class: "st-note", text: "Nothing on this stick yet." }),
-      single && s.playlistIds.length > 1 ? h("p", { class: "st-note warn", text: `${plan.profile.name} writes one playlist per stick, so only the first one goes on.` }) : null,
-      single && s.playlistIds.length ? null : add,
+      rows.some(Boolean) ? h("ol", { class: "folders" }, rows) : h("p", { class: "st-note", text: "Nothing on this stick yet." }),
+      single && realCount > 1 ? h("p", { class: "st-note warn", text: `${plan.profile.name} writes one playlist per stick, so only the first one goes on.` }) : null,
+      single && realCount ? null : add,
     );
   }
 
@@ -907,7 +1140,7 @@
     } else if (first) {
       names = h("div", { class: "prof-names" },
         h("p", null, "Files named like ", h("span", { class: "mono", text: first.name })),
-        h("button", { type: "button", class: "btn quiet small", text: "List all", onclick: () => allNames(s.id) }));
+        h("button", { type: "button", class: "btn quiet small", text: "List all", title: "Every folder and file, in a window of its own", onclick: () => openLayout(s.id) }));
     }
     fill(ST.profile,
       h("h3", { text: "Player profile" }),
@@ -979,8 +1212,12 @@
     }
     const enc = plan.all.filter((it) => it.d.action === "encode");
     const lossy = enc.filter((it) => it.d.lossy).length;
+    const joined = plan.all.filter((it) => it.joined).length;
+    const gaps = plan.all.filter((it) => it.gap).length;
     const parts = [`${plural(plan.all.length - enc.length, "track")} copied as they are`];
-    if (enc.length) parts.push(`${enc.length} encoded at ${plan.profile.bitrateCap} kbps${lossy ? ` (${lossy} lossy to lossy)` : ""}`);
+    if (enc.length) parts.push(`${plural(enc.length, "file")} encoded at ${plan.profile.bitrateCap} kbps${lossy ? ` (${lossy} lossy to lossy)` : ""}`);
+    if (joined) parts.push(`${plural(joined, "playlist")} joined into one track`);
+    if (gaps) parts.push(`${plural(gaps, "silence")} between playlists`);
     if (plan.skipped.length) parts.push(`${plan.skipped.length} skipped (missing or unreadable)`);
     kids.push(h("p", { class: "counts", text: parts.join(", ") + "." }));
     ST.prep = h("p", { class: "prep", "aria-live": "polite" });
@@ -1148,32 +1385,64 @@
     renderDisplay();
   }
 
-  // ---- dialogs ----------------------------------------------------------------------------------
-  function allNames(setId) {
-    const plan = planSet(stickSet(setId));
-    const lis = [];
-    for (const f of plan.folders) {
-      if (f.folder) lis.push(h("li", { class: "fold" }, h("span", { class: "nm", text: `${f.folder}/` }), h("span", { class: "sz", text: plural(f.present.length, "file") }), h("span")));
-      for (const it of f.present) {
-        lis.push(h("li", { class: "file" },
-          h("span", { class: "nm", text: it.name }),
-          h("span", { class: "sz", text: it.d.action === "copy" ? "copy" : `MP3 ${plan.profile.bitrateCap}` }),
-          h("span", { class: "sz", text: bytes(it.bytes) }),
-          it.notes.length ? h("span", { class: "nt", text: it.notes.join("; ") }) : null));
-      }
-    }
-    if (plan.skipped.length) {
-      lis.push(h("li", { class: "fold" }, h("span", { class: "nm", text: "Skipped" }), h("span"), h("span")));
-      for (const it of plan.skipped) lis.push(h("li", { class: "file" }, h("span", { class: "nm", text: `${it.t.title || it.t.filename}: ${it.d.reason}` }), h("span"), h("span")));
-    }
-    modal({
-      title: `On ${plan.s.name}, in FAT order`,
-      wide: true,
-      body: [h("p", { text: `This is the order a player reads the stick in: folders, then files, exactly as listed. Volume label ${N.volumeLabel(plan.s.label || plan.s.name) || "none"}.` }), h("ul", { class: "tree" }, lis)],
-      buttons: [h("button", { type: "button", class: "btn", text: "Close", onclick: closeModal })],
-    });
+  // ---- stick layout windows ------------------------------------------------------------------
+  // A window per stick shows everything on it, in FAT order. This window
+  // plans the stick and sends the plan whenever anything changes.
+  const layoutsOpen = new Set();
+  let layoutTimer = null;
+  function layoutData(setId) {
+    const s = stickSet(setId);
+    if (!s) return { setId, gone: true };
+    const plan = planSet(s);
+    const st = staleness(plan);
+    const pr = plan.profile;
+    const how = (it) => (it.d.action !== "copy" ? `MP3 ${pr.bitrateCap}` : it.recipe && it.recipe.kind === "gain" ? `Copy, ${db(it.recipe.steps * R.STEP)}` : "Copy");
+    const ends = (e) => (e && R.hasEdges(e) ? edgeTitle(e) : "");
+    const gain = (it) => (it.g && it.g.db ? db(it.g.db) : "");
+    const kind = (f) => (f.p.gap != null ? "silence" : f.p.join ? "joined" : "playlist");
+    return {
+      setId, name: s.name, profile: pr.name, single: plan.single, label: N.volumeLabel(s.label || s.name) || "",
+      theme: S.theme === "system" ? hostTheme || "system" : S.theme,
+      status: st.never ? { kind: "new", text: "Not synced yet." }
+        : st.current ? { kind: "ok", text: `Up to date. Synced ${ago(st.at)}.` }
+          : { kind: "out", text: `Out of date: ${st.parts.join(", ")} since the last sync ${ago(st.at)}.` },
+      stick: plan.dev ? { name: plan.dev.name, size: plan.dev.sizeBytes } : null,
+      space: plan.lay ? { used: plan.lay.used, data: plan.lay.dataBytes, fits: plan.lay.fits } : null,
+      ignored: plan.ignored.map((p) => p.name),
+      errors: plan.errors,
+      folders: plan.folders.map((f) => ({
+        folder: f.folder || "", playlist: f.p.name, kind: kind(f), tracks: f.present.length,
+        secs: f.files.reduce((a, it) => a + (it.secs || 0), 0),
+        bytes: f.files.reduce((a, it) => a + it.bytes, 0),
+        skipped: f.items.filter((it) => it.d.action === "skip").map((it) => `${it.t.title || it.t.filename} (${it.d.reason.toLowerCase()})`),
+        files: f.files.map((it, i) => ({
+          n: i + 1, name: it.name, notes: it.notes || [], kind: it.gap ? "silence" : it.joined ? "joined" : "track",
+          title: it.t.title || it.t.filename, artist: it.t.artist || "", secs: it.secs || 0, bytes: it.bytes, how: how(it),
+          gain: it.joined ? "" : gain(it), edges: it.joined || it.gap ? "" : ends(it.entry),
+          parts: it.joined ? it.parts.map((x) => ({ title: x.t.title || x.t.filename, artist: x.t.artist || "", at: x.at, secs: x.secs, gain: gain(x), edges: ends(x.entry) })) : null,
+        })),
+      })),
+    };
   }
+  function sendLayouts() {
+    if (!layoutsOpen.size) return;
+    clearTimeout(layoutTimer);
+    layoutTimer = setTimeout(() => { for (const id of layoutsOpen) P.link.emit("layout:data", layoutData(id)); }, 120);
+  }
+  function openLayout(setId) {
+    const s = stickSet(setId);
+    if (!s) return;
+    layoutsOpen.add(setId);
+    Promise.resolve(P.link.open(setId, `Layout of ${s.name}`)).catch((e) => toast(`Couldn't open the layout window: ${e}`));
+  }
+  P.link.on("layout:want", (m) => {
+    if (!m || !stickSet(m.setId)) return;
+    layoutsOpen.add(m.setId);
+    P.link.emit("layout:data", layoutData(m.setId));
+  });
+  P.link.on("layout:gone", (m) => { if (m) layoutsOpen.delete(m.setId); });
 
+  // ---- dialogs ----------------------------------------------------------------------------------
   async function locate(t) {
     if (DEMO) {
       modal({
@@ -1316,7 +1585,7 @@
       const lis = [];
       for (const f of plan.folders) {
         if (f.folder) lis.push(h("li", { class: "fold", text: `${f.folder}/` }));
-        for (const it of f.present) lis.push(h("li", { class: f.folder ? "file" : null }, it.name, it.notes.length ? h("span", { class: "nt", text: it.notes.join("; ") }) : null));
+        for (const it of f.files) lis.push(h("li", { class: f.folder ? "file" : null }, it.name, it.notes.length ? h("span", { class: "nt", text: it.notes.join("; ") }) : null));
       }
       const noted = plan.all.filter((it) => it.notes.length).length;
       const whose = plan.s.id === "__preview" ? "As they would be" : `On ${plan.s.name}`;
@@ -1458,7 +1727,7 @@
       for (const it of planSet(s).all) {
         if (!it.key || seen.has(it.key) || S.cache.has(it.key) || S.prepFailed.has(it.key)) continue;
         seen.add(it.key);
-        jobs.push({ key: it.key, trackId: it.t.id, recipe: it.recipe });
+        jobs.push({ key: it.key, trackId: fileTrack(it), recipe: it.recipe });
       }
     }
     const sig = jobs.map((j) => j.key).join("\n");
@@ -1506,8 +1775,8 @@
     const kv = [
       ["Stick", `${dev.name}, ${bytes(dev.sizeBytes)}${dev.device ? ` (${dev.device})` : ""}`],
       ["Now on it", dev.volumes.length ? dev.volumes.join("; ") : "Nothing (blank)"],
-      ["Will hold", `${plan.folders.map((f) => f.folder || f.p.name).join(", ")}: ${plural(plan.all.length, "track")}, about ${bytes(plan.lay.used)}`],
-      ["Encoded", enc ? `${plural(enc, "track")} at ${plan.profile.bitrateCap} kbps` : "None, every track is copied"],
+      ["Will hold", `${plan.folders.map((f) => f.folder || f.p.name).join(", ")}: ${plural(plan.all.length, "file")}, about ${bytes(plan.lay.used)}`],
+      ["Encoded", enc ? `${plural(enc, "file")} at ${plan.profile.bitrateCap} kbps` : "None, every track is copied"],
       ["Skipped", plan.skipped.length ? plan.skipped.map((it) => `${it.t.title || it.t.filename} (${it.d.reason.toLowerCase()})`).join("; ") : "None"],
       ["Format", `FAT32, ${bytes(plan.lay.cluster)} clusters, label ${N.volumeLabel(plan.s.label || plan.s.name) || "none"}`],
     ];
@@ -1584,7 +1853,7 @@
       stickSize: plan.dev.sizeBytes,
       note: {
         profile: { id: pr.id, name: pr.name },
-        playlists: plan.folders.map((f) => ({ id: f.p.id, name: f.p.name, tracks: f.present.length })),
+        playlists: plan.folders.filter((f) => f.p.gap == null).map((f) => ({ id: f.p.id, name: f.p.name, tracks: f.present.length, joined: !!f.p.join })),
       },
       label: plan.s.label || plan.s.name,
       profile: {
@@ -1593,7 +1862,10 @@
       },
       folders: plan.folders.map((f) => ({
         name: f.folder || "",
-        files: f.present.map((it, i) => ({ name: it.name, trackId: it.t.id, recipe: it.recipe, position: i + 1, total: f.present.length, key: it.key })),
+        files: f.files.map((it, i) => ({
+          name: it.name, trackId: fileTrack(it), recipe: it.recipe, position: i + 1, total: f.files.length, key: it.key,
+          ...(it.own ? { title: it.own.title, artist: it.own.artist, album: it.own.album } : {}),
+        })),
       })),
       verify: true,
       estimateBytes: plan.lay ? plan.lay.used : 0,
@@ -2115,6 +2387,7 @@
     if (mod && k === "v") { e.preventDefault(); paste(); return; }
     if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); removeSelected(); return; }
     if (e.key === "Enter" && S.focus) { e.preventDefault(); playEntry(S.focus); return; }
+    if (k === "e" && !mod && !e.altKey && S.sel.size) { e.preventDefault(); edgesDialog([...S.sel]); return; }
     if (e.key === "Escape") { selectOnly(null); syncSelection(); }
   }
 
@@ -2134,6 +2407,8 @@
       { label: "Move to the top", action: () => moveSelectionTo(0) },
       { label: "Move to the bottom", action: () => moveSelectionTo(pl().entries.length) },
       ...(others.length ? [{ heading: n === 1 ? "Add to playlist" : `Add ${n} tracks to` }, ...others.map((p) => ({ label: p.name, action: () => { addTracks(tids(), p.id); toast(`Added ${plural(n, "track")} to ${p.name}.`, { label: "Undo", run: undo }); } }))] : []),
+      "-",
+      { label: n === 1 ? "Start and end…" : `Start and end of ${n} tracks…`, key: "E", action: () => edgesDialog([...S.sel]) },
       "-",
       t.exists ? { label: "Show where the file is", action: () => toast(t.path) } : { label: "Locate…", action: () => locate(t) },
       { label: n === 1 ? "Remove from playlist" : `Remove ${n} from playlist`, key: "Delete", action: removeSelected },
@@ -2269,7 +2544,7 @@
     persist();
     scheduleWork();
     // For the app's self-test (tests/app_e2e.py) and for poking around in the inspector.
-    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, stopPlayback, refreshSticks, holder, selectSet, ready: true };
+    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, stopPlayback, refreshSticks, holder, selectSet, openLayout, layoutData, ready: true };
     if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Playlist2USB to get it back.");
     if (!DEMO) {
       stickPoll = setInterval(() => { if (!(S.sync && S.sync.running)) refreshSticks(true); }, 3000);

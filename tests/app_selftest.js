@@ -59,6 +59,38 @@
     add.dispatchEvent(new Event("change", { bubbles: true }));
     check("both playlists are on the stick", set.playlistIds.length === 2);
 
+    // The first track: 2 s cut from its start and 1 s of silence after it.
+    document.querySelector(`[data-pl="${S.playlists[0].id}"]`).click();
+    const list = document.getElementById("list");
+    const key = (init) => list.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+    list.focus();
+    key({ key: "Home" });
+    key({ key: "e" });
+    const cut = await until(() => document.getElementById("edge-cutStart"));
+    cut.value = "2";
+    document.getElementById("edge-padEnd").value = "1";
+    [...document.querySelectorAll("#modal .btn.primary")].find((b) => b.textContent === "Apply").click();
+    const e0 = S.playlists[0].entries[0];
+    check("the first track is cut and padded", e0.cutStart === 2 && e0.padEnd === 1, JSON.stringify(e0));
+
+    // Three seconds of silence between the two playlists.
+    const add2 = [...document.querySelectorAll("#stick select")].find((x) => x.getAttribute("aria-label") === "Add a playlist to this stick");
+    add2.value = "__gap";
+    add2.dispatchEvent(new Event("change", { bubbles: true }));
+    (await until(() => document.querySelector('#stick button[aria-label="Move silence up"]'))).click();
+    const secs = await until(() => document.querySelector('#stick input[aria-label="Seconds of silence"]'));
+    secs.value = "3";
+    secs.dispatchEvent(new Event("change", { bubbles: true }));
+    check("silence sits between the playlists", set.playlistIds.length === 3 && set.playlistIds[1].startsWith("gap-") && set.gaps[0].seconds === 3, JSON.stringify(set.playlistIds));
+
+    // The second playlist goes on as one track.
+    document.querySelector(`[data-pl="${S.playlists[1].id}"]`).click();
+    (await until(() => document.getElementById("join-btn"))).click();
+    (await until(() => document.getElementById("join-on"))).click();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    check("the second playlist is joined into one track", S.playlists[1].join === true && A.planSet(set).folders[2].files.length === 1);
+    document.querySelector(`[data-pl="${S.playlists[0].id}"]`).click();
+
     // The disk image, offered as a stick.
     await A.refreshSticks(true);
     const radio = await until(() => [...document.querySelectorAll("#stick .dev input")].find((i) => i.value.startsWith("image:")), 10000);
@@ -90,7 +122,16 @@
     check("the stick is up to date afterwards", A.staleness(A.planSet(A.stickSet())).current);
     const known = await until(() => { const hd = A.holder(S.sticks.find((d) => d.image)); return hd && hd.set && hd.set.id === set.id; }, 10000);
     check("the stick now carries a note naming this stick (set)", !!known);
-    lines.push(`INFO names=${JSON.stringify(A.planSet(A.stickSet()).folders.map((f) => [f.folder, f.present.map((it) => it.name)]))}`);
+    lines.push(`INFO names=${JSON.stringify(A.planSet(A.stickSet()).folders.map((f) => [f.folder, f.files.map((it) => it.name)]))}`);
+
+    // The stick's layout window, from a double-click in the sidebar: a real
+    // second window, fed by this one.
+    let drawn = null;
+    const stop = await T.event.listen("layout:rendered", (ev) => { drawn = ev.payload; });
+    document.querySelector(`[data-set="${set.id}"]`).dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    await until(() => drawn, 15000);
+    stop();
+    check("the layout window opens and shows the stick", !!drawn && drawn.folders === 3 && drawn.files === 6 && drawn.joined === 1 && drawn.silences === 1, JSON.stringify(drawn));
 
     // The player (a silent output in the test): the position moves, then stop.
     await A.playEntry(p.entries[0].id, p.id);
