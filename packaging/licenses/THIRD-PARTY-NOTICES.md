@@ -38,7 +38,7 @@ alongside the installers. The build script fetches them too.
 ## Fonts (in the window)
 
 - DSEG14 Classic, by keshikan: SIL Open Font License 1.1 (`app/ui/fonts/DSEG-LICENSE.txt`).
-- Barlow, by Jeremy Tribby: SIL Open Font License 1.1 (`app/ui/fonts/barlow-OFL.txt`).
+- Barlow and Barlow Condensed, by Jeremy Tribby (The Barlow Project Authors): SIL Open Font License 1.1 (`app/ui/fonts/barlow-OFL.txt`); Barlow Condensed from @fontsource/barlow-condensed 5.3.0.
 
 ## Signalsmith Stretch (key shifting)
 

@@ -56,6 +56,7 @@
       playerKey: (pitch, keepFormants) => invoke("player_key", { pitch, keepFormants }),
       playerShape: (x) => invoke("player_shape", x),
       trackPeaks: (trackId) => invoke("track_peaks", { trackId }),
+      printWindow: () => invoke("print_window"),
       resume: () => invoke("player_resume"),
       seek: (pos) => invoke("player_seek", { pos }),
       stop: () => invoke("player_stop"),
@@ -287,6 +288,7 @@
       },
       async playerKey() {},
       async playerShape() {},
+      async printWindow() { window.print(); },
       /** A made-up waveform for the demo: a quiet start, a body that moves
        * with the bars, and a fade at the end. The same for a track each time. */
       async trackPeaks(id) {

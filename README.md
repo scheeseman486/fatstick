@@ -129,6 +129,19 @@ GPL version 3 or later.
   ReplayGain tags: these players ignore them.
 - **Preparation in the background.** Encodes and gain changes are made while
   you edit, into a cache (10 GB by default), so a sync is mostly the write.
+- **Setlists to print.** "Print a setlist…" (in the menu, a playlist's
+  right-click menu, or Ctrl+P) lays the playlist out for a music stand or
+  the floor: big titles, the artist, length and key shift under or beside
+  them a little smaller, black on white only (nothing grey or coloured, for
+  a laser printer) and tight margins. Beside the settings is a preview of
+  the actual pages. Page: A4 or Letter, portrait or landscape, one to three
+  columns, margins. Text: Barlow Condensed (narrow, so long titles fit),
+  Barlow or a serif, title and detail sizes, spacing, bold, capitals. On
+  the page: a heading and a line under it ("The Fox, 9pm"; kept for each
+  playlist), numbers, artist, album, length, key shift, the song count and
+  total length, page numbers, lines between songs, or only the selected
+  songs. The settings are remembered. Print to paper or to a PDF from the
+  system's print dialog, at 100% size on the same paper.
 - **The player.** Listen to a playlist as it is, or "as on the stick", with
   the gain and bitrate the sync will use. The repeat button (or R) steps
   through play & stop (to the end of the playlist), repeat one song and
@@ -232,8 +245,9 @@ crates/fatstick-helper    tiny privileged helper (Windows UAC, Linux pkexec fall
 app/src-tauri             the app: commands, background preparation, sync, sticks, the player (cpal)
 app/ui                    the window: plain HTML/CSS/JS. js/api.js talks to the app (or to demo data in a
                           browser); js/names.js and js/rules.js hold the naming and copy-or-encode rules;
-                          js/library.js is the library view, the search panel and the tag editor, and
-                          js/search.js the search itself
+                          js/library.js is the library view, the search panel and the tag editor,
+                          js/search.js the search itself, js/stickview.js a stick's view, and
+                          js/setlist.js the printed setlist
 packaging/ffmpeg          builds the bundled LGPL ffmpeg and ffprobe, with LAME, from source
 packaging/licenses        LGPL texts and third-party notices, installed with the app
 packaging/linux           polkit policy for the pkexec fallback

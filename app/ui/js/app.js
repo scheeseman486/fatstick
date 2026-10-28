@@ -163,6 +163,7 @@
   /** The track a file's tags come from: none for a joined playlist or silence. */
   const fileTrack = (it) => (it.own ? "" : it.t.id);
   const gapOf = (s, id) => (s.gaps || []).find((g) => g.id === id);
+  const setlist = P.setlistSetup({ S, pl, track, R, keyText, saveSetting, api, DEMO });
   const stickView = P.stickViewSetup({ S, pl, stickSet, layoutData, edit, openPlaylist, setView, newId, isGap, gapOf, renderSide, undo });
   /** A stick's list, as playlists: silences become stand-ins with no tracks. */
   function stickLists(s) {
@@ -689,6 +690,7 @@
     menu(at, [
       { label: "Rename", action: () => startRename("playlist", p.id) },
       { label: "Duplicate", action: () => newPlaylist(`${p.name} copy`, p.entries.map((e) => e.trackId)) },
+      { label: "Print a setlist…", action: () => setlist.open(p.id), disabled: !p.entries.length },
       ...(others.length ? ["-", { heading: "Put on a stick" }, ...others.map((s) => ({ label: s.name, action: () => edit(`Put ${p.name} on ${s.name}`, () => { s.playlistIds.push(p.id); }) }))] : []),
       "-",
       {
@@ -3225,6 +3227,14 @@
 
   // ---- keyboard --------------------------------------------------------------------------------------
   function onKey(e) {
+    // Ctrl+P is the setlist, wherever the focus is (never a print of the window itself).
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "p") {
+      e.preventDefault();
+      const b = document.getElementById("sl-print");
+      if (modalOpen()) { if (b) b.click(); return; }
+      setlist.open(S.current);
+      return;
+    }
     if (modalOpen() || !$("menu").hidden) return;
     if (drag && e.key === "Escape") { e.preventDefault(); endDrag(false); return; }
     if (tdrag && e.key === "Escape") { e.preventDefault(); endTrackDrag(false); return; }
@@ -3312,6 +3322,7 @@
       { label: "Add a folder…", action: () => addFiles(true) },
       { label: "Import a playlist file…", action: importPlaylist },
       { label: "Export this playlist…", action: exportPlaylist, disabled: !pl() },
+      { label: "Print a setlist…", key: "Ctrl+P", action: () => setlist.open(S.current), disabled: !pl() || !pl().entries.length },
       "-",
       { label: "Search your music", key: "Ctrl+F", action: () => lib.openSearch() },
       { label: S.view === "library" ? "Back to the playlist" : "Music library", action: () => setView(S.view === "library" ? "playlist" : "library") },
@@ -3412,6 +3423,7 @@
     try { Object.assign(S.cols, JSON.parse(st.columns || "{}")); } catch { /* keep the defaults */ }
     if (st.volume) S.player.volume = Number(st.volume) || 0.8;
     if (REPEAT[st.repeat]) S.player.repeat = st.repeat;
+    try { setlist.load(JSON.parse(st.setlist || "null")); } catch { /* the defaults */ }
     for (const t of d.tracks) putTrack({ ...t });
     S.playlists = clone(d.playlists);
     S.profiles = clone(d.profiles);
@@ -3442,7 +3454,7 @@
     persist();
     scheduleWork();
     // For the app's self-test (tests/app_e2e.py) and for poking around in the inspector.
-    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, edgesDialog, seekTo, refreshSticks, holder, selectSet, openStick, layoutData, setView, lib, toggleTags, ready: true };
+    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, edgesDialog, seekTo, refreshSticks, holder, selectSet, openStick, layoutData, setView, setlist, lib, toggleTags, ready: true };
     if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Fatstick to get it back.");
     if (!DEMO) {
       stickPoll = setInterval(() => { if (!(S.sync && S.sync.running)) refreshSticks(true); }, 3000);

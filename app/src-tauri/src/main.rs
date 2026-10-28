@@ -492,6 +492,13 @@ async fn library_rename(st: State<'_, AppState>, jobs: Vec<folder::RenameJob>) -
 
 // ---- stick layout windows -------------------------------------------------------------------
 
+/// Printing (a setlist): through the webview, as window.print() does nothing
+/// in macOS's web view. The window calls window.print() on other systems.
+#[tauri::command]
+fn print_window(window: tauri::WebviewWindow) -> Res<()> {
+    window.print().map_err(err)
+}
+
 // ---- about ---------------------------------------------------------------------------------
 
 #[derive(Serialize)]
@@ -619,6 +626,7 @@ fn main() {
             player_key,
             player_shape,
             track_peaks,
+            print_window,
             player_resume,
             player_seek,
             player_stop,

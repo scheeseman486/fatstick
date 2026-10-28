@@ -644,6 +644,53 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.evaluate(() => Fatstick.app.stopPlayback());
   }
 
+  // 30. Nothing in the sidebar scrolls sideways, however long the names.
+  {
+    await p.evaluate(() => { const A = Fatstick.app; A.pl('p-sleep').name = 'A playlist with a name far too long for any sidebar to show in full'; A.stickSet('set-gym').name = 'A stick whose name is also much too long'; A.setView('playlist'); });
+    await p.locator('[data-pl="p-road"]').click();
+    const side = await p.evaluate(() => { const e = document.querySelector('.side'); return [e.scrollWidth, e.clientWidth, getComputedStyle(e).overflowX]; });
+    check('the sidebar never scrolls sideways', side[0] <= side[1] && side[2] === 'hidden', JSON.stringify(side));
+  }
+
+  // 31. A setlist to print: Ctrl+P, settings beside a preview of the pages, black and white.
+  {
+    await p.locator('[data-pl="p-road"]').click();
+    await p.keyboard.press('Control+p');
+    await p.waitForSelector('.sl-thumb .sl-page', { timeout: 5000 });
+    check('Ctrl+P opens the setlist with a preview of its pages', /^Print a setlist of Road Trip/.test(await p.locator('#modal-title').textContent()) && (await p.locator('.sl-thumb').count()) >= 1);
+    const pages1 = await p.locator('.sl-thumb').count();
+    const firstTitle = await p.locator('.sl-thumb .sl-title').first().textContent();
+    const want = await p.evaluate(() => { const A = Fatstick.app; const e = A.pl().entries[0]; const t = A.track(e.trackId); return t.title; });
+    check('it lists the playlist in order, numbered', firstTitle === want && (await p.locator('.sl-thumb .sl-n').first().textContent()) === '1', firstTitle);
+    const colours = await p.evaluate(() => [...document.querySelectorAll('.sl-thumb .sl-page, .sl-thumb .sl-page *')].map((e) => { const c = getComputedStyle(e); return [c.color, c.backgroundColor, c.borderTopColor]; }).flat().filter((c) => !['rgb(0, 0, 0)', 'rgb(255, 255, 255)', 'rgba(0, 0, 0, 0)'].includes(c)));
+    check('the pages are black on white, nothing else', colours.length === 0, [...new Set(colours)].join(' '));
+    await p.locator('.sl-seg label', { hasText: 'Landscape' }).click();
+    await p.locator('.sl-seg label', { hasText: /^3$/ }).click();
+    await p.waitForTimeout(150);
+    check('three columns, landscape: fewer pages', (await p.locator('.sl-thumb').count()) <= pages1 && (await p.locator('.sl-thumb').first().locator('.sl-col').count()) === 3);
+    await p.locator('.sl-controls input[aria-label="Heading"]').fill('Saturday set');
+    await p.locator('.sl-controls input[aria-label="Under the heading"]').fill('The Fox, 9pm');
+    const titleRange = p.locator('.sl-controls input[aria-label="Title size, points"]');
+    await titleRange.fill('40');
+    await p.waitForTimeout(150);
+    check('the heading, the line under it and the size follow the settings', (await p.locator('.sl-thumb .sl-h1').first().textContent()) === 'Saturday set' && /The Fox, 9pm/.test(await p.locator('.sl-thumb .sl-h2').first().textContent())
+      && Math.abs(parseFloat(await p.locator('.sl-thumb .sl-title').first().evaluate((e) => getComputedStyle(e).fontSize)) - 40 * 96 / 72) < 1);
+    await p.getByRole('checkbox', { name: 'Numbers', exact: true }).uncheck();
+    await p.waitForTimeout(150);
+    check('numbers can be left off', (await p.locator('.sl-thumb .sl-n').count()) === 0);
+    await p.screenshot({ path: `${out}/setlist.png` });
+    // What prints: only those pages, each the paper's size.
+    const n = await p.evaluate(() => Fatstick.app.setlist.preparePrint(Fatstick.app.setlist.data(Fatstick.app.S.current)));
+    await p.emulateMedia({ media: 'print' });
+    const pdf = await p.pdf({ preferCSSPageSize: true });
+    await p.emulateMedia({ media: 'screen' });
+    const pdfPages = (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
+    check('printing gives just the setlist, a page per page', pdfPages === n && n >= 1, `${pdfPages} printed, ${n} prepared`);
+    await p.getByRole('button', { name: 'Back to the defaults' }).click();
+    check('back to the defaults: one portrait column again', (await p.locator('.sl-seg input:checked + span').allTextContents()).join(',') === 'Portrait,1,Normal');
+    await p.getByRole('button', { name: 'Close' }).click();
+  }
+
   check('no console errors', errs.length === 0, errs.join(' / '));
   await b.close();
   server.close();

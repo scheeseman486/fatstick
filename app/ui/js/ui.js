@@ -181,10 +181,10 @@
   /** `tall` keeps the dialog one size whatever it shows (tabs). `player`
    * leaves the player bar usable above the dimmed window, for dialogs that
    * preview what they change. */
-  function modal({ title, body, buttons, wide, tall, onClose, player }) {
+  function modal({ title, body, buttons, wide, tall, onClose, player, cls }) {
     const back = document.getElementById("modal-back");
     const m = document.getElementById("modal");
-    m.className = `modal${wide ? " wide" : ""}${tall ? " tall" : ""}`;
+    m.className = `modal${wide ? " wide" : ""}${tall ? " tall" : ""}${cls ? ` ${cls}` : ""}`;
     m.replaceChildren(
       h("h2", { id: "modal-title", text: title }),
       h("div", { class: "mbody" }, body),

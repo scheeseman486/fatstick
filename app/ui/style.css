@@ -128,7 +128,11 @@ input[type="range"] { accent-color: var(--accent); }
 .side {
   grid-area: side;
   background: var(--pane);
-  overflow: auto;
+  /* Never sideways: long names are cut short instead (macOS shows a
+     scrollbar for the slightest overflow when scrollbars are always on). */
+  overflow-x: hidden;
+  overflow-y: auto;
+  min-width: 0;
   padding: 12px 8px 0;
   display: flex;
   flex-direction: column;
@@ -137,10 +141,11 @@ input[type="range"] { accent-color: var(--accent); }
 }
 .side-h { display: flex; align-items: center; justify-content: space-between; padding: 0 6px 4px 8px; }
 .side-h h2 { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
-.side ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.side ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.side > section, .side li { min-width: 0; }
 .side-item {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px;
-  width: 100%; padding: 6px 8px; text-align: left;
+  width: 100%; min-width: 0; padding: 6px 8px; text-align: left;
   border: 0; border-radius: var(--r-s); background: transparent; color: var(--ink); cursor: pointer;
 }
 .side-item:hover { background: var(--hover); }
@@ -151,7 +156,7 @@ input[type="range"] { accent-color: var(--accent); }
 body.pl-dragging, body.pl-dragging * { cursor: grabbing !important; }
 .side-item .nm { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-item .mt { grid-column: 1 / -1; font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.side-item .flag { font-size: 11.5px; color: var(--warn); align-self: center; }
+.side-item .flag { font-size: 11.5px; color: var(--warn); align-self: center; max-width: 9em; text-align: right; }
 .side-item .flag.ok { color: var(--ink-3); }
 .side-item .flag.plug { color: var(--accent); font-weight: 500; }
 .side-item .flag.plug.out { color: var(--warn); }
@@ -185,7 +190,7 @@ body.pl-dragging, body.pl-dragging * { cursor: grabbing !important; }
 .srch-in::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 .srch-scope { margin: 0 2px; font-size: 12.5px; color: var(--ink-2); display: grid; gap: 6px; justify-items: start; }
 .srch-scope .btn { margin-left: -8px; }
-.srch-res { overflow: auto; min-height: 0; margin: 0 -8px; padding: 2px 8px 10px; outline: none; overscroll-behavior: contain; }
+.srch-res { overflow-x: hidden; overflow-y: auto; min-height: 0; margin: 0 -8px; padding: 2px 8px 10px; outline: none; overscroll-behavior: contain; }
 .sr {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center;
   padding: 5px 8px; border-radius: var(--r-row); cursor: default; user-select: none; -webkit-user-select: none;
@@ -657,9 +662,10 @@ html.framed .player { padding-inline: 2px; }
 .lib-prog.busy i { animation: libbusy 1.1s ease-in-out infinite alternate; }
 @keyframes libbusy { from { margin-left: 0; } to { margin-left: 70%; } }
 .lib-body { display: grid; grid-template-columns: 196px minmax(0, 1fr) 304px; min-height: 0; }
-.lib-facets { overflow: auto; padding: 12px 8px 18px; border-right: 1px solid var(--rule); display: grid; gap: 16px; align-content: start; overscroll-behavior: contain; }
+.lib-facets { overflow-x: hidden; overflow-y: auto; min-width: 0; padding: 12px 8px 18px; border-right: 1px solid var(--rule); display: grid; gap: 16px; align-content: start; overscroll-behavior: contain; }
 .fct-g h3 { margin: 0 0 4px 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
-.fct-g ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.fct-g ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
+.fct-g, .fct-g li { min-width: 0; }
 .fct {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; width: 100%;
   padding: 3px 6px; border: 0; border-radius: var(--r-row); background: transparent; color: var(--ink);
@@ -890,7 +896,6 @@ html.framed .player { padding-inline: 2px; }
 .sv-head { display: grid; gap: 3px; padding: 14px 20px 10px; border-bottom: 1px solid var(--rule); background: var(--sheet); }
 .sv-head .lay-title h1 { font-size: 22px; }
 .sv-scroll { overflow: auto; min-height: 0; padding: 12px 20px 24px; overscroll-behavior: contain; display: grid; align-content: start; gap: 10px; }
-.sv-scroll > * { max-width: 920px; width: 100%; }
 #sv-list { position: relative; }
 .lay-folders .sv-insert + .lay-folder, .lay-folders .lay-folder + .sv-insert { margin-top: -8px; }
 /* The handle, left of the folder's name; taking it off, at the right. */
@@ -939,3 +944,77 @@ body.pl-dragging .sv-ins-btn { visibility: hidden; }
 .sv-empty { position: relative; padding: 40px 16px; border: 2px dashed var(--rule); border-radius: var(--r-pane); text-align: center; color: var(--ink-2); }
 .sv-empty p { margin: 0; }
 .sv-head .lay-bar .btn .ic { width: 14px; height: 14px; }
+
+/* ---- printing a setlist ------------------------------------------------------------- */
+/* The dialog: settings on the left, the pages as they'll print on the right. */
+.modal.sl-modal { width: min(1120px, 100%); height: min(860px, calc(100% - 32px)); }
+.modal.sl-modal .mbody { overflow: hidden; grid-template-rows: minmax(0, 1fr); }
+.sl-dlg { display: grid; grid-template-columns: minmax(250px, 300px) minmax(0, 1fr); gap: 16px; min-height: 0; }
+.sl-controls { overflow-y: auto; overflow-x: hidden; display: grid; gap: 10px; align-content: start; padding-right: 4px; min-height: 0; }
+.sl-group { margin: 0; padding: 8px 10px 10px; border: 1px solid var(--rule); border-radius: var(--r-s); display: grid; gap: 8px; min-width: 0; }
+.sl-group legend { padding: 0 4px; font-size: 13px; font-weight: 600; }
+.sl-field { display: grid; grid-template-columns: 5.4em minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; }
+.sl-field .lbl { font-size: 13px; color: var(--ink-2); }
+.sl-field .input { min-width: 0; height: 30px; }
+.sl-field input[type="range"] { width: 100%; margin: 0; }
+.sl-out { min-width: 3.4em; text-align: right; font-size: 12.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.sl-seg { display: flex; border: 1px solid var(--input-border); border-radius: var(--r-s); overflow: hidden; min-width: 0; }
+.sl-seg label { flex: 1 1 0; position: relative; min-width: 0; }
+.sl-seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.sl-seg span { display: block; padding: 4px 6px; text-align: center; font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+.sl-seg label + label span { border-left: 1px solid var(--input-border); }
+.sl-seg input:checked + span { background: var(--sel); color: var(--sel-ink); font-weight: 600; }
+.sl-seg input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: -2px; }
+.sl-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; }
+.sl-check { font-size: 13px; align-items: center; }
+.sl-preview { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 6px; min-width: 0; min-height: 0; }
+.sl-info { margin: 0; font-size: 13px; color: var(--ink-2); }
+.sl-sheets {
+  overflow: auto; min-height: 0; padding: 12px; border-radius: var(--r-s); background: var(--pane);
+  display: flex; flex-wrap: wrap; justify-content: center; align-content: start; gap: 16px;
+}
+.sl-thumb { margin: 0; display: grid; gap: 4px; justify-items: center; }
+.sl-thumb figcaption { font-size: 12px; color: var(--ink-3); }
+.sl-paper { position: relative; overflow: hidden; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); }
+.sl-scale { transform-origin: 0 0; }
+.sl-hint { margin: 0; font-size: 12.5px; color: var(--ink-3); }
+@media (max-width: 760px) {
+  .modal.sl-modal .mbody { overflow: auto; grid-template-rows: auto; }
+  .sl-dlg { grid-template-columns: minmax(0, 1fr); }
+  .sl-sheets { max-height: 70vh; }
+}
+
+/* A page of the setlist, exactly the paper's size: black on white only. */
+.sl-measure { position: absolute; left: -10000px; top: 0; visibility: hidden; pointer-events: none; }
+.sl-page {
+  box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden;
+  background: #fff; color: #000; font-family: var(--sl-font); font-size: var(--sl-detail); line-height: 1.2;
+  -webkit-font-smoothing: antialiased;
+}
+.sl-head { flex: 0 0 auto; padding-bottom: 2.5mm; margin-bottom: 3mm; border-bottom: 1pt solid #000; }
+.sl-h1 { font-size: calc(var(--sl-title) * 1.25); font-weight: var(--sl-bold); line-height: 1.1; overflow-wrap: anywhere; }
+.sl-h2 { display: flex; justify-content: space-between; gap: 6mm; margin-top: 1mm; font-size: var(--sl-detail); font-weight: var(--sl-normal); }
+.sl-cols { flex: 1 1 auto; min-height: 0; display: grid; column-gap: 8mm; }
+.sl-col { min-height: 0; overflow: hidden; }
+.sl-song { display: grid; grid-template-columns: var(--sl-nw) minmax(0, 1fr); column-gap: 0.35em; padding-block: calc(var(--sl-gap) / 2); }
+.sl-page.nonum .sl-song { grid-template-columns: minmax(0, 1fr); }
+.sl-n { font-size: var(--sl-title); font-weight: var(--sl-bold); line-height: 1.15; text-align: right; font-variant-numeric: tabular-nums; }
+.sl-main { min-width: 0; }
+.sl-line { display: flex; align-items: baseline; gap: 0.6em; }
+.sl-title { flex: 1 1 auto; min-width: 0; font-size: var(--sl-title); font-weight: var(--sl-weight); line-height: 1.15; overflow-wrap: anywhere; }
+.sl-len { flex: 0 0 auto; font-size: var(--sl-detail); font-weight: var(--sl-normal); font-variant-numeric: tabular-nums; }
+.sl-sub { font-size: var(--sl-detail); font-weight: var(--sl-normal); overflow-wrap: anywhere; }
+.sl-page.caps .sl-title, .sl-page.caps .sl-h1 { text-transform: uppercase; }
+.sl-page.rules .sl-col .sl-song + .sl-song { border-top: 0.6pt solid #000; }
+.sl-foot { flex: 0 0 auto; display: flex; justify-content: space-between; gap: 6mm; padding-top: 2mm; font-size: calc(var(--sl-detail) * 0.85); line-height: 1; min-height: calc(var(--sl-detail) * 0.85 + 2mm); }
+.sl-page.nofoot .sl-foot span:last-child { visibility: hidden; }
+
+/* Printing: only the setlist's pages, one to a sheet, nothing else of the window. */
+#print-root { display: none; }
+@media print {
+  html.printing-setlist, html.printing-setlist body { height: auto !important; min-height: 0 !important; overflow: visible !important; background: #fff !important; }
+  html.printing-setlist body > *:not(#print-root) { display: none !important; }
+  html.printing-setlist #print-root { display: block; }
+  #print-root .sl-page { break-after: page; page-break-after: always; }
+  #print-root .sl-page:last-child { break-after: auto; page-break-after: auto; }
+}
