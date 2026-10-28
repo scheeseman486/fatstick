@@ -294,7 +294,7 @@
           return h("div", { class: "ted-head" },
             h("h3", { class: t.title ? null : "untagged", text: titleOf(t) }),
             h("p", { class: "ted-sub", text: [t.artist, t.album].filter(Boolean).join(", ") || "No artist or album" }),
-            h("p", { class: "ted-path", title: t.path, text: rel(t.path) }));
+            h("p", { class: "ted-path", text: rel(t.path) }));
         }
         const artists = new Set(ts.map((t) => t.artist).filter(Boolean));
         const dur = ts.reduce((a, t) => a + (t.duration || 0), 0);
@@ -605,7 +605,7 @@
         go.textContent = change.length ? `Rename ${plural(change.length, "file")}` : "Rename";
         const show = [...rows.filter((x) => !x.same), ...rows.filter((x) => x.same)].slice(0, 400);
         fill(table, show.map((x) => h("div", { class: `ren-row${x.same ? " same" : ""}${x.clash ? " clash" : ""}` },
-          h("span", { class: "old", title: x.t.path, text: x.old }),
+          h("span", { class: "old", text: x.old }),
           h("span", { class: "arrow", "aria-hidden": "true", text: x.same ? "" : "→" }),
           h("span", { class: "new", title: x.notes.join("; ") || null }, x.same ? "unchanged" : x.name, x.clash ? h("small", { text: " (a file with this name is already there)" }) : x.notes.length ? h("small", { text: ` (${x.notes.join("; ")})` }) : null))),
         rows.length > 400 ? h("p", { class: "st-note", text: `And ${rows.length - 400} more.` }) : null);
@@ -872,7 +872,7 @@
         const on = SE.sel.has(t.id);
         return h("div", {
           class: `sr${on ? " sel" : ""}${SE.focus === t.id ? " focus" : ""}${close ? " close" : ""}${S.player.trackId === t.id ? " playing" : ""}`, role: "option", id: `sr-${t.id}`,
-          "aria-selected": String(on), dataset: { tid: t.id }, title: t.path,
+          "aria-selected": String(on), dataset: { tid: t.id },
         },
         h("div", { class: "sr-txt" },
           h("span", { class: t.title ? "sr-t" : "sr-t untagged" }, eqFor(t), titleOf(t)),
@@ -1340,7 +1340,7 @@
         const on = L.sel.has(t.id);
         const r = h("div", {
           class: `lr${on ? " sel" : ""}${L.focus === t.id ? " focus" : ""}${t.exists ? "" : " missing"}${S.player.trackId === t.id ? " playing" : ""}`, role: "option", id: `lr-${t.id}`,
-          "aria-selected": String(on), dataset: { tid: t.id }, style: { top: `${i * RH}px` }, title: rel(t.path),
+          "aria-selected": String(on), dataset: { tid: t.id }, style: { top: `${i * RH}px` },
         });
         for (const c of L.cols) r.append(lcell(c, t));
         kids.push(r);

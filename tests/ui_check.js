@@ -794,8 +794,10 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     const shown = await first.locator('.tag.lbl:not(.more)').count();
     const plus = await first.locator('.tag.more').count();
     check('search results show the track\'s labels, "+N" for the rest', shown >= 1 && shown + (plus ? Number((await first.locator('.tag.more').textContent()).slice(1)) : 0) === has, `${shown} shown, ${plus} more of ${has}`);
+    check('tracks have no file path tooltips (only labels have a tip)', (await p.locator('.sr[title]').count()) === 0);
     await p.evaluate(() => Fatstick.app.lib.closeSearch());
     await p.locator('[data-pl="p-road"]').click();
+    check('nor in a playlist or the library', (await p.locator('.row[title]').count()) === 0 && await p.evaluate(() => { Fatstick.app.setView('library'); const n = document.querySelectorAll('.lr[title]').length; Fatstick.app.setView('playlist'); return n === 0; }));
   }
 
   check('no console errors', errs.length === 0, errs.join(' / '));

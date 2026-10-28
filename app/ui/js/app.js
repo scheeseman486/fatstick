@@ -1565,7 +1565,7 @@
       const open = S.expanded === e.id;
       const r = h("div", {
         class: `row${S.sel.has(e.id) ? " sel" : ""}${S.focus === e.id ? " focus" : ""}${t.exists ? "" : " missing"}${playing ? " playing" : ""}${open ? " open" : ""}`,
-        role: "option", id: `row-${e.id}`, dataset: { id: e.id }, "aria-selected": String(S.sel.has(e.id)), "aria-expanded": String(open), title: t.path,
+        role: "option", id: `row-${e.id}`, dataset: { id: e.id }, "aria-selected": String(S.sel.has(e.id)), "aria-expanded": String(open),
       });
       for (const c of cols) r.append(cell(c, it, i, padN, playing, cols, prf));
       if (open) r.append(lib.rowTags(t, selectedInOrder().map((x) => x.trackId)));
