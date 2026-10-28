@@ -10,6 +10,10 @@ runs a debug build of the app twice under Xvfb with P2U_SELFTEST:
    that file), then opens the stick's layout window.
 2. tests/app_selftest2.js restarts on the same library and checks that
    everything was kept.
+3. tests/app_selftest3.js chooses the music folder (phase 1's folders and
+   a few more files), scans and searches it, writes tags into two files and
+   renames them through the library view, and sees a file copied into the
+   folder show up by itself. ffprobe reads the tags back.
 
 Then it reads the image with tools that aren't ours: fsck.fat, mtools (the
 order a player sees), ffprobe (codec, bitrate, tags, cover) and ebur128
@@ -22,6 +26,7 @@ order a player sees), ffprobe (codec, bitrate, tags, cover) and ebur128
 Needs ffmpeg and ffprobe on the PATH (for fixtures and checks), xvfb-run,
 mtools and dosfstools.
 """
+import hashlib
 import json
 import os
 import re
@@ -29,6 +34,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP = os.path.join(ROOT, "app", "src-tauri", "target", "debug", "playlist2usb")
@@ -61,7 +68,26 @@ def make_fixtures(work):
     ff("-f", "lavfi", "-i", tone(660, -9, rate=22050), "-ac", "1", "-c:a", "libmp3lame", "-b:a", "64k", *meta("Fourth", 4), os.path.join(music, "d fourth.mp3"))
     ff("-f", "lavfi", "-i", tone(220, -6), "-ac", "2", "-c:a", "libmp3lame", "-b:a", "192k", *meta("Encore", 1, "Live Band"), os.path.join(music2, "01 encore.mp3"))
     ff("-f", "lavfi", "-i", tone(880, -20), "-ac", "2", "-c:a", "pcm_s16le", *meta("Outro", 2, "Live Band"), os.path.join(music2, "02 outro.wav"))
+    # The rest of the music folder, for the library (phase 3).
+    owls = os.path.join(work, "Music", "Night Owls", "Lanterns")
+    unsorted = os.path.join(work, "Music", "Unsorted")
+    os.makedirs(owls)
+    os.makedirs(unsorted)
+    lib_meta = lambda title, n, grouping: ["-metadata", f"title={title}", "-metadata", "artist=Night Owls", "-metadata", "album=Lanterns",
+                                           "-metadata", f"track={n}", "-metadata", "genre=Folk", "-metadata", f"grouping={grouping}"]
+    ff("-f", "lavfi", "-i", tone(392, -8, 5), "-ac", "2", "-c:a", "libmp3lame", "-b:a", "192k", "-id3v2_version", "3",
+       *lib_meta("Lanterns", 1, "chill; road trip"), os.path.join(owls, "lanterns.mp3"))
+    ff("-f", "lavfi", "-i", tone(294, -8, 5), "-ac", "2", "-c:a", "flac", *lib_meta("Harbour Song", 2, "chill"), os.path.join(owls, "harbour.flac"))
+    ff("-f", "lavfi", "-i", tone(523, -8, 5), "-ac", "2", "-c:a", "libvorbis", "-q:a", "4", os.path.join(unsorted, "track07.ogg"))
+    ff("-f", "lavfi", "-i", tone(349, -8, 4), "-ac", "2", "-c:a", "libmp3lame", "-b:a", "128k", "-metadata", "title=New Arrival",
+       "-metadata", "artist=Night Owls", os.path.join(work, "new-arrival.mp3"))
     return {
+        "root": os.path.join(work, "Music"),
+        "owls": owls,
+        "libraryCount": 9,
+        "arrival": os.path.join(work, "new-arrival.mp3"),
+        "arrivalTo": os.path.join(unsorted, "new arrival.mp3"),
+        "untouched": [os.path.join(music, f) for f in sorted(os.listdir(music))],
         "music": music,
         "music2": music2,
         "titles": ["First", "Second", "Third", "Fourth"],
@@ -82,6 +108,9 @@ def run_app(phase, script, cfg, env):
         elif l.startswith("INFO "):
             k, v = l[5:].split("=", 1)
             info[k] = v
+    if os.environ.get("P2U_E2E_LOG"):
+        with open(os.environ["P2U_E2E_LOG"] + f".{phase.replace(' ', '')}", "w") as f:
+            f.write(r.stdout + "\n--- stderr ---\n" + r.stderr)
     record(f"app {phase}: the app reported and exited", r.returncode == 0 and any(l.startswith("SELFTEST") for l in lines),
            f"exit {r.returncode}; {r.stderr.strip().splitlines()[-1] if r.stderr.strip() else ''}")
     return info
@@ -182,6 +211,41 @@ def main():
     record("the joined track takes the playlist's name and the shared artist", probes[5][4].get("album") == "Live" and probes[5][4].get("artist") == "Live Band", str(probes[5][4]))
 
     run_app("phase 2", "app_selftest2.js", cfg, env)
+
+    # Phase 3: the music library. Once the app has renamed its two files, a
+    # new file is copied into the folder; the app should notice by itself.
+    def sums(paths):
+        out = []
+        for p in paths:
+            with open(p, "rb") as f:
+                out.append(hashlib.sha256(f.read()).hexdigest())
+        return out
+    untouched = sums(cfg["untouched"])
+    stop = threading.Event()
+
+    def drop_in():
+        renamed = os.path.join(cfg["owls"], "01 - Lanterns.mp3")
+        while not stop.is_set():
+            if os.path.exists(renamed):
+                time.sleep(1)
+                shutil.copy(cfg["arrival"], cfg["arrivalTo"])
+                return
+            time.sleep(0.25)
+    threading.Thread(target=drop_in, daemon=True).start()
+    info3 = run_app("phase 3", "app_selftest3.js", cfg, env)
+    stop.set()
+    tagged = json.loads(info3.get("tagged", "[]"))
+    record("the renamed files are on disk, and the old names are gone",
+           sorted(os.listdir(cfg["owls"])) == ["01 - Lanterns.mp3", "02 - Harbour Song.flac"], str(sorted(os.listdir(cfg["owls"]))))
+    for path in tagged:
+        j = json.loads(subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_format", path], capture_output=True, text=True).stdout or "{}")
+        tags = {k.lower(): v for k, v in j.get("format", {}).get("tags", {}).items()}
+        grouping = tags.get("grouping") or tags.get("tit1") or tags.get("contentgroup") or ""
+        name = os.path.basename(path)
+        record(f"{name}: the new genre is in the file (ffprobe)", tags.get("genre") == "Night Folk", str(tags))
+        record(f"{name}: the labels are in its Grouping tag", grouping == "chill; kitchen", grouping)
+        record(f"{name}: the other tags are kept", tags.get("title") in ("Lanterns", "Harbour Song") and tags.get("artist") == "Night Owls" and tags.get("album") == "Lanterns")
+    record("files the library didn't edit are byte for byte the same", sums(cfg["untouched"]) == untouched)
 
     shutil.rmtree(work, ignore_errors=True)
     passed = sum(ok for _, ok in RESULTS)

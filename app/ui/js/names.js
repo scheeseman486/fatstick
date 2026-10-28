@@ -162,6 +162,37 @@
     return { names: out, errors, numbered: usesField(nodes, "n") };
   }
 
+  /**
+   * New names for files in the music folder (the library's file name clean-up):
+   * the same template language and clean-up rules, each file keeping its own
+   * extension and folder. {n} is the track number here.
+   * entries: [{ tags, filename, ext: ".flac", dir }]; returns [{ name, notes }].
+   */
+  function libraryNames(entries, opts) {
+    const { nodes, errors } = parse(opts.template || "");
+    const seen = new Set();
+    const names = entries.map((e) => {
+      const notes = [];
+      const ctx = { ...e.tags, filename: e.filename, n: e.tags.track || "", nPad: 2, playlist: "" };
+      let base = clean(evaluate(nodes, ctx, notes).text, { ...opts, ext: e.ext }, notes);
+      if (!base) {
+        base = e.filename;
+        notes.push("the template gave an empty name, kept the old one");
+      }
+      let name = base + e.ext;
+      const key = (n) => `${e.dir}\u0000${n.toLowerCase()}`;
+      if (seen.has(key(name))) {
+        let k = 2;
+        while (seen.has(key(`${base} (${k})${e.ext}`))) k++;
+        name = `${base} (${k})${e.ext}`;
+        notes.push("another file in its folder gets the same name, added a number");
+      }
+      seen.add(key(name));
+      return { name, notes: [...new Set(notes)] };
+    });
+    return { names, errors };
+  }
+
   /** Folder names for the playlists on one stick, in stick order. */
   function folderNames(playlists, opts) {
     const { nodes, errors } = parse(opts.template || "{playlist}");
@@ -184,5 +215,5 @@
     return asciiFold(s || "").text.toUpperCase().replace(/[^A-Z0-9 _\-!#$%&'()@^`{}~]/g, "").trim().slice(0, 11);
   }
 
-  P2U.names = { FIELDS, parse, fileNames, folderNames, volumeLabel, asciiFold };
+  P2U.names = { FIELDS, parse, fileNames, folderNames, libraryNames, volumeLabel, asciiFold };
 })(typeof window !== "undefined" ? (window.P2U = window.P2U || {}) : (globalThis.P2U = globalThis.P2U || {}));

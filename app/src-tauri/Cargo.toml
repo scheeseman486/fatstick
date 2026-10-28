@@ -18,6 +18,8 @@ p2u-device = { path = "../../crates/p2u-device" }
 p2u-audio = { path = "../../crates/p2u-audio" }
 p2u-library = { path = "../../crates/p2u-library" }
 cpal = "0.16"
+# Watching the music folder for changes.
+notify = "8"
 
 [dev-dependencies]
 tempfile = "3"

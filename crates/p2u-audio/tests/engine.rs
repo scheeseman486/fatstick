@@ -9,6 +9,7 @@ use std::process::Command;
 use p2u_audio::encode::EncodeSpec;
 use p2u_audio::prepare::{copy_allowed, prepare, Recipe};
 use p2u_audio::render::{self, RenderPart, RenderSpec, Source};
+use p2u_audio::tagwrite::{write_tags, TagEdit};
 use p2u_audio::tags::{id3v1, id3v2, TagSpec};
 use p2u_audio::{cover, loudness, mp3, probe, Cache, Tools};
 
@@ -215,4 +216,87 @@ fn render_cuts_pads_and_joins() {
     assert!(rms(&pcm(&g.path), 0.0, 2.5) < 1e-4);
     // A part whose track has no source is refused.
     assert!(render::prepare(&t, &cache, &one, &[None]).is_err());
+}
+
+#[test]
+fn tags_written_into_library_files() {
+    let Some(t) = tools() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let p = |n: &str| dir.path().join(n);
+    let d = |n: &str| p(n).display().to_string();
+    ff(&["-f", "lavfi", "-i", "testsrc2=size=300x300:duration=1", "-frames:v", "1", &d("cover.png")]);
+    let tone = "sine=frequency=440:duration=2";
+    ff(&["-f", "lavfi", "-i", tone, "-i", &d("cover.png"), "-map", "0:a", "-map", "1:v", "-c:a", "libmp3lame", "-b:a", "192k", "-c:v", "png",
+        "-disposition:v", "attached_pic", "-id3v2_version", "3", "-write_id3v1", "1", "-metadata", "title=Old Title", "-metadata", "artist=Old Artist",
+        "-metadata", "comment=keep me", &d("a.mp3")]);
+    ff(&["-f", "lavfi", "-i", tone, "-c:a", "flac", "-metadata", "TITLE=Old", &d("b.flac")]);
+    ff(&["-f", "lavfi", "-i", tone, "-c:a", "libopus", "-b:a", "96k", &d("c.opus")]);
+    ff(&["-f", "lavfi", "-i", tone, "-c:a", "aac", "-b:a", "128k", &d("d.m4a")]);
+    let edit = TagEdit {
+        title: Some("Röad Söng".into()),
+        artist: Some("Néw Artist".into()),
+        album: Some("The Album".into()),
+        albumartist: Some("Various".into()),
+        genre: Some("Krautrock".into()),
+        composer: Some("Someone".into()),
+        year: Some("1977".into()),
+        track: Some("4/12".into()),
+        disc: Some("2".into()),
+        labels: Some(vec!["chill".into(), "road trip".into()]),
+    };
+    for n in ["a.mp3", "b.flac", "c.opus", "d.m4a"] {
+        let before = probe(&t, &p(n)).unwrap();
+        write_tags(&p(n), &edit).unwrap();
+        let after = probe(&t, &p(n)).unwrap();
+        let tg = &after.tags;
+        assert_eq!((tg.title.as_str(), tg.artist.as_str(), tg.album.as_str(), tg.albumartist.as_str()), ("Röad Söng", "Néw Artist", "The Album", "Various"), "{n}: {tg:?}");
+        assert_eq!((tg.genre.as_str(), tg.composer.as_str(), tg.year, tg.track, tg.disc), ("Krautrock", "Someone", Some(1977), Some(4), Some(2)), "{n}: {tg:?}");
+        assert_eq!(tg.labels, ["chill", "road trip"], "{n}");
+        assert_eq!((after.codec.as_str(), after.cover), (before.codec.as_str(), before.cover), "{n}: same audio, same cover");
+        assert!((after.duration - before.duration).abs() < 0.05, "{n}");
+    }
+    // The MP3: ID3v2.3, the audio frames untouched, the ID3v1 tag updated, other fields kept.
+    let mp3 = std::fs::read(p("a.mp3")).unwrap();
+    assert!(mp3.starts_with(b"ID3\x03"), "ID3v2.3");
+    assert_eq!(&mp3[mp3.len() - 128..mp3.len() - 125], b"TAG");
+    assert!(mp3[mp3.len() - 125..mp3.len() - 95].starts_with(b"R"), "ID3v1 title updated");
+    let j = String::from_utf8(Command::new("ffprobe").args(["-v", "error", "-show_entries", "format_tags=comment", "-of", "json"]).arg(p("a.mp3")).output().unwrap().stdout).unwrap();
+    assert!(j.contains("keep me"), "other fields are kept: {j}");
+    // Clearing a field, and leaving the rest.
+    write_tags(&p("b.flac"), &TagEdit { genre: Some(String::new()), year: Some(String::new()), labels: Some(vec![]), ..Default::default() }).unwrap();
+    let b = probe(&t, &p("b.flac")).unwrap().tags;
+    assert_eq!((b.genre.as_str(), b.year, b.labels.len(), b.title.as_str()), ("", None, 0, "Röad Söng"));
+    // Nonsense numbers are refused before anything is written.
+    assert!(write_tags(&p("b.flac"), &TagEdit { track: Some("zero".into()), ..Default::default() }).is_err());
+
+    // An MP3 whose labels another app kept elsewhere: ffmpeg in TXXX:grouping,
+    // Apple in GRP1. They all get the new labels, so no player shows old ones.
+    ff(&["-f", "lavfi", "-i", tone, "-c:a", "libmp3lame", "-b:a", "128k", "-id3v2_version", "3", "-metadata", "grouping=chill; road trip", &d("e.mp3")]);
+    {
+        use lofty::config::{ParseOptions, WriteOptions};
+        use lofty::file::AudioFile;
+        use lofty::id3::v2::{Frame, FrameId, TextInformationFrame};
+        use lofty::tag::TagExt;
+        let mut f = std::fs::File::open(p("e.mp3")).unwrap();
+        let mut tag = lofty::mpeg::MpegFile::read_from(&mut f, ParseOptions::new()).unwrap().id3v2().cloned().unwrap();
+        drop(f);
+        tag.insert(Frame::Text(TextInformationFrame::new(FrameId::Valid("GRP1".into()), lofty::TextEncoding::UTF16, "chill; road trip".to_string())));
+        tag.save_to_path(p("e.mp3"), WriteOptions::default()).unwrap();
+    }
+    assert_eq!(probe(&t, &p("e.mp3")).unwrap().tags.labels, ["chill", "road trip"]);
+    write_tags(&p("e.mp3"), &TagEdit { labels: Some(vec!["chill".into(), "kitchen".into()]), ..Default::default() }).unwrap();
+    assert_eq!(probe(&t, &p("e.mp3")).unwrap().tags.labels, ["chill", "kitchen"]);
+    let frames = || {
+        use lofty::config::ParseOptions;
+        use lofty::file::AudioFile;
+        let mut f = std::fs::File::open(p("e.mp3")).unwrap();
+        let tag = lofty::mpeg::MpegFile::read_from(&mut f, ParseOptions::new()).unwrap().id3v2().cloned().unwrap();
+        let text = |id: &str| tag.get_text(&lofty::id3::v2::FrameId::Valid(id.to_string().into())).map(str::to_string);
+        (text("TIT1"), text("GRP1"), tag.get_user_text("grouping").map(str::to_string))
+    };
+    let want = Some("chill; kitchen".to_string());
+    assert_eq!(frames(), (want.clone(), want.clone(), want));
+    write_tags(&p("e.mp3"), &TagEdit { labels: Some(vec![]), ..Default::default() }).unwrap();
+    assert_eq!(frames(), (None, None, None), "no labels: every Grouping frame goes");
+    assert!(probe(&t, &p("e.mp3")).unwrap().tags.labels.is_empty());
 }

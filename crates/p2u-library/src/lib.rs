@@ -11,6 +11,7 @@
 //!   saved whole and atomically on every edit.
 //! * Sync records: what was written to which stick, and when.
 
+pub mod folder;
 pub mod scan;
 
 use std::path::{Path, PathBuf};
@@ -90,6 +91,9 @@ pub struct Track {
     pub track: Option<u32>,
     pub disc: Option<u32>,
     pub genre: String,
+    pub composer: String,
+    /// The user's own labels (the file's Grouping field).
+    pub labels: Vec<String>,
     pub codec: String,
     pub bitrate: u32,
     pub peak_bitrate: u32,
@@ -107,6 +111,16 @@ pub struct Track {
     pub content_key: String,
     /// Why the file couldn't be read, if it couldn't.
     pub error: Option<String>,
+}
+
+/// A track's file as last read.
+#[derive(Debug, Clone)]
+pub struct Stamp {
+    pub id: String,
+    pub path: PathBuf,
+    pub size: u64,
+    pub mtime: i64,
+    pub content_key: String,
 }
 
 pub fn track_id(rowid: i64) -> String {
@@ -192,6 +206,8 @@ impl Library {
             track: p.tags.track,
             disc: p.tags.disc,
             genre: p.tags.genre,
+            composer: p.tags.composer,
+            labels: p.tags.labels,
             codec: p.codec,
             bitrate: p.bitrate,
             peak_bitrate: p.peak_bitrate,
@@ -271,6 +287,28 @@ impl Library {
         )?;
         let id: i64 = self.conn.query_row("SELECT id FROM tracks WHERE path = ?1", [path.to_string_lossy()], |r| r.get(0))?;
         Ok(track_id(id))
+    }
+
+    /// What the library knows of the tracks inside a folder (canonical path).
+    pub fn stamps_under(&self, root: &Path) -> Result<Vec<Stamp>> {
+        let mut st = self.conn.prepare("SELECT id, path, size, mtime, content_key FROM tracks")?;
+        let rows = st.query_map([], |r| {
+            Ok(Stamp {
+                id: track_id(r.get(0)?),
+                path: PathBuf::from(r.get::<_, String>(1)?),
+                size: r.get::<_, i64>(2)? as u64,
+                mtime: r.get(3)?,
+                content_key: r.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().filter(|s| folder::inside(root, &s.path)).collect())
+    }
+
+    /// The size and modified time a track was last read at (after a move).
+    pub fn set_stamp(&self, id: &str, size: u64, mtime: i64) -> Result<()> {
+        let n = rowid(id).ok_or_else(|| LibraryError::Other(format!("no track {id}")))?;
+        self.conn.execute("UPDATE tracks SET size = ?1, mtime = ?2 WHERE id = ?3", params![size as i64, mtime, n])?;
+        Ok(())
     }
 
     /// Point a track at a new path (Locate). If another track already has that

@@ -342,3 +342,68 @@ fn player_plays_seeks_and_ends() {
     }
     assert!(start.elapsed().as_secs_f64() < 1.2);
 }
+
+#[test]
+fn music_folder_scans_writes_tags_and_renames() {
+    if Command::new("ffmpeg").arg("-version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("Music");
+    std::fs::create_dir_all(root.join("Band")).unwrap();
+    std::fs::create_dir_all(dir.path().join("Elsewhere")).unwrap();
+    let d = |p: PathBuf| p.display().to_string();
+    ff(&["-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:a", "libmp3lame", "-metadata", "title=Song", &d(root.join("Band").join("song.mp3"))]);
+    ff(&["-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:a", "flac", &d(dir.path().join("Elsewhere").join("outside.flac"))]);
+    let lib = std::sync::Arc::new(Mutex::new(Library::open_in_memory().unwrap()));
+    let tools = Tools::locate().unwrap();
+    let events = std::sync::Arc::new(Mutex::new(Vec::<String>::new()));
+    let ev = events.clone();
+    let music = crate::folder::MusicFolder::start(lib.clone(), Some(tools.clone()), move |name, _| ev.lock().unwrap().push(name.to_string()));
+    assert!(music.info().root.is_none());
+    music.set_root(&root).unwrap();
+    let t0 = std::time::Instant::now();
+    while (music.info().scanning || music.info().last.is_none()) && t0.elapsed().as_secs() < 30 {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let info = music.info();
+    assert_eq!(info.last.as_ref().map(|s| s.files), Some(1), "{info:?}");
+    assert!(events.lock().unwrap().iter().any(|e| e == "library-scanned"));
+    let id = info.last.unwrap().changed[0].clone();
+    // The scan reads the folder, which the watcher must not take for a change.
+    let scans = || events.lock().unwrap().iter().filter(|e| *e == "library-scanned").count();
+    assert!(info.watching);
+    std::thread::sleep(std::time::Duration::from_millis(3500));
+    assert_eq!(scans(), 1, "the scan set off another scan");
+    // A file copied in is noticed by itself, two seconds after it stops changing.
+    std::fs::copy(root.join("Band").join("song.mp3"), root.join("Band").join("copy.mp3")).unwrap();
+    let t1 = std::time::Instant::now();
+    while scans() < 2 && t1.elapsed().as_secs() < 15 {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    while music.info().scanning && t1.elapsed().as_secs() < 30 {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert_eq!(music.info().last.map(|s| (s.files, s.added)), Some((2, 1)), "the watcher saw the new file");
+    std::fs::remove_file(root.join("Band").join("copy.mp3")).unwrap();
+    let outside = scan::read_file(&lib, &tools, &dir.path().join("Elsewhere").join("outside.flac")).unwrap();
+
+    // Tags: written into the file inside the folder, refused outside it.
+    let edit = p2u_audio::tagwrite::TagEdit { artist: Some("The Band".into()), labels: Some(vec!["chill".into()]), ..Default::default() };
+    let r = crate::folder::write(&music, &[crate::folder::TagJob { track_id: id.clone(), edit: edit.clone() }, crate::folder::TagJob { track_id: outside.clone(), edit }]);
+    assert_eq!(r.tracks.len(), 1);
+    assert_eq!((r.tracks[0].artist.as_str(), r.tracks[0].labels.clone()), ("The Band", vec!["chill".to_string()]));
+    assert!(r.failed.len() == 1 && r.failed[0].error.contains("isn't in your music folder"), "{:?}", r.failed);
+    assert!(probe(&tools, &dir.path().join("Elsewhere").join("outside.flac")).unwrap().tags.artist.is_empty(), "untouched");
+
+    // Renames: within the folder, keeping the id; clashes and new types refused.
+    let r = crate::folder::rename(&music, &[crate::folder::RenameJob { track_id: id.clone(), name: "01 - The Band - Song.mp3".into() }]);
+    assert!(r.failed.is_empty(), "{:?}", r.failed);
+    assert_eq!(r.tracks[0].id, id);
+    assert!(root.join("Band").join("01 - The Band - Song.mp3").is_file() && !root.join("Band").join("song.mp3").exists());
+    let bad = crate::folder::rename(&music, &[crate::folder::RenameJob { track_id: id.clone(), name: "x.flac".into() }, crate::folder::RenameJob { track_id: outside, name: "y.flac".into() }]);
+    assert_eq!(bad.failed.len(), 2, "{:?}", bad.failed);
+    // A change of case only.
+    let r = crate::folder::rename(&music, &[crate::folder::RenameJob { track_id: id.clone(), name: "01 - the band - song.mp3".into() }]);
+    assert!(r.failed.is_empty() && r.tracks[0].path.ends_with("01 - the band - song.mp3"), "{:?}", r);
+}

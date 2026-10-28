@@ -288,6 +288,133 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   check('stick is up to date afterwards', /Up to date/.test(await p.locator('.st-status').textContent()));
   await p.screenshot({ path: `${out}/synced.png` });
 
+  {
+    // 19. A playlist row shows its tags when clicked, and hides them again.
+    await p.locator('[data-pl="p-road"]').click();
+    await row(0).click();
+    check('clicking a track shows its tags under it', (await p.locator('#list .row.open .row-tags .tag.lbl').count()) >= 1 && /Genre/.test(await p.locator('#list .row.open .row-tags').textContent()));
+    check('the row grows to fit them', (await p.locator('#list .row.open').boundingBox()).height > 50);
+    await row(0).click();
+    check('clicking again hides them', (await p.locator('#list .row.open').count()) === 0);
+    await row(1).click({ modifiers: ['Shift'] });
+    check('shift-click selects without opening', (await p.locator('#list .row.open').count()) === 0);
+    await p.screenshot({ path: `${out}/row-tags.png` });
+
+    // 20. The search panel: exact matches, a divider, close ones; drag into the list.
+    await p.locator('#srch-btn').click();
+    await p.waitForTimeout(350);
+    check('the search button widens the sidebar into the search panel', await p.locator('#app').evaluate((a) => a.classList.contains('searching')) && (await p.locator('#side').boundingBox()).width > 280);
+    await p.keyboard.type('dream');
+    await p.waitForTimeout(250);
+    const srTitles = async (sel) => p.locator(sel).allTextContents();
+    const exact = await srTitles('.srch-res .sr:not(.close) .sr-t');
+    const close = await srTitles('.srch-res .sr.close .sr-t');
+    check('whole-word matches come first', exact.includes('Red Eyes') && exact.includes("Runnin' Down a Dream"), exact.join(' | '));
+    check('then a divider and the close matches', (await p.locator('.srch-res .sr-div').count()) === 1 && close.includes('Dreams'), close.join(' | '));
+    await p.fill('#srch-in', 'chill');
+    await p.waitForTimeout(250);
+    check('labels are searched, and shown as the reason', (await p.locator('.srch-res .sr').count()) === 9 && (await p.locator('.srch-res .sr .sr-hints .tag.lbl', { hasText: 'chill' }).count()) === 9);
+    await p.screenshot({ path: `${out}/search.png` });
+    await p.fill('#srch-in', 'go your own way');
+    await p.waitForTimeout(250);
+    const before19 = (await titles()).length;
+    const [rx, ry] = await center(row(2));
+    await dragTo(p.locator('.srch-res .sr').first(), rx, ry - 6);
+    check('dragging a result shows where it goes', !(await p.locator('#drop-line').isHidden()));
+    await p.mouse.up();
+    await p.waitForTimeout(150);
+    const after19 = await titles();
+    check('a search result dragged into the list lands there', after19.length === before19 + 1 && after19[2] === 'Go Your Own Way', after19.slice(0, 4).join(' | '));
+    await p.locator('.srch-res .sr').first().dblclick();
+    await p.waitForTimeout(150);
+    check('double-clicking a result adds it at the end', (await titles()).length === before19 + 2 && (await titles()).pop() === 'Go Your Own Way');
+    await p.locator('#srch-in').focus();
+    await p.keyboard.press('Escape');
+    await p.keyboard.press('Escape');
+    check('Esc clears, then closes the search', !(await p.locator('#app').evaluate((a) => a.classList.contains('searching'))));
+    await p.keyboard.press('Control+f');
+    check('Ctrl+F opens it again', await p.locator('#srch-in').evaluate((x) => document.activeElement === x));
+    await p.locator('#srch-btn').click();
+
+    // 21. The library view: browse by tag, select, drag onto a playlist.
+    await p.locator('#lib-btn').click();
+    check('the Library button switches the middle of the window', await p.locator('#app').evaluate((a) => a.classList.contains('lib-mode')) && await p.locator('#main').isHidden() && await p.locator('#libview').isVisible());
+    check('the library lists the music folder', /64 tracks/.test(await p.locator('.lib-status').textContent()), await p.locator('.lib-status').textContent());
+    await p.locator('.fct', { hasText: 'kids' }).first().click();
+    check('a label narrows the table', (await p.locator('.lr').count()) === 10 && (await p.locator('.lib-chips .tag', { hasText: 'kids' }).count()) === 1);
+    await p.locator('.fct', { hasText: 'Pop' }).first().click();
+    check('tags add up', (await p.locator('.lr').count()) === 8);
+    await p.locator('.lib-chips .tag', { hasText: 'Pop' }).locator('.x').click();
+    await p.locator('.lr').nth(0).click();
+    await p.locator('.lr').nth(1).click({ modifiers: ['Shift'] });
+    const gymWas = parseInt(await p.locator('[data-pl="p-gym"] .mt').textContent(), 10);
+    const gym = p.locator('[data-pl="p-gym"]');
+    const [gx, gy] = await center(gym);
+    await dragTo(p.locator('.lr').nth(0), gx, gy);
+    check('dragging library tracks offers the playlist', /Add 2 tracks to Gym/.test(await p.locator('#drag-badge').textContent()));
+    await p.mouse.up();
+    await p.waitForTimeout(150);
+    check('the playlist gets them', parseInt(await p.locator('[data-pl="p-gym"] .mt').textContent(), 10) === gymWas + 2, `${gymWas} -> ${await p.locator('[data-pl="p-gym"] .mt').textContent()}`);
+
+    // 22. Tags written into the files, after a preview, with undo.
+    const tagsOf = (ids) => p.evaluate((ids) => ids.map((id) => { const t = P2U.app.S.tracks.get(id); return `${t.genre}|${t.labels.join(',')}`; }), ids);
+    const selIds = await p.evaluate(() => P2U.app.lib.state.L.ids.filter((x) => P2U.app.lib.state.L.sel.has(x)));
+    const tagsBefore = await tagsOf(selIds);
+    await p.locator('.lib-edit input[id^="ted-genre"]').fill('Kids');
+    await p.locator('.lib-edit input[id^="ted-lbl"]').fill('car');
+    await p.keyboard.press('Enter');
+    check('the editor shows the new label on all of them', (await p.locator('.lib-edit .tag.lbl.added', { hasText: 'car' }).count()) === 1);
+    await p.locator('.lib-edit .ted-foot .btn.primary').click();
+    const preview = await p.locator('#modal').textContent();
+    check('saving shows what changes first', /Write these tags into 2 files/.test(preview) && /Genre/.test(preview) && /adds/.test(preview), preview.slice(0, 120));
+    await p.screenshot({ path: `${out}/tag-preview.png` });
+    await p.locator('#modal .mfoot .btn.primary').click();
+    const toastSays = (re) => p.waitForFunction((src) => new RegExp(src).test(document.getElementById('toast').textContent), re.source, { timeout: 5000 }).catch(() => {});
+    await toastSays(/Wrote tags/);
+    check('then writes them', /Wrote tags into 2 files/.test(await p.locator('#toast').textContent()) && (await tagsOf(selIds)).every((x) => /^Kids\|.*car/.test(x)), (await tagsOf(selIds)).join(' / '));
+    check('the table shows the new label', (await p.locator('.lr.sel .c-labels').evaluateAll((cs) => cs.filter((c) => c.title.split(', ').includes('car')).length)) === 2);
+    await p.locator('#toast .btn').click();
+    await toastSays(/Put the old tags back/);
+    check('undo writes the old tags back', JSON.stringify(await tagsOf(selIds)) === JSON.stringify(tagsBefore), (await tagsOf(selIds)).join(' / '));
+
+    // 23. Unsaved edits aren't lost by clicking elsewhere.
+    await p.locator('.lib-edit input[id^="ted-year"]').fill('1999');
+    await p.locator('.lr').nth(4).click();
+    check('changing the selection asks first', /Discard your tag changes/.test(await p.locator('#modal-title').textContent()));
+    await p.getByRole('button', { name: 'Keep editing' }).click();
+    check('keeping them keeps the selection and the edit', (await p.locator('.lr.sel').count()) === 2 && (await p.locator('.lib-edit input[id^="ted-year"]').inputValue()) === '1999');
+    await p.locator('.lib-edit .ted-foot .btn', { hasText: 'Revert' }).click();
+
+    // 24. File names cleaned up from the tags, with undo.
+    const pathsOf = (ids) => p.evaluate((ids) => ids.map((id) => P2U.app.S.tracks.get(id).path), ids);
+    const pathsBefore = await pathsOf(selIds);
+    await p.locator('.lib-head .btn', { hasText: 'Clean up file names' }).click();
+    await p.locator('#modal select').selectOption({ label: '01 - Artist - Title' });
+    const ren = await p.locator('#modal .ren-row:not(.same) .new').allTextContents();
+    check('the preview shows the new names', ren.length === 2 && ren.every((n) => /^\d\d - .+ - .+\.mp3$/.test(n)), ren.join(' | '));
+    await p.screenshot({ path: `${out}/rename.png` });
+    await p.locator('#modal .mfoot .btn.primary').click();
+    await toastSays(/Renamed 2 files/);
+    const pathsAfter = await pathsOf(selIds);
+    check('renaming keeps each file in its folder', pathsAfter.every((x, i) => x !== pathsBefore[i] && x.slice(0, x.lastIndexOf('/')) === pathsBefore[i].slice(0, pathsBefore[i].lastIndexOf('/'))), pathsAfter.join(' | '));
+    await p.locator('#toast .btn').click();
+    await toastSays(/Put back the old names/);
+    check('undo puts the old names back', JSON.stringify(await pathsOf(selIds)) === JSON.stringify(pathsBefore));
+    await p.screenshot({ path: `${out}/library.png` });
+
+    // 25. Back to the playlist: click one on the left.
+    await p.locator('[data-pl="p-road"]').click();
+    check('a playlist on the left leaves the library', !(await p.locator('#app').evaluate((a) => a.classList.contains('lib-mode'))) && await p.locator('#main').isVisible());
+
+    // 26. Edit tags from a playlist row.
+    const first = (await titles())[0];
+    await row(0).click({ button: 'right' });
+    await p.getByRole('menuitem', { name: 'Edit tags…' }).click();
+    check('"Edit tags…" opens the editor in a dialog', /Edit tags/.test(await p.locator('#modal-title').textContent()) && (await p.locator('#modal input[id^="ted-title"]').inputValue()) === first, first);
+    await p.keyboard.press('Escape');
+
+  }
+
   check('no console errors', errs.length === 0, errs.join(' / '));
   await b.close();
   server.close();

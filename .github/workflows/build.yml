@@ -63,6 +63,7 @@ jobs:
       - name: The window's own tests (name rules; the UI in headless Chromium)
         run: |
           node tests/ui_names.js
+          node tests/ui_search.js
           npm install --no-save playwright
           npx playwright install --with-deps chromium
           node tests/ui_check.js

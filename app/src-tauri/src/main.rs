@@ -3,6 +3,7 @@
 // measures, converts and caches audio, plays previews, and writes sticks.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod folder;
 #[cfg(target_os = "linux")]
 mod graphics;
 mod player;
@@ -32,6 +33,7 @@ struct AppState {
     cancel: Arc<AtomicBool>,
     syncing: AtomicBool,
     data_dir: PathBuf,
+    music: Arc<folder::MusicFolder>,
 }
 
 type Res<T> = Result<T, String>;
@@ -64,6 +66,8 @@ struct InitView {
     version: String,
     /// This library's id, which every stick it writes carries.
     library_id: String,
+    /// The music folder and its last scan.
+    music: folder::FolderInfo,
     /// Files passed on the command line ("Open with").
     open_paths: Vec<String>,
 }
@@ -90,6 +94,7 @@ fn init(st: State<AppState>) -> Res<InitView> {
         data_dir: st.data_dir.display().to_string(),
         version: env!("CARGO_PKG_VERSION").into(),
         library_id: lib.library_id().map_err(err)?,
+        music: st.music.info(),
         open_paths: std::env::args().skip(1).filter(|a| !a.starts_with('-') && Path::new(a).exists()).collect(),
     })
 }
@@ -364,6 +369,37 @@ fn player_volume(st: State<AppState>, volume: f32) {
     st.player.send(player::Cmd::Volume(volume));
 }
 
+// ---- the music folder ----------------------------------------------------------------------
+
+#[tauri::command]
+fn library_info(st: State<AppState>) -> folder::FolderInfo {
+    st.music.info()
+}
+
+#[tauri::command]
+fn library_set_root(st: State<AppState>, path: String) -> Res<folder::FolderInfo> {
+    st.music.set_root(Path::new(&path))
+}
+
+#[tauri::command]
+fn library_scan(st: State<AppState>) {
+    st.music.scan();
+}
+
+/// Tag edits written into files in the music folder (each one read again after).
+#[tauri::command]
+async fn library_write_tags(st: State<'_, AppState>, jobs: Vec<folder::TagJob>) -> Res<folder::FileOps> {
+    let music = st.music.clone();
+    tauri::async_runtime::spawn_blocking(move || folder::write(&music, &jobs)).await.map_err(err)
+}
+
+/// Files in the music folder renamed within their folders.
+#[tauri::command]
+async fn library_rename(st: State<'_, AppState>, jobs: Vec<folder::RenameJob>) -> Res<folder::FileOps> {
+    let music = st.music.clone();
+    tauri::async_runtime::spawn_blocking(move || folder::rename(&music, &jobs)).await.map_err(err)
+}
+
 // ---- stick layout windows -------------------------------------------------------------------
 
 /// A stick's layout in a window of its own, or the one already open brought
@@ -472,6 +508,10 @@ fn main() {
             let player = player::Player::start(tools.clone(), move |ev| {
                 let _ = h.emit("player", ev);
             });
+            let h = app.handle().clone();
+            let music = folder::MusicFolder::start(lib.clone(), tools.clone(), move |name, v| {
+                let _ = h.emit(name, v);
+            });
             app.manage(AppState {
                 lib: lib.clone(),
                 tools: tools.clone(),
@@ -482,12 +522,18 @@ fn main() {
                 cancel: Arc::new(AtomicBool::new(false)),
                 syncing: AtomicBool::new(false),
                 data_dir: data_dir.clone(),
+                music,
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             init,
             open_layout,
+            library_info,
+            library_set_root,
+            library_scan,
+            library_write_tags,
+            library_rename,
             save_docs,
             set_setting,
             add_paths,

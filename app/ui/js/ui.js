@@ -15,6 +15,7 @@
     caret: '<svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>',
     volume: '<svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15 8.5a5 5 0 0 1 0 7l-1.2-1.2a3.3 3.3 0 0 0 0-4.6zM17.6 6a8.5 8.5 0 0 1 0 12l-1.2-1.2a6.8 6.8 0 0 0 0-9.6z"/></svg>',
     check: '<svg viewBox="0 0 24 24"><path d="M9.5 16.2L5.3 12l-1.4 1.4 5.6 5.6L20.1 8.4 18.7 7z"/></svg>',
+    search: '<svg viewBox="0 0 24 24"><path fill-rule="evenodd" d="M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13zM10.5 6a4.5 4.5 0 1 1 0 9a4.5 4.5 0 1 1 0-9z"/><path d="M14.2 15.6l1.4-1.4 4.8 4.8-1.4 1.4z"/></svg>',
   };
 
   function icon(name) {

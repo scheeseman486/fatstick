@@ -18,6 +18,8 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # Lossless MP3 gain (global_gain steps), as mp3gain does it. The library only:
 # its CLI features pull in a decoder we don't need.
 mp3rgain = { version = "=3.14.0", default-features = false }
+# Writing tags into library files (ID3v2, Vorbis comments, MP4, APE, RIFF INFO).
+lofty = "0.25"
 
 [dev-dependencies]
 tempfile = "3"

@@ -10,6 +10,8 @@
 //!   or padded at its ends, silence between playlists, a playlist joined
 //!   into one track;
 //! * [`tags`] and [`cover`]: what goes in front of (and after) the audio;
+//! * [`tagwrite`]: tag edits written into library files (the only writes to
+//!   a source file, made from the library view);
 //! * [`decode`]: PCM for the player.
 //!
 //! Source files are only ever opened for reading.
@@ -24,6 +26,7 @@ pub mod prepare;
 pub mod probe;
 pub mod render;
 pub mod tags;
+pub mod tagwrite;
 pub mod tools;
 
 pub use cache::Cache;

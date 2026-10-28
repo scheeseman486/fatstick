@@ -22,6 +22,11 @@ pub struct Tags {
     pub track: Option<u32>,
     pub disc: Option<u32>,
     pub genre: String,
+    #[serde(default)]
+    pub composer: String,
+    /// The user's own labels, from the Grouping field (see `tagwrite`).
+    #[serde(default)]
+    pub labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -83,6 +88,13 @@ fn read_tags(maps: &[&Value]) -> Tags {
                 "album" => &mut t.album,
                 "albumartist" => &mut t.albumartist,
                 "genre" => &mut t.genre,
+                "composer" => &mut t.composer,
+                "grouping" | "contentgroup" | "tit1" => {
+                    if t.labels.is_empty() {
+                        t.labels = crate::tagwrite::split_labels(&val);
+                    }
+                    continue;
+                }
                 "track" | "tracknumber" => {
                     t.track = t.track.or(leading_u32(&val));
                     continue;

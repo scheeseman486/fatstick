@@ -105,6 +105,52 @@
     track("t77", "Stars of the Lid", "Requiem for Dying Mothers, Part 2", "The Tired Sounds of Stars of the Lid", 2001, 4, "flac 16/44.1", "6:08", -22.7, -5.5),
   ];
 
+  // In the music folder but in no playlist yet: something to find in the library.
+  tracks.push(
+    track("t90", "Fleetwood Mac", "Go Your Own Way", "Rumours", 1977, 5, "flac 16/44.1", "3:38", -12.1, -0.4),
+    track("t91", "Fleetwood Mac", "The Chain", "Rumours", 1977, 7, "flac 16/44.1", "4:30", -13.0, -0.6),
+    track("t92", "Fleetwood Mac", "Everywhere", "Tango in the Night", 1987, 4, "mp3 320", "3:48", -10.9, -0.2),
+    track("t93", "The Cure", "Lovesong", "Disintegration", 1989, 8, "mp3 320", "3:29", -11.8, -0.4),
+    track("t94", "Khruangbin", "Time (You and I)", "Mordechai", 2020, 9, "flac 16/44.1", "6:24", -12.2, -0.5),
+    track("t95", "Daft Punk", "Get Lucky (feat. Pharrell Williams)", "Random Access Memories", 2013, 8, "flac 24/96", "6:09", -9.6, 0.1),
+    track("t96", "ABBA", "Mamma Mia", "ABBA", 1975, 1, "mp3 256", "3:32", -11.0, -0.3),
+    track("t97", "Brian Eno", "Deep Blue Day", "Apollo: Atmospheres and Soundtracks", 1983, 9, "flac 16/44.1", "3:59", -21.3, -5.2),
+    track("t98", "Massive Attack", "Angel", "Mezzanine", 1998, 1, "mp3 320", "6:18", -11.6, -0.4),
+    track("t99", "Stereolab", "Cybele's Reverie", "Emperor Tomato Ketchup", 1996, 2, "vorbis 192", "4:37", -11.2, -0.3),
+    track("t9a", "", "", "", null, null, "mp3 256", "4:12", -12.4, -0.6, { filename: "track07", path: "~/Music/Unsorted/track07.mp3", albumartist: "", cover: false }),
+    track("t9b", "Max Richter", "Vladimir's Blues", "The Blue Notebooks", 2004, 6, "flac 16/44.1", "1:18", -22.6, -6.1),
+  );
+
+  // Genres by artist, and the labels someone gave their music.
+  const GENRES = {
+    "Fleetwood Mac": "Rock", "Tom Petty": "Rock", "The War on Drugs": "Indie Rock", Kraftwerk: "Electronic", "Sigur Rós": "Post-Rock",
+    "LCD Soundsystem": "Dance", "Massive Attack": "Trip Hop", "Bruce Springsteen": "Rock", Khruangbin: "Psychedelic", "Daft Punk": "Electronic",
+    "Talking Heads": "New Wave", "Röyksopp": "Electronic", "Steely Dan": "Jazz Rock", "Boards of Canada": "Electronic", "The Cure": "New Wave",
+    Stereolab: "Indie Pop", "Pink Floyd": "Progressive Rock", Phoenix: "Indie Pop", M83: "Synth-Pop", "Arcade Fire": "Indie Rock",
+    "The Beatles": "Pop", ABBA: "Pop", "Electric Light Orchestra": "Rock", Queen: "Rock", "Katrina and the Waves": "Pop", "The Monkees": "Pop",
+    "Pharrell Williams": "Pop", "Bob Marley & The Wailers": "Reggae", "Bill Withers": "Soul", "Earth, Wind & Fire": "Funk", "Bruno Mars": "Pop",
+    Eminem: "Hip Hop", "Macklemore & Ryan Lewis": "Hip Hop", "Kanye West": "Hip Hop", "Fort Minor": "Hip Hop", Muse: "Rock",
+    "The White Stripes": "Rock", "Beastie Boys": "Hip Hop", Survivor: "Rock", "David Guetta": "Dance", "Run the Jewels": "Hip Hop",
+    "Rage Against the Machine": "Rock", "Brian Eno": "Ambient", "Max Richter": "Modern Classical", "Ólafur Arnalds": "Modern Classical",
+    "Hiroshi Yoshimura": "Ambient", "Nils Frahm": "Modern Classical", "Aphex Twin": "Ambient", "Harold Budd & Brian Eno": "Ambient",
+    "Stars of the Lid": "Ambient",
+  };
+  const LABELS = {
+    "driving": ["t01", "t02", "t03", "t04", "t06", "t09", "t12", "t19", "t20", "t21", "t90", "t92"],
+    "singalong": ["t01", "t09", "t16", "t30", "t31", "t32", "t33", "t34", "t35", "t40", "t90", "t96"],
+    "kids": ["t30", "t31", "t32", "t34", "t35", "t36", "t37", "t40", "t41", "t96"],
+    "chill": ["t05", "t07", "t10", "t13", "t17", "t38", "t94", "t98", "t99"],
+    "workout": ["t50", "t51", "t52", "t53", "t54", "t55", "t56", "t57", "t58", "t59", "t60", "t61", "t95"],
+    "sleep": ["t70", "t71", "t72", "t73", "t74", "t75", "t76", "t77", "t97", "t9b"],
+    "favourite": ["t01", "t06", "t11", "t16", "t32", "t53", "t71", "t91"],
+    "70s": ["t01", "t04", "t09", "t14", "t18", "t31", "t32", "t33", "t37", "t38", "t39", "t90", "t91", "t96"],
+  };
+  for (const t of tracks) {
+    t.genre = t.genre || GENRES[t.artist] || "";
+    t.composer = t.composer || "";
+    t.labels = Object.keys(LABELS).filter((l) => LABELS[l].includes(t.id));
+  }
+
   let n = 0;
   const entries = (ids) => ids.map((id) => ({ id: `e${++n}`, trackId: id }));
   const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => `t${String(a + i).padStart(2, "0")}`);
@@ -179,5 +225,11 @@
     },
   ];
 
-  P2U.demo = { tracks, playlists, profiles, stickSets, sticks, libraryId: "lib-demo", nextEntry: () => `e${++n}` };
+  /** The demo's music folder, chosen and scanned three hours ago. */
+  const music = {
+    root: "~/Music", scanning: false, watching: true, lastScan: Date.now() - 3 * 3600000, error: null,
+    last: { files: tracks.filter((t) => t.path.startsWith("~/Music/") && t.exists).length, changed: [], added: 0, moved: 0, missing: 1, failed: 0 },
+  };
+
+  P2U.demo = { tracks, playlists, profiles, stickSets, sticks, music, libraryId: "lib-demo", nextEntry: () => `e${++n}` };
 })(window.P2U = window.P2U || {});

@@ -16,8 +16,34 @@ GPL version 3 or later.
 - **Playlists.** Make them in the app, or import M3U/M3U8, XSPF (VLC) and PLS
   files; export as M3U8 or XSPF. Drop files and folders from the file manager. A
   folder is added in album order (disc, track number, then name). Moved or
-  renamed files can be found again ("Locate"), and nothing ever changes or
-  deletes your music files.
+  renamed files can be found again ("Locate"). Your music files only change
+  when you ask in the library (tags and file names, after a preview), and
+  nothing ever deletes them.
+- **Your music library.** "Library" (top right) turns the middle of the
+  window into your music folder: choose the folder once and the app reads
+  every song in it, then keeps up as files are added, moved or retagged (it
+  watches the folder, and "Scan now" is there too). You sort the files into
+  folders yourself; the library is for finding and tagging them. Browse by
+  your labels, genres, artists, albums and decades, or by what's missing (no
+  genre, no labels, file not found); filter by typing; sort by any column;
+  and drag tracks onto a playlist on the left.
+- **Tags, and labels of your own.** Select tracks in the library to see and
+  change their tags (several at once: "Various" fields stay as they are
+  unless you type over them). Labels are your own free-form tags ("road
+  trip", "kids", "sleep"), kept in each file's Grouping field where other
+  players see them too, and shown as coloured boxes, one colour per label.
+  "Save to files…" shows every change before it writes, and Undo puts the
+  old tags back. "Clean up file names…" renames files from their tags with
+  the same template language as names on a stick; files stay in their
+  folders and keep their type. Nothing outside the music folder is touched.
+- **Search.** The search button at the bottom left (or Ctrl+F) widens the
+  sidebar into a search panel. Type a title, an artist, an album, a genre,
+  a label, a year or part of a file name: whole-word matches come first,
+  then a divider and close ones (a word's start, part of a word, a letter or
+  two off). Drag songs into the playlist, or double-click to add one.
+- **Tags in the playlist.** Click a track (or press T) to see its tags under
+  it; click again to hide them. "Edit tags…" opens the tag editor there.
+
 - **Sticks.** A stick holds one or more playlists, one folder each and in the
   order you choose, or a single playlist at the top level. It also has a player
   profile, which sets the bitrate cap, sample rates, tag version, cover art and
@@ -60,6 +86,10 @@ GPL version 3 or later.
   you edit, into a cache (10 GB by default), so a sync is mostly the write.
 - **The player.** Listen to a playlist as it is, or "as on the stick", with
   the gain and bitrate the sync will use.
+
+![The music library: browsing by label, four tracks selected in the tag editor](docs/library.png)
+
+![The search panel, with a track's tags shown in the playlist](docs/search.png)
 
 ## How a stick is written
 
@@ -142,12 +172,15 @@ crates/p2u-core      playlists, naming plan, FAT32 layout + writer + read-back c
 crates/p2u-device    USB stick discovery and OS-brokered raw disk access (linux/macos/windows)
 crates/p2u-audio     the ffmpeg engine: probing, MP3 frame scan, loudness, LAME encodes, lossless gain,
                      covers, ID3 tags, the prepared-file cache, PCM for the player
-crates/p2u-library   the SQLite library and reading files, folders and playlist files into it
+crates/p2u-library   the SQLite library, reading files, folders and playlist files into it, and the
+                     music folder's scan (new, changed, moved and missing files)
 crates/p2u-cli       `p2u` command-line tool
 crates/p2u-helper    tiny privileged helper (Windows UAC, Linux pkexec fallback)
 app/src-tauri        the app: commands, background preparation, sync, sticks, the player (cpal)
 app/ui               the window: plain HTML/CSS/JS. js/api.js talks to the app (or to demo data in a
-                     browser); js/names.js and js/rules.js hold the naming and copy-or-encode rules
+                     browser); js/names.js and js/rules.js hold the naming and copy-or-encode rules;
+                     js/library.js is the library view, the search panel and the tag editor, and
+                     js/search.js the search itself
 packaging/ffmpeg     builds the bundled LGPL ffmpeg and ffprobe, with LAME, from source
 packaging/licenses   LGPL texts and third-party notices, installed with the app
 packaging/linux      polkit policy for the pkexec fallback
@@ -220,13 +253,14 @@ cargo build --workspace && python3 tests/stick_e2e.py   # 84 checks on disk imag
 cargo test --manifest-path app/src-tauri/Cargo.toml     # the app's backend: a full sync to a disk image, the player
 cargo build --manifest-path app/src-tauri/Cargo.toml && python3 tests/app_e2e.py
 node tests/ui_names.js                                  # the file name rules
+node tests/ui_search.js                                 # search: exact and close matches, and its speed
 node tests/ui_check.js                                  # the window on demo data (needs playwright)
 # Real Linux driver (needs qemu-system-x86, busybox-static and an extracted Ubuntu kernel):
 cargo build --release -p p2u-cli --target x86_64-unknown-linux-musl
 python3 tests/kernel_stick.py --kroot <kernel dir> --p2u target/x86_64-unknown-linux-musl/release/p2u
 ```
 
-`tests/app_e2e.py` runs the real app under Xvfb, twice. The first run starts
+`tests/app_e2e.py` runs the real app under Xvfb, three times. The first run starts
 from an empty library: it adds two folders of real audio (FLAC, Opus, WAV,
 MP3s at 320 kbps and at 22.05 kHz mono), turns on even volume, cuts and pads
 a track, joins the second playlist into one track and puts silence between
@@ -234,11 +268,15 @@ the two, picks a disk image standing in for a stick, syncs through the button
 and its confirmation, opens the stick's layout window and plays a track. The second run checks that all of it
 was kept, that an edit makes the stick out of date, that the stick is
 recognized from its note, and that syncing another stick's playlists onto it
-asks first. Then the image is
+asks first. The third chooses a music folder, scans and searches it, writes
+tags into two files and renames them from the library view, and checks that
+a file copied into the folder shows up by itself (and that the scan's own
+reading of the folder doesn't set off another scan). Then the image is
 read with tools that aren't ours: fsck.fat, mtools (the order a player sees),
 ffprobe (codec, sample rate, tags, cover, lengths), and ffmpeg's EBU R128
 meter and volumedetect (−18 LUFS where the volume was evened out; silence
-where it was added).
+where it was added). ffprobe also reads back the tags the library wrote,
+including labels in an MP3 that another app had kept in TXXX:GROUPING.
 
 ## Status
 

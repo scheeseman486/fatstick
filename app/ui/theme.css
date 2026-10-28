@@ -60,6 +60,18 @@
   --r-pane: 0px;
   --gap: 1px;
   --row-h: 32px;
+  /* Tags: each label gets one of eight colours from its name; a file tag
+     has its name on a colour of its own. */
+  --lab0: #d9e6f4; --lab0-ink: #1f4a76;
+  --lab1: #d6ecdc; --lab1-ink: #1f5c34;
+  --lab2: #f5e2c4; --lab2-ink: #74470a;
+  --lab3: #f3d9e2; --lab3-ink: #842a4b;
+  --lab4: #e3dcf3; --lab4-ink: #4a3782;
+  --lab5: #d2eaea; --lab5-ink: #1a5959;
+  --lab6: #f4dccd; --lab6-ink: #833a12;
+  --lab7: #e4e8cb; --lab7-ink: #4f5711;
+  --fk-artist: #2e5b8a; --fk-albumartist: #4d6e90; --fk-album: #5b4a95; --fk-year: #85590a;
+  --fk-genre: #2c6a3a; --fk-composer: #1f6262; --fk-track: #5a646e; --fk-ink: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -73,6 +85,11 @@
   --btn-bg: #252c33; --btn-border: #3b444d; --btn-ink: #e1e6ea; --btn-hover: #2d353d; --input-bg: #14181c; --input-border: #3b444d;
   --map-a: #86b0da; --map-b: #5d84ab; --map-c: #44617f; --map-free: #29313a; --map-hatch: rgba(0, 0, 0, 0.35);
   --scrim: rgba(0, 0, 0, 0.6); --shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+  --lab0: #1f3550; --lab0-ink: #a9cbee; --lab1: #1c3a26; --lab1-ink: #9fd8ae; --lab2: #3d2f17; --lab2-ink: #edc486;
+  --lab3: #45222f; --lab3-ink: #f0adc4; --lab4: #2f2849; --lab4-ink: #c8b9ef; --lab5: #173839; --lab5-ink: #98d7d7;
+  --lab6: #45291a; --lab6-ink: #f0b591; --lab7: #33361a; --lab7-ink: #d0d68e;
+  --fk-artist: #86b0da; --fk-albumartist: #9fb7cf; --fk-album: #b7a8e8; --fk-year: #e7ae58;
+  --fk-genre: #8fcf9a; --fk-composer: #86cccc; --fk-track: #9ca7b1; --fk-ink: #10161c;
   color-scheme: dark;
   }
 }
@@ -86,5 +103,10 @@
   --btn-bg: #252c33; --btn-border: #3b444d; --btn-ink: #e1e6ea; --btn-hover: #2d353d; --input-bg: #14181c; --input-border: #3b444d;
   --map-a: #86b0da; --map-b: #5d84ab; --map-c: #44617f; --map-free: #29313a; --map-hatch: rgba(0, 0, 0, 0.35);
   --scrim: rgba(0, 0, 0, 0.6); --shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
+  --lab0: #1f3550; --lab0-ink: #a9cbee; --lab1: #1c3a26; --lab1-ink: #9fd8ae; --lab2: #3d2f17; --lab2-ink: #edc486;
+  --lab3: #45222f; --lab3-ink: #f0adc4; --lab4: #2f2849; --lab4-ink: #c8b9ef; --lab5: #173839; --lab5-ink: #98d7d7;
+  --lab6: #45291a; --lab6-ink: #f0b591; --lab7: #33361a; --lab7-ink: #d0d68e;
+  --fk-artist: #86b0da; --fk-albumartist: #9fb7cf; --fk-album: #b7a8e8; --fk-year: #e7ae58;
+  --fk-genre: #8fcf9a; --fk-composer: #86cccc; --fk-track: #9ca7b1; --fk-ink: #10161c;
   color-scheme: dark;
 }

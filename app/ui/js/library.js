@@ -1,0 +1,1408 @@
+// The music library: your music folder, searched, browsed by tag and tagged.
+//
+// * The library view (the Library button, top right) takes the middle of the
+//   window: the folder and its scan, tags to browse by (your labels, genres,
+//   artists, albums, decades, and what's missing), the tracks as a table to
+//   filter, sort and select, and a tag editor for the selection. Tags are
+//   written into the files after a preview, and file names can be cleaned up
+//   from the tags the same way. Drag tracks onto a playlist on the left.
+// * The search panel (the search button, bottom left) widens the sidebar:
+//   type a title, an artist, a label or anything else; exact matches come
+//   first, then a divider, then close ones. Drag songs into the playlist.
+// * A playlist row shows its tags when clicked: tagChips() draws them.
+//
+// Nothing here writes a file outside the music folder, and the app's Rust
+// side checks that again before it touches one.
+"use strict";
+(function (P2U) {
+  const { h, fill, icon, clock, length, plural, ago, menu, modal, closeModal, toast } = P2U.ui;
+  const SR = P2U.search;
+  const N = P2U.names;
+
+  /** Library table row height, px (the table only draws the rows in view). */
+  const RH = 30;
+  const FIELD_LABEL = {
+    title: "Title", artist: "Artist", albumartist: "Album artist", album: "Album", track: "Track", disc: "Disc",
+    year: "Year", genre: "Genre", composer: "Composer",
+  };
+  /** The tag editor's fields, in order. */
+  const EDIT_FIELDS = ["title", "artist", "album", "albumartist", "genre", "year", "track", "disc", "composer"];
+  const NUMERIC = { year: 9999, track: 999, disc: 99 };
+  const NAME_PRESETS = [
+    { label: "01 - Title", tpl: "[{track} - ]{title|filename}" },
+    { label: "01 - Artist - Title", tpl: "[{track} - ][{artist} - ]{title|filename}" },
+    { label: "Artist - Title", tpl: "[{artist} - ]{title|filename}" },
+    { label: "Title", tpl: "{title|filename}" },
+  ];
+  const MISSING = [
+    { key: "title", label: "No title", test: (t) => !t.title },
+    { key: "artist", label: "No artist", test: (t) => !t.artist },
+    { key: "album", label: "No album", test: (t) => !t.album },
+    { key: "genre", label: "No genre", test: (t) => !t.genre },
+    { key: "year", label: "No year", test: (t) => !t.year },
+    { key: "labels", label: "No labels", test: (t) => !(t.labels && t.labels.length) },
+    { key: "file", label: "File not found", test: (t) => !t.exists },
+  ];
+  const GROUPS = [
+    { field: "labels", title: "Labels", show: 14 },
+    { field: "genre", title: "Genres", show: 8 },
+    { field: "artist", title: "Artists", show: 8 },
+    { field: "album", title: "Albums", show: 6 },
+    { field: "decade", title: "Decades", show: 10, byValue: true },
+    { field: "missing", title: "Missing tags", show: 10, fixed: true },
+  ];
+  /** Fields where every chosen tag must match (a track has many); the others match any. */
+  const EVERY = new Set(["labels", "missing"]);
+  const FILTER_NAME = { labels: "Label", genre: "Genre", artist: "Artist", album: "Album", decade: "Decade", missing: "" };
+
+  const LCOLS = {
+    title: { label: "Title", w: "minmax(8em, 2fr)" },
+    artist: { label: "Artist", w: "minmax(6em, 1.3fr)" },
+    album: { label: "Album", w: "minmax(6em, 1.2fr)" },
+    track: { label: "#", w: "2.3em", right: true },
+    year: { label: "Year", w: "3.2em", right: true },
+    genre: { label: "Genre", w: "minmax(5em, 0.9fr)" },
+    labels: { label: "Labels", w: "minmax(6em, 1.3fr)" },
+    time: { label: "Time", w: "3.4em", right: true },
+  };
+  const LCOL_ORDER = ["title", "artist", "album", "track", "year", "genre", "labels", "time"];
+
+  const lkey = (l) => String(l).trim().toLowerCase();
+  const titleOf = (t) => t.title || t.filename || "";
+  /** A field as text, the way the editor shows it ("" for none). */
+  const val = (t, f) => (f in NUMERIC ? (t[f] ? String(t[f]) : "") : String(t[f] || ""));
+  const decadeOf = (y) => `${Math.floor(y / 10) * 10}s`;
+  /** Each label keeps its colour wherever it shows: one of eight, from its name. */
+  function labelHue(l) {
+    let x = 7;
+    for (const c of lkey(l)) x = (Math.imul(x, 31) + c.codePointAt(0)) >>> 0;
+    return x % 8;
+  }
+  const sameSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
+  function splitPath(p) {
+    const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+    const file = p.slice(i + 1);
+    const dot = file.lastIndexOf(".");
+    return { dir: p.slice(0, i), sep: p[i] || "/", file, ext: dot > 0 ? file.slice(dot) : "" };
+  }
+  let uid = 0;
+
+  /** The colour-coded boxes: a label is one coloured box; a tag has its name in colour. */
+  function labelChip(l, small) {
+    return h("span", { class: `tag lbl lab-${labelHue(l)}${small ? " sm" : ""}`, text: l });
+  }
+  function fieldChip(f, v) {
+    return h("span", { class: `tag fld f-${f}` }, h("span", { class: "k", text: FIELD_LABEL[f] }), h("span", { class: "v", text: v }));
+  }
+  function tagChips(t) {
+    const out = (t.labels || []).map((l) => labelChip(l));
+    if (t.genre) out.push(fieldChip("genre", t.genre));
+    if (t.year) out.push(fieldChip("year", String(t.year)));
+    if (t.artist) out.push(fieldChip("artist", t.artist));
+    if (t.albumartist && t.albumartist !== t.artist) out.push(fieldChip("albumartist", t.albumartist));
+    if (t.album) out.push(fieldChip("album", t.album));
+    if (t.track) out.push(fieldChip("track", t.disc ? `${t.track}, disc ${t.disc}` : String(t.track)));
+    else if (t.disc) out.push(fieldChip("disc", String(t.disc)));
+    if (t.composer) out.push(fieldChip("composer", t.composer));
+    return out;
+  }
+
+  P2U.librarySetup = function (core) {
+    const { S, api, track } = core;
+    const $ = (id) => document.getElementById(id);
+
+    // ---- what's in the library ----------------------------------------------------------
+    const root = () => (S.music && S.music.root) || "";
+    function inMusic(t) {
+      const r = root().replace(/[\\/]+$/, "");
+      if (!r || !t.path || t.path.length <= r.length + 1 || !t.path.startsWith(r)) return false;
+      const c = t.path[r.length];
+      return c === "/" || c === "\\";
+    }
+    /** Why a track's file can't be changed here, or "" if it can. */
+    function whyNot(t, renaming) {
+      if (!root()) return "the music folder isn't chosen yet";
+      if (!inMusic(t)) return "it isn't in your music folder";
+      if (!t.exists) return "its file isn't there any more";
+      if (!renaming && (String(t.codec).toLowerCase() === "wma" || /\.(wma|asf)$/i.test(t.path))) return "WMA files can't take new tags";
+      return "";
+    }
+    function whyText(ts, renaming) {
+      const by = new Map();
+      for (const t of ts) {
+        const w = whyNot(t, renaming);
+        if (w) by.set(w, (by.get(w) || 0) + 1);
+      }
+      return [...by].map(([w, n]) => `${plural(n, "track")}: ${w}`).join("; ");
+    }
+    const rel = (p) => {
+      const r = root().replace(/[\\/]+$/, "");
+      return r && p.startsWith(r) ? p.slice(r.length + 1) : p;
+    };
+
+    let LC = { v: -1, root: null, list: [], index: null };
+    function libList() {
+      if (LC.v !== S.tracksVersion || LC.root !== root()) LC = { v: S.tracksVersion, root: root(), list: [...S.tracks.values()].filter(inMusic), index: null };
+      return LC;
+    }
+    function libIndex() {
+      const c = libList();
+      if (!c.index) c.index = SR.build(c.list);
+      return c.index;
+    }
+    let AC = { v: -1, index: null, n: 0 };
+    /** Search covers every track the app can play: the folder's and the playlists'. */
+    function allIndex() {
+      if (AC.v !== S.tracksVersion) {
+        const ts = [...S.tracks.values()].filter((t) => t.exists && t.codec);
+        AC = { v: S.tracksVersion, index: SR.build(ts), n: ts.length };
+      }
+      return AC.index;
+    }
+    function knownValues(field, max = 400) {
+      const m = new Map();
+      for (const t of S.tracks.values()) {
+        const vs = field === "labels" ? t.labels || [] : t[field] ? [t[field]] : [];
+        for (const v of vs) {
+          const k = lkey(v);
+          const e = m.get(k) || { v, n: 0 };
+          e.n++;
+          m.set(k, e);
+        }
+      }
+      return [...m.values()].sort((a, b) => b.n - a.n).slice(0, max).map((e) => e.v);
+    }
+    function datalist(field) {
+      const id = `dl-${field}-${++uid}`;
+      return { id, el: h("datalist", { id }, knownValues(field).map((v) => h("option", { value: v }))) };
+    }
+
+    // ---- writing tags -----------------------------------------------------------------------
+    async function writeTags(jobs, back, undoing) {
+      let r;
+      try {
+        r = await api.libraryWriteTags(jobs);
+      } catch (e) {
+        toast(`Couldn't write the tags: ${e}`);
+        return null;
+      }
+      core.putTracks(r.tracks);
+      const okIds = new Set(r.tracks.map((t) => t.id));
+      const undoJobs = back ? back.filter((j) => okIds.has(j.trackId)) : [];
+      const undoIt = undoJobs.length ? () => writeTags(undoJobs, null, true) : null;
+      if (r.failed.length) {
+        modal({
+          title: r.tracks.length ? `${plural(r.failed.length, "file")} kept ${r.failed.length === 1 ? "its" : "their"} old tags` : "The tags weren't written",
+          body: [
+            r.tracks.length ? h("p", { text: `${undoing ? "Put the old tags back into" : "Wrote tags into"} ${plural(r.tracks.length, "file")}. These ones couldn't be changed:` }) : null,
+            h("ul", { class: "fail-list" }, r.failed.map((f) => h("li", null, h("b", { text: rel(track(f.trackId).path) }), h("span", { text: f.error })))),
+          ],
+          buttons: [
+            undoIt && !undoing ? h("button", { type: "button", class: "btn left", text: "Undo the others", onclick: () => { closeModal(); undoIt(); } }) : null,
+            h("button", { type: "button", class: "btn primary", text: "Close", onclick: closeModal }),
+          ],
+        });
+      } else if (undoing) toast(`Put the old tags back into ${plural(r.tracks.length, "file")}.`);
+      else toast(`Wrote tags into ${plural(r.tracks.length, "file")}.`, undoIt ? { label: "Undo", run: undoIt } : null);
+      return r;
+    }
+
+    function confirmWrite(jobs, back, { lines, skipped, onBack, onDone }) {
+      const files = jobs.map((j) => track(j.trackId));
+      const one = jobs.length === 1;
+      modal({
+        title: one ? "Write these tags into the file?" : `Write these tags into ${jobs.length} files?`,
+        body: [
+          h("ul", { class: "changes" }, lines),
+          one ? h("p", { class: "path-line", text: rel(files[0].path) })
+            : h("details", { class: "file-list" }, h("summary", { text: `The ${jobs.length} files` }), h("ol", null, files.map((t) => h("li", { text: rel(t.path) })))),
+          skipped ? h("p", { class: "st-note", text: `Left as they are: ${skipped}.` }) : null,
+          h("p", { class: "st-note", text: "The tags go into the files themselves, so other players and apps see them too. You can undo it straight after." }),
+        ],
+        buttons: [
+          h("button", { type: "button", class: "btn", text: onBack ? "Back" : "Cancel", onclick: onBack || closeModal }),
+          h("button", {
+            type: "button", class: "btn primary", "data-autofocus": "", text: one ? "Write tags" : `Write tags into ${jobs.length} files`,
+            onclick: async (e) => {
+              e.currentTarget.disabled = true;
+              closeModal();
+              const r = await writeTags(jobs, back);
+              if (r && onDone) onDone();
+            },
+          }),
+        ],
+      });
+    }
+
+    // ---- the tag editor ------------------------------------------------------------------
+    // One component for the library's side panel and the playlist's "Edit
+    // tags…" dialog. Fields show the tracks' common value, or "Various" when
+    // they differ (left as they are unless typed over). Labels show on how
+    // many of the tracks they are, and can be added to or taken off all.
+    function makeEditor(ids, opts = {}) {
+      const ED = { ids: [...new Set(ids)], draft: {}, add: [], remove: new Map(), err: {}, v: S.tracksVersion };
+      const all = () => ED.ids.map(track);
+      const ok = () => all().filter((t) => !whyNot(t));
+      const pool = () => { const o = ok(); return o.length ? o : all(); };
+      function base(f) {
+        const vs = new Set(pool().map((t) => val(t, f)));
+        return vs.size === 1 ? [...vs][0] : null;
+      }
+      const n0 = ok().length;
+      const readOnly = !n0;
+      const id = ++uid;
+      const errLine = h("p", { class: "ted-err", role: "alert" });
+      const lblBox = h("div", { class: "ted-labels tags" });
+      const lists = { artist: datalist("artist"), albumartist: datalist("albumartist"), album: datalist("album"), genre: datalist("genre"), composer: datalist("composer"), labels: datalist("labels") };
+      const lblIn = h("input", {
+        class: "input", id: `ted-lbl-${id}`, placeholder: "Add a label", autocomplete: "off", spellcheck: "false", list: lists.labels.id, disabled: readOnly,
+        onkeydown: (e) => {
+          if (e.key === "Enter" || e.key === "," || e.key === ";") {
+            e.preventDefault();
+            if (lblIn.value.trim()) { addLabel(lblIn.value); lblIn.value = ""; } else if (e.key === "Enter" && opts.modal && dirty()) save();
+          }
+        },
+        onchange: () => { if (lblIn.value.trim() && knownValues("labels").some((x) => lkey(x) === lkey(lblIn.value))) { addLabel(lblIn.value); lblIn.value = ""; } },
+        onblur: () => { if (lblIn.value.trim()) { addLabel(lblIn.value); lblIn.value = ""; } },
+      });
+      const saveBtn = h("button", { type: "button", class: "btn primary", text: "Save to files…", disabled: true, onclick: () => save() });
+      const revertBtn = h("button", { type: "button", class: "btn", text: "Revert", disabled: true, onclick: () => reset() });
+      const inputs = {};
+
+      function head() {
+        const ts = all();
+        if (ts.length === 1) {
+          const t = ts[0];
+          return h("div", { class: "ted-head" },
+            h("h3", { class: t.title ? null : "untagged", text: titleOf(t) }),
+            h("p", { class: "ted-sub", text: [t.artist, t.album].filter(Boolean).join(", ") || "No artist or album" }),
+            h("p", { class: "ted-path", title: t.path, text: rel(t.path) }));
+        }
+        const artists = new Set(ts.map((t) => t.artist).filter(Boolean));
+        const dur = ts.reduce((a, t) => a + (t.duration || 0), 0);
+        return h("div", { class: "ted-head" },
+          h("h3", { text: plural(ts.length, "track") }),
+          h("p", { class: "ted-sub", text: `${artists.size === 1 ? [...artists][0] : artists.size ? plural(artists.size, "artist") : "No artist"}, ${length(dur)}` }));
+      }
+      function fieldRow(f) {
+        const b = base(f);
+        const num = f in NUMERIC;
+        const input = h("input", {
+          class: `input${num ? " num-in" : ""}`, id: `ted-${f}-${id}`, value: b == null ? "" : b, placeholder: b === null ? "Various" : "",
+          inputmode: num ? "numeric" : null, autocomplete: "off", spellcheck: "false", list: lists[f] ? lists[f].id : null, disabled: readOnly,
+          oninput: () => onField(f),
+          onkeydown: (e) => { if (e.key === "Enter" && opts.modal && dirty()) { e.preventDefault(); save(); } },
+        });
+        inputs[f] = input;
+        return [h("label", { class: "lbl", for: input.id, text: FIELD_LABEL[f] }), input];
+      }
+      function onField(f) {
+        const input = inputs[f];
+        const b = base(f);
+        const v = input.value;
+        if ((b === null && v.trim() === "") || (b !== null && v.trim() === b.trim())) delete ED.draft[f];
+        else ED.draft[f] = v;
+        delete ED.err[f];
+        if (f in NUMERIC && v.trim()) {
+          const m = v.trim().match(/^(\d+)(\/\d+)?$/);
+          const n = m ? parseInt(m[1], 10) : NaN;
+          if (!(n >= 1 && n <= NUMERIC[f])) ED.err[f] = `${FIELD_LABEL[f]} must be a number from 1 to ${NUMERIC[f]}.`;
+        }
+        input.classList.toggle("changed", f in ED.draft);
+        input.classList.toggle("bad", !!ED.err[f]);
+        update();
+      }
+
+      function labelRows() {
+        const P = pool();
+        const m = new Map();
+        for (const t of P) {
+          for (const l of t.labels || []) {
+            const k = lkey(l);
+            const e = m.get(k) || { label: l, n: 0 };
+            e.n++;
+            m.set(k, e);
+          }
+        }
+        for (const l of ED.add) m.set(lkey(l), { ...(m.get(lkey(l)) || { label: l }), n: P.length, added: true });
+        for (const k of ED.remove.keys()) m.delete(k);
+        return [...m.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
+      }
+      function renderLabels() {
+        const n = pool().length;
+        const rows = labelRows();
+        fill(lblBox, rows.length ? rows.map((r) => {
+          const partial = r.n < n;
+          return h("span", { class: `tag lbl edit lab-${labelHue(r.label)}${partial ? " partial" : ""}${r.added ? " added" : ""}` },
+            h("span", { class: "v", text: r.label }),
+            partial ? h("span", { class: "of", text: `${r.n} of ${n}` }) : null,
+            readOnly ? null : [
+              partial ? h("button", { type: "button", class: "x", title: `Add “${r.label}” to all ${n}`, "aria-label": `Add ${r.label} to all ${n}`, onclick: () => addLabel(r.label) }, icon("plus")) : null,
+              h("button", { type: "button", class: "x", title: `Take “${r.label}” off`, "aria-label": `Remove the label ${r.label}`, onclick: () => removeLabel(r.label) }, icon("close")),
+            ]);
+        }) : h("span", { class: "tags-none", text: "No labels yet" }));
+      }
+      function addLabel(raw) {
+        const l = raw.trim().replace(/;/g, ",");
+        if (!l) return;
+        const k = lkey(l);
+        ED.remove.delete(k);
+        const spelled = [...pool().flatMap((t) => t.labels || []), ...knownValues("labels")].find((x) => lkey(x) === k) || l;
+        ED.add = ED.add.filter((x) => lkey(x) !== k);
+        if (pool().some((t) => !(t.labels || []).some((x) => lkey(x) === k))) ED.add.push(spelled);
+        renderLabels();
+        update();
+      }
+      function removeLabel(l) {
+        const k = lkey(l);
+        ED.add = ED.add.filter((x) => lkey(x) !== k);
+        if (pool().some((t) => (t.labels || []).some((x) => lkey(x) === k))) ED.remove.set(k, l);
+        renderLabels();
+        update();
+      }
+
+      const dirty = () => Object.keys(ED.draft).length > 0 || ED.add.length > 0 || ED.remove.size > 0;
+      const valid = () => !Object.values(ED.err).some(Boolean);
+      function update() {
+        saveBtn.disabled = readOnly || !dirty() || !valid();
+        revertBtn.disabled = !dirty();
+        errLine.textContent = Object.values(ED.err).filter(Boolean).join(" ");
+        if (opts.onState) opts.onState();
+      }
+      function reset() {
+        ED.draft = {};
+        ED.add = [];
+        ED.remove = new Map();
+        ED.err = {};
+        for (const f of EDIT_FIELDS) {
+          const b = base(f);
+          inputs[f].value = b == null ? "" : b;
+          inputs[f].classList.remove("changed", "bad");
+        }
+        lblIn.value = "";
+        renderLabels();
+        update();
+      }
+      function nextLabels(t) {
+        const ls = (t.labels || []).filter((l) => !ED.remove.has(lkey(l)));
+        for (const a of ED.add) if (!ls.some((x) => lkey(x) === lkey(a))) ls.push(a);
+        return ls;
+      }
+      /** The edit for each file, and the one that undoes it. */
+      function plan() {
+        const jobs = [];
+        const back = [];
+        for (const t of ok()) {
+          const edit = {};
+          const old = {};
+          for (const [f, v] of Object.entries(ED.draft)) {
+            const nv = f in NUMERIC ? (v.trim() ? String(parseInt(v.trim(), 10)) : "") : v.trim();
+            if (nv !== val(t, f).trim()) { edit[f] = nv; old[f] = val(t, f); }
+          }
+          if (ED.add.length || ED.remove.size) {
+            const nl = nextLabels(t);
+            if (nl.join("\u0000") !== (t.labels || []).join("\u0000")) { edit.labels = nl; old.labels = [...(t.labels || [])]; }
+          }
+          if (Object.keys(edit).length) { jobs.push({ trackId: t.id, edit }); back.push({ trackId: t.id, edit: old }); }
+        }
+        return { jobs, back };
+      }
+      function changeLines(jobs) {
+        const lines = [];
+        const one = jobs.length === 1;
+        const q = (s) => `“${s}”`;
+        for (const f of EDIT_FIELDS) {
+          const js = jobs.filter((j) => f in j.edit);
+          if (!js.length) continue;
+          const nv = js[0].edit[f];
+          const was = val(track(js[0].trackId), f);
+          const to = nv === "" ? "cleared" : q(nv);
+          lines.push(h("li", null, h("b", { text: FIELD_LABEL[f] }),
+            one ? h("span", { text: `${was ? q(was) : "empty"} → ${to}` })
+              : h("span", { text: `${nv === "" ? "cleared" : `set to ${q(nv)}`}${js.length < jobs.length ? ` in ${plural(js.length, "file")}` : ""}` })));
+        }
+        const adds = ED.add.filter((l) => jobs.some((j) => j.edit.labels && j.edit.labels.some((x) => lkey(x) === lkey(l))));
+        const rems = [...ED.remove.values()];
+        if (adds.length || rems.length) {
+          lines.push(h("li", null, h("b", { text: "Labels" }), h("span", null,
+            adds.length ? ["adds ", adds.map((l, i) => [i ? ", " : "", labelChip(l, true)])] : null,
+            adds.length && rems.length ? "; " : null,
+            rems.length ? ["takes off ", rems.map((l, i) => [i ? ", " : "", labelChip(l, true)])] : null)));
+        }
+        return lines;
+      }
+      function save() {
+        if (lblIn.value.trim()) { addLabel(lblIn.value); lblIn.value = ""; }
+        if (!dirty() || !valid()) return;
+        const { jobs, back } = plan();
+        if (!jobs.length) {
+          toast("The files already have those tags.");
+          reset();
+          return;
+        }
+        const skipped = whyText(all());
+        confirmWrite(jobs, back, { lines: changeLines(jobs), skipped, onBack: opts.onBack, onDone: () => { if (opts.onSaved) opts.onSaved(); } });
+      }
+
+      const grid = h("div", { class: "ted-grid" }, EDIT_FIELDS.map(fieldRow));
+      const reason = whyText(all());
+      const el = h("div", { class: `ted${opts.modal ? " in-modal" : ""}` },
+        head(),
+        all().length > 1 && !readOnly ? h("p", { class: "hint ted-hint", text: "“Various” means the tracks differ there; they keep their own unless you type over it." }) : null,
+        reason ? h("p", { class: "ted-note", text: readOnly ? `These tags can't be changed here (${reason}). Only files in your music folder can be changed.` : `Left as they are: ${reason}.` }) : null,
+        grid,
+        h("div", { class: "ted-lbl" },
+          h("label", { class: "lbl", for: lblIn.id, text: "Labels" }),
+          lblBox,
+          lblIn,
+          h("p", { class: "hint", text: "Your own tags, like “road trip” or “kids”. They're saved in each file's Grouping field." })),
+        errLine,
+        Object.values(lists).map((l) => l.el),
+        opts.modal ? null : h("div", { class: "ted-foot" }, revertBtn, saveBtn));
+      renderLabels();
+      update();
+      return { el, ids: ED.ids, v: ED.v, dirty, valid, save, reset, saveBtn, revertBtn, count: () => ok().length };
+    }
+
+    /** "Edit tags…" from a playlist: the editor in a dialog. */
+    function editTagsDialog(ids) {
+      const ts = ids.map(track);
+      if (!root()) {
+        modal({
+          title: "Choose your music folder first",
+          body: [h("p", { text: "Tags can be written into files in your music folder. Choose the folder your music is in, in the library, and the files there can be retagged and renamed." })],
+          buttons: [
+            h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal }),
+            h("button", { type: "button", class: "btn primary", text: "Open the library", onclick: () => { closeModal(); core.setView("library"); } }),
+          ],
+        });
+        return;
+      }
+      if (!ts.some((t) => !whyNot(t))) {
+        toast(`Those tags can't be changed here: ${whyText(ts)}.`);
+        return;
+      }
+      let ed = null;
+      const open = () => {
+        const save = h("button", { type: "button", class: "btn primary", text: "Save to files…", onclick: () => ed.save() });
+        const cancel = h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal });
+        if (!ed) ed = makeEditor(ids, { modal: true, onBack: open, onState: () => { if (ed) save.disabled = ed.saveBtn.disabled; }, onSaved: () => {} });
+        modal({ title: ts.length === 1 ? "Edit tags" : `Edit the tags of ${ts.length} tracks`, body: [ed.el], buttons: [cancel, save], wide: false });
+        save.disabled = ed.saveBtn.disabled;
+        const first = ed.el.querySelector("input:not(:disabled)");
+        if (first) first.focus();
+      };
+      open();
+    }
+
+    // ---- cleaning up file names -------------------------------------------------------------
+    async function runRenames(items) {
+      // A new name that's another of these files' current name: everything
+      // goes through a temporary name first, so swaps work.
+      const cur = new Map(items.map((x) => [x.t.path.toLowerCase(), x.t.id]));
+      const target = (x) => { const s = splitPath(x.t.path); return `${s.dir}${s.sep}${x.name}`.toLowerCase(); };
+      const failed = [];
+      let done = [];
+      try {
+        if (items.some((x) => { const o = cur.get(target(x)); return o && o !== x.t.id; })) {
+          const r1 = await api.libraryRename(items.map((x) => ({ trackId: x.t.id, name: `p2u-renaming-${x.t.id}${splitPath(x.t.path).ext}` })));
+          core.putTracks(r1.tracks);
+          failed.push(...r1.failed);
+          const okIds = new Set(r1.tracks.map((t) => t.id));
+          items = items.filter((x) => okIds.has(x.t.id));
+        }
+        const r2 = await api.libraryRename(items.map((x) => ({ trackId: x.t.id, name: x.name })));
+        core.putTracks(r2.tracks);
+        failed.push(...r2.failed);
+        done = r2.tracks;
+      } catch (e) {
+        toast(`Couldn't rename the files: ${e}`);
+        return { done, failed };
+      }
+      return { done, failed };
+    }
+    function renameDialog(ids) {
+      let cfg = { template: NAME_PRESETS[0].tpl, ascii: false, maxLen: 0 };
+      try { cfg = { ...cfg, ...JSON.parse(S.settings.libraryNames || "{}") }; } catch { /* the defaults */ }
+      const ts = ids.map(track);
+      const ok = ts.filter((t) => !whyNot(t, true));
+      const skipped = whyText(ts, true);
+      const tplIn = h("input", { class: "input mono", value: cfg.template, spellcheck: "false", autocomplete: "off", "aria-label": "File name template", oninput: () => { cfg.template = tplIn.value; refresh(); } });
+      const presets = h("select", {
+        class: "input", "aria-label": "Templates",
+        onchange: () => { if (presets.value) { tplIn.value = cfg.template = presets.value; presets.value = ""; refresh(); } },
+      }, h("option", { value: "", text: "Templates" }), NAME_PRESETS.map((p) => h("option", { value: p.tpl, text: p.label })));
+      const ascii = h("input", { type: "checkbox", checked: !!cfg.ascii, onchange: () => { cfg.ascii = ascii.checked; refresh(); } });
+      const maxIn = h("input", { class: "input secs", type: "number", min: "0", max: "200", value: String(cfg.maxLen || ""), placeholder: "none", "aria-label": "Longest name", oninput: () => { cfg.maxLen = parseInt(maxIn.value, 10) || 0; refresh(); } });
+      const errs = h("p", { class: "ted-err", role: "alert" });
+      const sum = h("p", { class: "ren-sum" });
+      const table = h("div", { class: "ren-list" });
+      const go = h("button", { type: "button", class: "btn primary", text: "Rename", disabled: true });
+      let rows = [];
+      function refresh() {
+        const entries = ok.map((t) => { const s = splitPath(t.path); return { t, s, tags: { ...t }, filename: t.filename, ext: s.ext, dir: s.dir }; });
+        const r = N.libraryNames(entries, { template: cfg.template, ascii: cfg.ascii, maxLen: cfg.maxLen });
+        errs.textContent = r.errors.join(" ");
+        tplIn.classList.toggle("bad", r.errors.length > 0);
+        const mine = new Set(ok.map((t) => t.id));
+        const taken = new Set();
+        for (const t of S.tracks.values()) if (!mine.has(t.id) && t.exists) taken.add(t.path.toLowerCase());
+        rows = entries.map((e, i) => {
+          const name = r.names[i].name;
+          const same = name === e.s.file;
+          const clash = !same && taken.has(`${e.s.dir}${e.s.sep}${name}`.toLowerCase());
+          return { t: e.t, old: e.s.file, name, notes: r.names[i].notes, same, clash };
+        });
+        const change = rows.filter((x) => !x.same && !x.clash);
+        const clashes = rows.filter((x) => x.clash).length;
+        sum.textContent = `${change.length ? `${plural(change.length, "file")} get${change.length === 1 ? "s" : ""} a new name` : "No file needs a new name"}${rows.length - change.length - clashes ? `, ${rows.length - change.length - clashes} already match` : ""}${clashes ? `, ${clashes} would take the name of a file that's already there and ${clashes === 1 ? "is" : "are"} left out` : ""}.`;
+        go.disabled = !change.length || r.errors.length > 0;
+        go.textContent = change.length ? `Rename ${plural(change.length, "file")}` : "Rename";
+        const show = [...rows.filter((x) => !x.same), ...rows.filter((x) => x.same)].slice(0, 400);
+        fill(table, show.map((x) => h("div", { class: `ren-row${x.same ? " same" : ""}${x.clash ? " clash" : ""}` },
+          h("span", { class: "old", title: x.t.path, text: x.old }),
+          h("span", { class: "arrow", "aria-hidden": "true", text: x.same ? "" : "→" }),
+          h("span", { class: "new", title: x.notes.join("; ") || null }, x.same ? "unchanged" : x.name, x.clash ? h("small", { text: " (a file with this name is already there)" }) : x.notes.length ? h("small", { text: ` (${x.notes.join("; ")})` }) : null))),
+        rows.length > 400 ? h("p", { class: "st-note", text: `And ${rows.length - 400} more.` }) : null);
+      }
+      go.onclick = async () => {
+        const change = rows.filter((x) => !x.same && !x.clash);
+        go.disabled = true;
+        core.saveSetting("libraryNames", cfg);
+        S.settings.libraryNames = JSON.stringify(cfg);
+        closeModal();
+        const back = change.map((x) => ({ id: x.t.id, name: x.old }));
+        const r = await runRenames(change.map((x) => ({ t: x.t, name: x.name })));
+        const okIds = new Set(r.done.map((t) => t.id));
+        const undoIt = () => runRenames(back.filter((b) => okIds.has(b.id)).map((b) => ({ t: track(b.id), name: b.name }))).then((u) => toast(u.failed.length ? `Put back ${plural(u.done.length, "name")}; ${u.failed.length} couldn't be: ${u.failed[0].error}` : `Put back the old names of ${plural(u.done.length, "file")}.`));
+        if (r.failed.length) toast(`Renamed ${plural(r.done.length, "file")}. ${plural(r.failed.length, "file")} kept ${r.failed.length === 1 ? "its" : "their"} name: ${r.failed[0].error}`, r.done.length ? { label: "Undo", run: undoIt } : null);
+        else if (r.done.length) toast(`Renamed ${plural(r.done.length, "file")}.`, { label: "Undo", run: undoIt });
+      };
+      modal({
+        title: ok.length === 1 ? "Clean up the file name" : `Clean up ${plural(ok.length, "file name")}`,
+        wide: true, tall: true,
+        body: [
+          h("p", { text: "New names from the tags, with the same clean-up as names on a stick. Each file stays in its folder and keeps its type; playlists follow the files." }),
+          h("div", { class: "form" },
+            h("span", { class: "lbl", text: "Name" }),
+            h("div", { class: "opts" }, h("div", { class: "tpl-row" }, tplIn, presets), errs,
+              h("span", { class: "hint", text: "Tags: {title} {artist} {album} {albumartist} {track} {disc} {year} {genre} {filename}. {a|b} uses b when a is empty; [ ] leaves out a part whose tag is empty." })),
+            h("span", { class: "lbl", text: "Clean-up" }),
+            h("div", { class: "opts row-opts" },
+              h("label", { class: "check" }, ascii, h("span", { text: "Plain letters only (é becomes e)" })),
+              h("label", { class: "check" }, h("span", { text: "Longest name" }), maxIn))),
+          skipped ? h("p", { class: "st-note", text: `Left as they are: ${skipped}.` }) : null,
+          sum,
+          table,
+        ],
+        buttons: [h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal }), go],
+      });
+      refresh();
+    }
+
+    // ---- dragging tracks and adding them ----------------------------------------------------
+    function addToCurrent(ids) {
+      if (!ids.length) return;
+      if (!core.pl()) { core.newPlaylist("From the library", ids); return; }
+      core.insertTracks(ids, { kind: "playlist", id: S.current });
+    }
+    /** Pointer down on a row of a track list (search results, library table). */
+    function rowsDown(e, X) {
+      if (e.button !== 0) return;
+      const r = e.target.closest("[data-tid]");
+      if (!r || e.target.closest("button, input, a")) return;
+      if (e.pointerType !== "touch") e.preventDefault();
+      X.box.focus({ preventScroll: true });
+      const id = r.dataset.tid;
+      const mod = e.ctrlKey || e.metaKey;
+      let next = new Set(X.sel);
+      let after = null;
+      if (e.shiftKey) {
+        next = X.range(X.anchor || id, id, mod ? next : new Set());
+      } else if (mod) {
+        if (next.has(id)) after = () => { const n = new Set(X.sel); n.delete(id); X.set(n, id); };
+        else { next.add(id); X.anchor = id; }
+      } else if (!next.has(id)) {
+        next = new Set([id]);
+        X.anchor = id;
+      } else if (next.size > 1) after = () => X.set(new Set([id]), id);
+      if (!X.set(next, id)) return;
+      if (e.pointerType === "touch") return;
+      core.startTrackDrag(e, X.box, () => X.ordered(), {
+        onTap: () => {
+          if (after) after();
+          const now = performance.now();
+          if (X.lastTap && X.lastTap.id === id && now - X.lastTap.t < 450) {
+            X.lastTap = null;
+            addToCurrent(X.sel.has(id) && X.sel.size > 1 ? X.ordered() : [id]);
+          } else X.lastTap = { id, t: now };
+        },
+      });
+    }
+    function rangeOf(ids, a, b, into) {
+      const i = ids.indexOf(a);
+      const j = ids.indexOf(b);
+      const out = new Set(into);
+      if (i < 0 || j < 0) { out.add(b); return out; }
+      for (let k = Math.min(i, j); k <= Math.max(i, j); k++) out.add(ids[k]);
+      return out;
+    }
+    /** Arrow keys, Home, End, Ctrl+A, Enter and Escape in a track list. */
+    function listKey(e, X, pageRows) {
+      const ids = X.ids();
+      if (!ids.length) return false;
+      const i = ids.indexOf(X.focus);
+      const go = (j) => {
+        j = Math.max(0, Math.min(ids.length - 1, j));
+        const id = ids[j];
+        const next = e.shiftKey ? rangeOf(ids, X.anchor || id, id, new Set()) : new Set([id]);
+        if (!e.shiftKey) X.anchor = id;
+        if (X.set(next, id)) X.reveal(id);
+      };
+      const mod = e.ctrlKey || e.metaKey;
+      if (e.key === "ArrowDown") go(i < 0 ? 0 : i + 1);
+      else if (e.key === "ArrowUp") { if (i <= 0 && X.up) X.up(); else go(i - 1); }
+      else if (e.key === "PageDown") go((i < 0 ? 0 : i) + pageRows);
+      else if (e.key === "PageUp") go((i < 0 ? 0 : i) - pageRows);
+      else if (e.key === "Home") go(0);
+      else if (e.key === "End") go(ids.length - 1);
+      else if (mod && e.key.toLowerCase() === "a") X.set(new Set(ids), X.focus);
+      else if (e.key === "Enter") addToCurrent(X.ordered());
+      else if (e.key === "Escape") { if (X.sel.size) X.set(new Set(), null); else if (X.escape) X.escape(); else return false; }
+      else return false;
+      e.preventDefault();
+      return true;
+    }
+    function trackMenu(e, X) {
+      const r = e.target.closest("[data-tid]");
+      if (!r) return;
+      e.preventDefault();
+      const id = r.dataset.tid;
+      if (!X.sel.has(id) && !X.set(new Set([id]), id)) return;
+      const ids = X.ordered();
+      const n = ids.length;
+      const p = core.pl();
+      const others = S.playlists.filter((x) => !p || x.id !== p.id);
+      const canTag = ids.some((x) => !whyNot(track(x)));
+      menu({ x: e.clientX, y: e.clientY }, [
+        p ? { label: `Add to ${p.name}`, key: "Enter", action: () => addToCurrent(ids) } : null,
+        ...(others.length ? [{ heading: n === 1 ? "Add to playlist" : `Add ${n} tracks to` }, ...others.map((x) => ({ label: x.name, action: () => core.insertTracks(ids, { kind: "playlist", id: x.id }) }))] : []),
+        { label: "New playlist from these", action: () => { core.newPlaylist(n === 1 ? titleOf(track(ids[0])) : "From the library", ids); if (S.view === "library") core.setView("playlist"); } },
+        "-",
+        X.inLibrary ? null : { label: "Show in the library", action: () => revealInLibrary(id), disabled: !inMusic(track(id)) },
+        X.inLibrary ? null : { label: n === 1 ? "Edit tags…" : `Edit the tags of ${n} tracks…`, action: () => editTagsDialog(ids), disabled: !canTag },
+        X.inLibrary ? { label: n === 1 ? "Clean up the file name…" : `Clean up ${n} file names…`, action: () => renameDialog(ids), disabled: !ids.some((x) => !whyNot(track(x), true)) } : null,
+      ].filter(Boolean));
+    }
+
+    // ---- the search panel ------------------------------------------------------------------
+    const SE = { q: "", sel: new Set(), anchor: null, focus: null, ids: [], res: null, key: "", lastTap: null };
+    const SX = {
+      get sel() { return SE.sel; },
+      get anchor() { return SE.anchor; },
+      set anchor(v) { SE.anchor = v; },
+      get focus() { return SE.focus; },
+      get lastTap() { return SE.lastTap; },
+      set lastTap(v) { SE.lastTap = v; },
+      get box() { return SE.list; },
+      ids: () => SE.ids,
+      ordered: () => SE.ids.filter((x) => SE.sel.has(x)),
+      range: (a, b, into) => rangeOf(SE.ids, a, b, into),
+      set(next, focus) { SE.sel = next; SE.focus = focus; syncSearchRows(); return true; },
+      reveal(id) { const el = document.getElementById(`sr-${id}`); if (el) el.scrollIntoView({ block: "nearest" }); },
+      up() { SE.input.focus(); },
+      escape() { SE.input.focus(); },
+    };
+    function buildSearch() {
+      SE.input = h("input", {
+        type: "search", class: "input srch-in", id: "srch-in", placeholder: "Song, artist, album, genre, label…", "aria-label": "Search your music",
+        autocomplete: "off", spellcheck: "false",
+        oninput: () => { clearTimeout(SE.timer); SE.timer = setTimeout(() => { SE.q = SE.input.value; refreshSearch(); }, 90); },
+        onkeydown: (e) => {
+          if (e.key === "ArrowDown" || e.key === "Enter") {
+            e.preventDefault();
+            clearTimeout(SE.timer);
+            if (SE.q !== SE.input.value) { SE.q = SE.input.value; refreshSearch(); }
+            if (SE.ids.length) { SE.anchor = SE.ids[0]; SX.set(new Set([SE.ids[0]]), SE.ids[0]); SE.list.focus(); SX.reveal(SE.ids[0]); }
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            if (SE.input.value) { SE.input.value = SE.q = ""; refreshSearch(); } else closeSearch();
+          }
+        },
+      });
+      SE.scope = h("p", { class: "srch-scope", "aria-live": "polite" });
+      SE.list = h("div", {
+        class: "srch-res", role: "listbox", tabindex: "0", "aria-label": "Search results", "aria-multiselectable": "true",
+        onpointerdown: (e) => rowsDown(e, SX),
+        onkeydown: (e) => { if (listKey(e, SX, 8)) e.stopPropagation(); },
+        oncontextmenu: (e) => trackMenu(e, SX),
+      });
+      SE.root = h("div", { class: "srch" },
+        h("div", { class: "srch-box" },
+          h("span", { class: "srch-ic" }, icon("search")),
+          SE.input,
+          h("button", { type: "button", class: "btn quiet small icon", title: "Close the search (Esc)", "aria-label": "Close the search", onclick: closeSearch }, icon("close"))),
+        SE.scope, SE.list,
+        h("p", { class: "srch-foot", text: "Drag songs into the playlist, or double-click to add one at the end." }));
+    }
+    function searchRoot() {
+      if (!SE.root) buildSearch();
+      return SE.root;
+    }
+    /** The sidebar in search mode: the panel (kept, so typing keeps its focus) and the foot. */
+    function renderSearch(side, foot) {
+      const r = searchRoot();
+      if (r.parentNode !== side) fill(side, r, foot);
+      else if (r.nextSibling) r.nextSibling.replaceWith(foot);
+      else side.append(foot);
+      refreshSearch();
+    }
+    function openSearch() {
+      if (S.view === "library") core.setView("playlist");
+      S.searching = true;
+      core.renderSide();
+      document.getElementById("app").classList.add("searching");
+      SE.input.focus();
+      SE.input.select();
+    }
+    function closeSearch() {
+      S.searching = false;
+      document.getElementById("app").classList.remove("searching");
+      core.renderSide();
+      const b = document.getElementById("srch-btn");
+      if (b) b.focus({ preventScroll: true });
+    }
+    function refreshSearch() {
+      if (!SE.root) return;
+      const q = SE.q.trim();
+      const key = `${S.tracksVersion}\u0000${q}`;
+      if (SE.key !== key) {
+        SE.key = key;
+        SE.res = q ? SR.search(allIndex(), q, { limit: 150 }) : null;
+      } else allIndex();
+      const R = SE.res;
+      const p = core.pl();
+      const inPl = new Set(p ? p.entries.map((e) => e.trackId) : []);
+      const toks = SR.norm(q).split(" ").filter(Boolean);
+      const hit = (s) => SR.norm(s).split(" ").some((w) => toks.some((tk) => SR.closeness(tk, w) > 0));
+      const row = (x, close) => {
+        const t = x.t;
+        const hints = [];
+        if (x.fields.includes("labels")) for (const l of t.labels || []) if (hit(l)) hints.push(labelChip(l, true));
+        for (const f of ["genre", "year", "composer", "albumartist"]) if (x.fields.includes(f) && t[f] && hit(String(t[f]))) hints.push(fieldChip(f, String(t[f])));
+        const sub = [t.artist, t.album].filter(Boolean).join(", ");
+        const on = SE.sel.has(t.id);
+        return h("div", {
+          class: `sr${on ? " sel" : ""}${SE.focus === t.id ? " focus" : ""}${close ? " close" : ""}`, role: "option", id: `sr-${t.id}`,
+          "aria-selected": String(on), dataset: { tid: t.id }, title: t.path,
+        },
+        h("div", { class: "sr-txt" },
+          h("span", { class: t.title ? "sr-t" : "sr-t untagged", text: titleOf(t) }),
+          sub ? h("span", { class: "sr-s", text: sub }) : null,
+          hints.length ? h("span", { class: "sr-hints tags" }, hints) : null),
+        h("span", { class: "sr-r" },
+          inPl.has(t.id) ? h("span", { class: "sr-in", title: `Already in ${p.name}`, "aria-label": `Already in ${p.name}` }, icon("check")) : null,
+          h("span", { class: "sr-time num", text: t.duration ? clock(t.duration) : "" })));
+      };
+      SE.ids = R ? [...R.exact, ...R.close].map((x) => x.t.id) : [];
+      SE.sel = new Set([...SE.sel].filter((x) => SE.ids.includes(x)));
+      if (!q) {
+        fill(SE.scope, `Searches ${plural(AC.n, "song")}${root() ? " in your music folder and your playlists" : " in your playlists"}: titles, artists, albums, genres, labels, years and file names.`,
+          root() ? null : h("button", { type: "button", class: "btn quiet small", text: "Choose your music folder…", onclick: () => core.setView("library") }));
+        fill(SE.list);
+        return;
+      }
+      fill(SE.scope, R.exact.length || R.close.length
+        ? `${R.exact.length ? plural(R.exact.length, "exact match", "exact matches") : "No exact matches"}${R.close.length ? `, ${R.close.length} close` : ""}.`
+        : `Nothing matches “${q}”. Try fewer words, or part of a name.`);
+      fill(SE.list,
+        R.exact.map((x) => row(x, false)),
+        R.close.length ? h("div", { class: "sr-div", role: "separator" }, h("span", { text: "Close matches" })) : null,
+        R.close.map((x) => row(x, true)));
+    }
+    function syncSearchRows() {
+      if (!SE.list) return;
+      for (const r of SE.list.querySelectorAll(".sr")) {
+        const on = SE.sel.has(r.dataset.tid);
+        r.classList.toggle("sel", on);
+        r.classList.toggle("focus", r.dataset.tid === SE.focus);
+        r.setAttribute("aria-selected", String(on));
+      }
+      if (SE.focus) SE.list.setAttribute("aria-activedescendant", `sr-${SE.focus}`);
+      else SE.list.removeAttribute("aria-activedescendant");
+    }
+
+    // ---- the library view -----------------------------------------------------------------
+    const L = { q: "", filters: [], sort: { key: "artist", dir: 1 }, best: true, sel: new Set(), anchor: null, focus: null, rows: [], ids: [], at: new Map(), more: {}, width: 800, editor: null, lastTap: null, scrollTo: null };
+    const V = {};
+    const LX = {
+      inLibrary: true,
+      get sel() { return L.sel; },
+      get anchor() { return L.anchor; },
+      set anchor(v) { L.anchor = v; },
+      get focus() { return L.focus; },
+      get lastTap() { return L.lastTap; },
+      set lastTap(v) { L.lastTap = v; },
+      get box() { return V.scroll; },
+      ids: () => L.ids,
+      ordered: () => L.ids.filter((x) => L.sel.has(x)),
+      range: (a, b, into) => rangeOf(L.ids, a, b, into),
+      set: (next, focus) => setSel(next, focus),
+      reveal: (id) => revealRow(id),
+      escape: null,
+    };
+
+    function buildView() {
+      V.root = $("libview");
+      V.head = h("header", { class: "lib-head" });
+      V.facets = h("nav", { class: "lib-facets", "aria-label": "Browse by tag" });
+      V.q = h("input", {
+        type: "search", class: "input lib-q", id: "lib-q", placeholder: "Filter by title, artist, album, genre, label…", "aria-label": "Filter the library",
+        autocomplete: "off", spellcheck: "false",
+        oninput: () => { clearTimeout(V.qt); V.qt = setTimeout(() => setQuery(V.q.value), 110); },
+        onkeydown: (e) => {
+          if (e.key === "ArrowDown") { e.preventDefault(); if (L.ids.length) { L.anchor = L.ids[0]; if (setSel(new Set([L.ids[0]]), L.ids[0])) { V.scroll.focus(); revealRow(L.ids[0]); } } }
+          if (e.key === "Escape" && V.q.value) { e.preventDefault(); e.stopPropagation(); V.q.value = ""; setQuery(""); }
+        },
+      });
+      V.chips = h("div", { class: "lib-chips" });
+      V.cols = h("div", { class: "lib-cols" });
+      V.inner = h("div", { class: "lib-rows" });
+      V.scroll = h("div", {
+        class: "lib-scroll", tabindex: "0", role: "listbox", "aria-multiselectable": "true", "aria-label": "Tracks in your music folder",
+        onpointerdown: (e) => rowsDown(e, LX),
+        onkeydown: (e) => { if (listKey(e, LX, Math.max(1, Math.floor(V.scroll.clientHeight / RH) - 1))) e.stopPropagation(); },
+        oncontextmenu: (e) => trackMenu(e, LX),
+        onscroll: () => { if (!V.raf) V.raf = requestAnimationFrame(() => { V.raf = 0; renderRows(); }); },
+      }, V.inner);
+      V.empty = h("p", { class: "lib-none", hidden: true });
+      V.foot = h("div", { class: "lib-foot" });
+      V.edit = h("aside", { class: "lib-edit", "aria-label": "Tags of the selected tracks" });
+      V.main = h("div", { class: "lib-main" },
+        h("div", { class: "lib-bar" }, h("div", { class: "lib-qbox" }, h("span", { class: "srch-ic" }, icon("search")), V.q), V.chips),
+        h("div", { class: "lib-table" }, V.cols, V.scroll, V.empty),
+        V.foot);
+      V.body = h("div", { class: "lib-body" }, V.facets, V.main, V.edit);
+      V.start = h("div", { class: "lib-start" });
+      V.root.replaceChildren(V.head, V.body, V.start);
+      new ResizeObserver(() => {
+        const w = V.scroll.clientWidth;
+        if (!w) return;
+        const before = visibleCols().join();
+        L.width = w;
+        if (visibleCols().join() !== before) renderTable();
+        else renderRows();
+      }).observe(V.scroll);
+    }
+
+    function renderView() {
+      if (!V.root) buildView();
+      const has = !!root();
+      V.body.hidden = !has;
+      V.start.hidden = has;
+      if (has) computeRows();
+      renderLibHead();
+      if (!has) { renderStart(); return; }
+      renderFacets();
+      renderChips();
+      renderTable();
+      renderLibFoot();
+      renderEditor();
+    }
+    /** After tracks changed (a scan, a tag edit, a rename). */
+    function refresh() {
+      if (S.searching) refreshSearch();
+      if (S.view === "library" && V.root) renderView();
+    }
+
+    function statusText() {
+      const m = S.music || {};
+      const p = S.libProgress;
+      if (m.error) return `Can't open the folder: ${m.error}. If it's on a drive that isn't plugged in, plug it in and scan again, or choose another folder.`;
+      if (m.scanning) return p && p.phase === "read" && p.total ? `Reading ${p.done} of ${plural(p.total, "new or changed file")}…` : "Looking for new, changed and moved files…";
+      const list = libList().list;
+      const missing = list.filter((t) => !t.exists).length;
+      const failed = m.last && m.last.failed ? `, ${m.last.failed} couldn't be read` : "";
+      return `${plural(list.length, "track")}${missing ? `, ${missing} not found` : ""}${failed}. ${m.watching ? "Watching for changes" : "Not watching for changes; scan after you change files"}${m.lastScan ? `, last checked ${ago(m.lastScan)}` : ""}.`;
+    }
+    function renderLibHead() {
+      const m = S.music || {};
+      const p = S.libProgress;
+      const pct = m.scanning && p && p.total ? Math.round((100 * p.done) / p.total) : null;
+      fill(V.head,
+        h("div", { class: "lib-title" },
+          h("h1", { text: "Music library" }),
+          root() ? h("p", { class: "lib-path", title: root(), text: root() }) : null,
+          root() ? h("p", { class: `lib-status${m.error ? " bad" : ""}`, "aria-live": "polite", text: statusText() }) : null),
+        root() ? h("div", { class: "tools" },
+          h("button", { type: "button", class: "btn small", text: "Clean up file names…", onclick: () => renameDialog(L.sel.size ? LX.ordered() : L.ids), disabled: !L.ids.length }),
+          h("button", { type: "button", class: "btn small", text: m.scanning ? "Scanning…" : "Scan now", disabled: !!m.scanning, onclick: scanNow }),
+          h("button", { type: "button", class: "btn small", text: "Change folder…", onclick: chooseFolder })) : null,
+        m.scanning ? h("div", { class: `lib-prog${pct == null ? " busy" : ""}`, role: "progressbar", "aria-label": "Scanning", "aria-valuenow": pct == null ? null : String(pct) }, h("i", { style: { width: `${pct == null ? 30 : pct}%` } })) : null);
+    }
+    function renderStart() {
+      fill(V.start,
+        h("div", { class: "lib-start-in" },
+          h("h2", { text: "Choose the folder your music is in" }),
+          h("p", { text: "Playlist2USB reads every song in it, and keeps up as you add, move and retag files. Search it, browse it by tag, and drag songs onto your playlists." }),
+          h("p", { text: "You sort the files into folders yourself. Tags and file names only change when you ask, after a preview, and nothing outside the folder is touched." }),
+          h("button", { type: "button", class: "btn primary", text: "Choose your music folder…", onclick: chooseFolder })));
+    }
+    // The folder's state comes from the app's events. A small folder's scan
+    // can finish (and its event arrive) before the call that started it
+    // returns, so an answer older than the last event is ignored.
+    let scanEvents = 0;
+    async function chooseFolder() {
+      const path = await api.pickFolder("Your music folder");
+      if (path) await useFolder(path);
+    }
+    async function useFolder(path) {
+      const seen = scanEvents;
+      let info;
+      try {
+        info = await api.librarySetRoot(path);
+      } catch (e) {
+        toast(`Couldn't use that folder: ${e}`);
+        return false;
+      }
+      if (scanEvents === seen) S.music = info;
+      L.sel = new Set();
+      L.filters = [];
+      L.editor = null;
+      renderView();
+      core.renderDisplay();
+      return true;
+    }
+    async function scanNow() {
+      S.music = { ...S.music, scanning: true };
+      S.libProgress = null;
+      renderLibHead();
+      const seen = scanEvents;
+      try {
+        await api.libraryScan();
+        // No scan started (no folder, or no ffmpeg): say how things are.
+        const info = await api.libraryInfo();
+        if (scanEvents === seen && !info.scanning) { S.music = info; renderLibHead(); }
+      } catch (e) {
+        toast(`Couldn't scan: ${e}`);
+      }
+    }
+
+    // Filters and the rows they leave.
+    function keysOf(t, field) {
+      switch (field) {
+        case "labels": return (t.labels || []).map((l) => [lkey(l), l]);
+        case "decade": return t.year ? [[decadeOf(t.year), decadeOf(t.year)]] : [];
+        case "missing": return MISSING.filter((m) => m.test(t)).map((m) => [m.key, m.label]);
+        default: {
+          const v = String(t[field] || "").trim();
+          return v ? [[v.toLowerCase(), v]] : [];
+        }
+      }
+    }
+    function applyFilters(list, skip) {
+      const by = new Map();
+      for (const f of L.filters) {
+        if (f.field === skip) continue;
+        if (!by.has(f.field)) by.set(f.field, []);
+        by.get(f.field).push(f.value);
+      }
+      if (!by.size) return list;
+      return list.filter((t) => {
+        for (const [field, vals] of by) {
+          const ks = new Set(keysOf(t, field).map(([k]) => k));
+          if (EVERY.has(field) ? !vals.every((v) => ks.has(v)) : !vals.some((v) => ks.has(v))) return false;
+        }
+        return true;
+      });
+    }
+    const SK = {
+      title: (t) => [titleOf(t)],
+      artist: (t) => [t.albumartist || t.artist, t.album, t.disc || 0, t.track || 0, t.path],
+      album: (t) => [t.album, t.albumartist || t.artist, t.disc || 0, t.track || 0],
+      track: (t) => [t.disc || 0, t.track || 0, titleOf(t)],
+      year: (t) => [t.year || 0, t.albumartist || t.artist, t.album, t.disc || 0, t.track || 0],
+      genre: (t) => [t.genre, t.albumartist || t.artist, t.album, t.disc || 0, t.track || 0],
+      labels: (t) => [(t.labels || []).join(", "), titleOf(t)],
+      time: (t) => [t.duration || 0],
+    };
+    function sorted(list) {
+      const kf = SK[L.sort.key] || SK.artist;
+      const dir = L.sort.dir;
+      const C = core.collator;
+      return list.map((t) => ({ t, k: kf(t) })).sort((a, b) => {
+        for (let i = 0; i < a.k.length; i++) {
+          const x = a.k[i];
+          const y = b.k[i];
+          if (typeof x === "number" || typeof y === "number") {
+            const c = (x || 0) - (y || 0);
+            if (c) return c * dir;
+            continue;
+          }
+          if (!x !== !y) return x ? -1 : 1; // empty values last, either way
+          const c = C.compare(x || "", y || "");
+          if (c) return c * dir;
+        }
+        return 0;
+      }).map((x) => x.t);
+    }
+    function computeRows() {
+      const all = libList().list;
+      const q = L.q.trim();
+      let qList = all;
+      let ex = null;
+      let cl = null;
+      if (q) {
+        const r = SR.search(libIndex(), q, { limit: 1e9 });
+        ex = r.exact.map((x) => x.t);
+        cl = r.close.map((x) => x.t);
+        qList = [...ex, ...cl];
+      }
+      L.qList = qList;
+      const keep = new Set(applyFilters(qList).map((t) => t.id));
+      let rows;
+      if (q) {
+        let e = ex.filter((t) => keep.has(t.id));
+        let c = cl.filter((t) => keep.has(t.id));
+        if (!L.best) { e = sorted(e); c = sorted(c); }
+        rows = [...e.map((t) => ({ t })), ...(c.length ? [{ divider: true, n: c.length }] : []), ...c.map((t) => ({ t, close: true }))];
+      } else rows = sorted(all.filter((t) => keep.has(t.id))).map((t) => ({ t }));
+      L.rows = rows;
+      L.ids = [];
+      L.at = new Map();
+      rows.forEach((r, i) => { if (r.t) { L.ids.push(r.t.id); L.at.set(r.t.id, i); } });
+      // The selection only keeps what's shown, unless there are unsaved edits for it.
+      if (!(L.editor && L.editor.dirty())) {
+        const shown = new Set(L.ids);
+        const next = new Set([...L.sel].filter((x) => shown.has(x)));
+        if (next.size !== L.sel.size) L.sel = next;
+        if (L.focus && !shown.has(L.focus)) L.focus = null;
+      }
+    }
+    function setQuery(q) {
+      if (q.trim() && !L.q.trim()) L.best = true;
+      L.q = q;
+      computeRows();
+      renderFacets();
+      renderTable();
+      renderLibFoot();
+      renderEditor();
+      V.scroll.scrollTop = 0;
+    }
+    function toggleFilter(field, value, label) {
+      const i = L.filters.findIndex((f) => f.field === field && f.value === value);
+      if (i >= 0) L.filters.splice(i, 1);
+      else L.filters.push({ field, value, label });
+      computeRows();
+      renderFacets();
+      renderChips();
+      renderTable();
+      renderLibFoot();
+      renderEditor();
+      V.scroll.scrollTop = 0;
+    }
+
+    function renderFacets() {
+      const groups = GROUPS.map((g) => {
+        const list = EVERY.has(g.field) ? applyFilters(L.qList) : applyFilters(L.qList, g.field);
+        const m = new Map();
+        for (const t of list) {
+          for (const [k, label] of keysOf(t, g.field)) {
+            const e = m.get(k) || { k, label, n: 0 };
+            e.n++;
+            m.set(k, e);
+          }
+        }
+        for (const f of L.filters) if (f.field === g.field && !m.has(f.value)) m.set(f.value, { k: f.value, label: f.label, n: 0 });
+        let items = [...m.values()];
+        if (g.fixed) items.sort((a, b) => MISSING.findIndex((x) => x.key === a.k) - MISSING.findIndex((x) => x.key === b.k));
+        else if (g.byValue) items.sort((a, b) => a.k.localeCompare(b.k));
+        else items.sort((a, b) => b.n - a.n || core.collator.compare(a.label, b.label));
+        const on = (it) => L.filters.some((f) => f.field === g.field && f.value === it.k);
+        const open = L.more[g.field];
+        const max = open ? 400 : g.show;
+        // Chosen tags stay in view, even past the first few.
+        const shown = [...items.slice(0, max), ...items.slice(max).filter(on)];
+        if (!items.length) {
+          return g.field === "labels"
+            ? h("section", { class: "fct-g" }, h("h3", { text: g.title }), h("p", { class: "fct-none", text: "None yet. Select tracks and add labels in the tag editor on the right." }))
+            : null;
+        }
+        return h("section", { class: "fct-g" },
+          h("h3", { text: g.title }),
+          h("ul", null, shown.map((it) => h("li", null, h("button", {
+            type: "button", class: `fct${g.field === "labels" ? " dotted" : ""}${on(it) ? " on" : ""}`, "aria-pressed": String(on(it)), title: it.label,
+            onclick: () => toggleFilter(g.field, it.k, it.label),
+          },
+          g.field === "labels" ? h("span", { class: `dot lab-${labelHue(it.label)}`, "aria-hidden": "true" }) : null,
+          h("span", { class: "nm", text: it.label }),
+          h("span", { class: "ct num", text: String(it.n) }))))),
+          items.length > g.show ? h("button", { type: "button", class: "btn quiet small fct-more", text: open ? "Show fewer" : `Show all ${items.length}`, onclick: () => { L.more[g.field] = !open; renderFacets(); } }) : null,
+          open && items.length > 400 ? h("p", { class: "fct-none", text: `And ${items.length - 400} more: type in the filter to find them.` }) : null);
+      });
+      const top = V.facets.scrollTop;
+      fill(V.facets, groups);
+      V.facets.scrollTop = top;
+    }
+    function renderChips() {
+      fill(V.chips, L.filters.map((f) => {
+        const x = h("button", { type: "button", class: "x", title: "Remove this filter", "aria-label": `Remove the filter ${f.label}`, onclick: () => toggleFilter(f.field, f.value, f.label) }, icon("close"));
+        if (f.field === "labels") return h("span", { class: `tag lbl edit lab-${labelHue(f.label)}` }, h("span", { class: "v", text: f.label }), x);
+        return h("span", { class: "tag fchip" }, FILTER_NAME[f.field] ? h("span", { class: "k", text: FILTER_NAME[f.field] }) : null, h("span", { class: "v", text: f.label }), x);
+      }), L.filters.length > 1 ? h("button", { type: "button", class: "btn quiet small", text: "Clear filters", onclick: () => { L.filters = []; computeRows(); renderFacets(); renderChips(); renderTable(); renderLibFoot(); renderEditor(); } }) : null);
+    }
+
+    function visibleCols() {
+      const w = L.width;
+      const k = new Set(["title", "artist", "time"]);
+      if (w >= 470) k.add("album");
+      if (w >= 540) k.add("labels");
+      if (w >= 700) k.add("year");
+      if (w >= 780) k.add("genre");
+      if (w >= 860) k.add("track");
+      return LCOL_ORDER.filter((c) => k.has(c));
+    }
+    function sortBy(c) {
+      if (L.sort.key === c && !(L.q.trim() && L.best)) L.sort.dir = -L.sort.dir;
+      else L.sort = { key: c, dir: 1 };
+      L.best = false;
+      core.saveSetting("librarySort", L.sort);
+      computeRows();
+      renderTable();
+    }
+    function renderTable() {
+      const cols = visibleCols();
+      L.cols = cols;
+      const tpl = cols.map((c) => LCOLS[c].w).join(" ");
+      V.cols.style.setProperty("--cols", tpl);
+      V.inner.style.setProperty("--cols", tpl);
+      const best = L.q.trim() && L.best;
+      fill(V.cols, cols.map((c) => {
+        const on = !best && L.sort.key === c;
+        return h("button", {
+          type: "button", class: `lc${on ? " on" : ""}${LCOLS[c].right ? " r" : ""}`, title: `Sort by ${LCOLS[c].label === "#" ? "track number" : LCOLS[c].label.toLowerCase()}`,
+          "aria-label": `Sort by ${LCOLS[c].label === "#" ? "track number" : LCOLS[c].label.toLowerCase()}`, onclick: () => sortBy(c),
+        }, h("span", { text: LCOLS[c].label }), on ? icon(L.sort.dir > 0 ? "up" : "down") : null);
+      }));
+      const none = !L.ids.length;
+      V.empty.hidden = !none;
+      if (none) {
+        V.empty.textContent = !libList().list.length
+          ? (S.music && S.music.scanning ? "Reading your music folder…" : "No audio files in this folder yet. Add some and they show up here.")
+          : L.q.trim() ? `Nothing matches “${L.q.trim()}”${L.filters.length ? " with these filters" : ""}.` : "No tracks have all of these tags.";
+      }
+      renderRows();
+    }
+    function lcell(c, t) {
+      switch (c) {
+        case "title": return h("div", { class: "c c-title" }, h("span", { class: t.title ? "t" : "t untagged", text: titleOf(t) }), t.exists ? null : h("span", { class: "sub", text: "File not found" }));
+        case "track": return h("div", { class: "c r num", text: t.track ? String(t.track) : "" });
+        case "year": return h("div", { class: "c r num", text: t.year ? String(t.year) : "" });
+        case "time": return h("div", { class: "c r num", text: t.duration ? clock(t.duration) : "" });
+        case "labels": return h("div", { class: "c c-labels", title: (t.labels || []).join(", ") || null }, labelsThatFit(t.labels || []));
+        default: return h("div", { class: `c c-${c}`, text: t[c] || "" });
+      }
+    }
+    /** As many labels as fit the column whole, then "+2" for the rest. */
+    let labW = 0;
+    function labelsThatFit(ls) {
+      const out = [];
+      let used = 0;
+      const est = (l) => 15 + l.length * 6.3;
+      for (let i = 0; i < ls.length; i++) {
+        const more = i < ls.length - 1 ? 28 : 0;
+        if (labW && i > 0 && used + est(ls[i]) + more > labW) {
+          out.push(h("span", { class: "tag lbl sm more", text: `+${ls.length - i}` }));
+          break;
+        }
+        out.push(labelChip(ls[i], true));
+        used += est(ls[i]);
+      }
+      return out;
+    }
+    function renderRows() {
+      if (!V.inner) return;
+      const total = L.rows.length;
+      V.inner.style.height = `${total * RH}px`;
+      const top = V.scroll.scrollTop;
+      const hgt = V.scroll.clientHeight || 600;
+      const a = Math.max(0, Math.floor(top / RH) - 6);
+      const b = Math.min(total, Math.ceil((top + hgt) / RH) + 6);
+      const kids = [];
+      for (let i = a; i < b; i++) {
+        const it = L.rows[i];
+        if (it.divider) {
+          kids.push(h("div", { class: "lr-div", role: "separator", style: { top: `${i * RH}px` } }, h("span", { text: `Close matches (${it.n})` })));
+          continue;
+        }
+        const t = it.t;
+        const on = L.sel.has(t.id);
+        const r = h("div", {
+          class: `lr${on ? " sel" : ""}${L.focus === t.id ? " focus" : ""}${t.exists ? "" : " missing"}`, role: "option", id: `lr-${t.id}`,
+          "aria-selected": String(on), dataset: { tid: t.id }, style: { top: `${i * RH}px` }, title: rel(t.path),
+        });
+        for (const c of L.cols) r.append(lcell(c, t));
+        kids.push(r);
+      }
+      V.inner.replaceChildren(...kids);
+      if (L.focus && L.at.has(L.focus)) V.scroll.setAttribute("aria-activedescendant", `lr-${L.focus}`);
+      else V.scroll.removeAttribute("aria-activedescendant");
+      // The labels column's width, measured once it's drawn (and again when it changes).
+      const cell = V.inner.querySelector(".c-labels");
+      if (cell && Math.abs(cell.clientWidth - labW) > 4) {
+        labW = cell.clientWidth;
+        renderRows();
+      }
+    }
+    function syncRows() {
+      for (const r of V.inner.children) {
+        const id = r.dataset.tid;
+        if (!id) continue;
+        const on = L.sel.has(id);
+        r.classList.toggle("sel", on);
+        r.classList.toggle("focus", id === L.focus);
+        r.setAttribute("aria-selected", String(on));
+      }
+      if (L.focus && L.at.has(L.focus)) V.scroll.setAttribute("aria-activedescendant", `lr-${L.focus}`);
+    }
+    function revealRow(id) {
+      const i = L.at.get(id);
+      if (i == null) return;
+      const top = i * RH;
+      const s = V.scroll;
+      if (top < s.scrollTop) s.scrollTop = top;
+      else if (top + RH > s.scrollTop + s.clientHeight) s.scrollTop = top + RH - s.clientHeight;
+      renderRows();
+    }
+    function askKeep(discard) {
+      modal({
+        title: "Discard your tag changes?",
+        body: [h("p", { text: `You changed tags for ${plural(L.editor.count(), "track")} and haven't saved them to the files yet.` })],
+        buttons: [
+          h("button", { type: "button", class: "btn", text: "Discard changes", onclick: () => { closeModal(); discard(); } }),
+          h("button", { type: "button", class: "btn primary", text: "Keep editing", "data-autofocus": "", onclick: closeModal }),
+        ],
+      });
+    }
+    function setSel(next, focus) {
+      if (!sameSet(next, L.sel) && L.editor && L.editor.dirty()) {
+        askKeep(() => { L.editor = null; setSel(next, focus); });
+        return false;
+      }
+      const changedSel = !sameSet(next, L.sel);
+      L.sel = next;
+      L.focus = focus;
+      syncRows();
+      renderLibFoot();
+      if (changedSel) renderEditor(true);
+      return true;
+    }
+    function renderLibFoot() {
+      const all = libList().list.length;
+      const n = L.ids.length;
+      const sel = L.ids.filter((x) => L.sel.has(x));
+      const dur = (ids) => ids.reduce((a, id) => a + (track(id).duration || 0), 0);
+      const p = core.pl();
+      fill(V.foot,
+        h("p", { class: "lib-count" },
+          L.q.trim() || L.filters.length ? `${n} of ${plural(all, "track")}` : plural(all, "track"),
+          n ? `, ${length(dur(L.ids))}` : "",
+          sel.length ? `. ${sel.length} selected, ${clock(dur(sel))}: drag ${sel.length === 1 ? "it" : "them"} onto a playlist on the left.` : ". Drag tracks onto a playlist on the left; double-click adds one to the open playlist."),
+        sel.length ? h("div", { class: "tools" },
+          p ? h("button", { type: "button", class: "btn small", text: `Add to ${p.name}`, onclick: () => addToCurrent(sel) }) : null,
+          h("button", { type: "button", class: "btn small", text: "New playlist", onclick: () => { core.newPlaylist("From the library", sel); core.setView("playlist"); } })) : null);
+    }
+    function renderEditor(force) {
+      const ids = LX.ordered();
+      const ed = L.editor;
+      if (!ids.length) {
+        if (ed && ed.dirty()) return;
+        L.editor = null;
+        fill(V.edit,
+          h("div", { class: "ted-idle" },
+            h("h3", { text: "Tags" }),
+            h("p", { text: "Select a track to see its tags here and change them. Select several to change them all at once: a genre, an album artist, or labels of your own." }),
+            h("p", { text: "Labels are your own tags, like “road trip”, “kids” or “sleep”. Browse by them on the left, and search for them." })));
+        return;
+      }
+      const same = ed && ed.ids.length === ids.length && ed.ids.every((x, i) => x === ids[i]);
+      if (same && (ed.dirty() || (!force && (ed.v === S.tracksVersion || V.edit.contains(document.activeElement))))) return;
+      L.editor = makeEditor(ids, { onSaved: () => {} });
+      const top = V.edit.scrollTop;
+      fill(V.edit, L.editor.el);
+      if (same) V.edit.scrollTop = top;
+    }
+    function revealInLibrary(id) {
+      core.setView("library");
+      L.q = "";
+      V.q.value = "";
+      L.filters = [];
+      computeRows();
+      L.anchor = id;
+      setSel(new Set([id]), id);
+      renderView();
+      revealRow(id);
+      V.scroll.focus({ preventScroll: true });
+    }
+
+    // ---- events from the app ------------------------------------------------------------------
+    function onProgress(p) {
+      S.libProgress = p;
+      if (S.music && !S.music.scanning) S.music = { ...S.music, scanning: true };
+      if (S.view === "library" && V.root && !V.headRaf) V.headRaf = requestAnimationFrame(() => { V.headRaf = 0; renderLibHead(); core.renderDisplay(); });
+    }
+    function onScanned(x) {
+      scanEvents++;
+      S.music = x.info;
+      S.libProgress = null;
+      if (x.tracks && x.tracks.length) core.putTracks(x.tracks);
+      else refresh();
+      if (S.view === "library") core.renderDisplay();
+    }
+    function onKey(e) {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        if (S.view === "library" && root()) { V.q.focus(); V.q.select(); } else openSearch();
+        return true;
+      }
+      return false;
+    }
+    /** For the display band, while the library is open. */
+    function display() {
+      const m = S.music || {};
+      const p = S.libProgress;
+      const n = libList().list.length;
+      if (m.scanning) return { main: "SCANNING", count: p && p.total ? String(Math.floor((100 * p.done) / p.total)) : "", unit: p && p.total ? "%" : "", time: "", sub: statusText() };
+      if (!root()) return { main: "LIBRARY", count: "", unit: "", time: "", sub: "Choose the folder your music is in." };
+      return { main: "LIBRARY", count: n < 1000 ? String(n) : "", unit: n < 1000 ? "TRK" : "", time: "", sub: `${plural(n, "track")} in ${root()}.` };
+    }
+
+    return {
+      tagChips, rowTags(t, ids) {
+        const chips = tagChips(t);
+        const why = whyNot(t);
+        return h("div", { class: "row-tags" },
+          h("div", { class: "tags" }, chips.length ? chips : h("span", { class: "tags-none", text: "No tags" })),
+          !why ? h("button", { type: "button", class: "btn quiet small", text: "Edit tags…", onclick: (ev) => { ev.stopPropagation(); editTagsDialog(ids && ids.includes(t.id) ? ids : [t.id]); } })
+            : root() && t.exists && !inMusic(t) ? h("span", { class: "tags-why", text: "Not in your music folder" }) : null);
+      },
+      canTag: (t) => !whyNot(t),
+      inMusic, editTagsDialog, renameDialog, renderView, refresh, useFolder, renderSearch, openSearch, closeSearch, searchRoot,
+      onProgress, onScanned, onKey, display, revealInLibrary,
+      /** The folder's state from the window's start, unless a scan's event beat it here. */
+      initial(music) {
+        if (!scanEvents) S.music = music || null;
+      },
+      /** The settings are in: the table's sort order. */
+      loaded() {
+        try {
+          const v = JSON.parse((S.settings && S.settings.librarySort) || "{}");
+          if (v && LCOLS[v.key] && (v.dir === 1 || v.dir === -1)) L.sort = { key: v.key, dir: v.dir };
+        } catch { /* keep album order */ }
+      },
+      state: { L, SE },
+    };
+  };
+})(window.P2U = window.P2U || {});

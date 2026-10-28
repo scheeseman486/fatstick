@@ -57,6 +57,15 @@
       stop: () => invoke("player_stop"),
       volume: (volume) => invoke("player_volume", { volume }),
       about: () => invoke("about"),
+      libraryInfo: () => invoke("library_info"),
+      librarySetRoot: (path) => invoke("library_set_root", { path }),
+      libraryScan: () => invoke("library_scan"),
+      libraryWriteTags: (jobs) => invoke("library_write_tags", { jobs }),
+      libraryRename: (jobs) => invoke("library_rename", { jobs }),
+      async pickFolder(title) {
+        const r = await T.dialog.open({ directory: true, multiple: false, title });
+        return r || null;
+      },
       on(name, fn) { T.event.listen(name, (e) => fn(e.payload)); },
       onFileDrop(cb) {
         const w = T.webviewWindow && T.webviewWindow.getCurrentWebviewWindow();
@@ -97,6 +106,43 @@
       }, ms);
     }
 
+    // The music folder: the demo's ~/Music, "scanned" in a moment. Tag edits
+    // and renames change the tracks in memory only.
+    const music = { ...D.music };
+    const inMusic = (t) => !!music.root && t.path.startsWith(`${music.root}/`);
+    function fakeScan() {
+      music.scanning = true;
+      const files = [...tracks.values()].filter((t) => inMusic(t) && t.exists);
+      let done = 0;
+      ev.emit("library-progress", { phase: "walk", done: 0, total: 0 });
+      const step = () => {
+        done = Math.min(files.length, done + 9);
+        ev.emit("library-progress", { phase: "read", done, total: files.length });
+        if (done < files.length) { setTimeout(step, 60); return; }
+        Object.assign(music, { scanning: false, lastScan: Date.now(), last: { files: files.length, changed: [], added: 0, moved: 0, missing: [...tracks.values()].filter((t) => inMusic(t) && !t.exists).length, failed: 0 } });
+        ev.emit("library-scanned", { info: { ...music }, tracks: [] });
+      };
+      setTimeout(step, 200);
+    }
+    const NUM = { year: 9999, track: 999, disc: 99 };
+    function applyEdit(t, e) {
+      const next = { ...t };
+      for (const [k, v] of Object.entries(e)) {
+        if (v == null) continue;
+        if (k === "labels") { next.labels = v.map((l) => l.trim().replace(/;/g, ",")).filter(Boolean).filter((l, i, a) => a.findIndex((x) => x.toLowerCase() === l.toLowerCase()) === i); continue; }
+        if (k in NUM) {
+          const s = String(v).trim();
+          if (!s) { next[k] = null; continue; }
+          const n = parseInt(s, 10);
+          if (!(n > 0 && n <= NUM[k])) throw new Error(`The ${k === "track" ? "track number" : k === "disc" ? "disc number" : "year"} must be a number from 1 to ${NUM[k]}, not "${s}"`);
+          next[k] = n;
+          continue;
+        }
+        next[k] = String(v).trim();
+      }
+      return next;
+    }
+
     // The silent player: demo tracks have no audio; dropped files play for real.
     const P = { audio: null, timer: null, token: "", pos: 0, dur: 0, playing: false };
     function pev(state, error) {
@@ -124,6 +170,7 @@
           dataDir: "",
           version: "demo",
           libraryId: D.libraryId,
+          music: { ...music },
           openPaths: [],
         };
       },
@@ -239,6 +286,54 @@
       async stop() { stopAudio(); P.playing = false; P.pos = 0; pev("stopped"); },
       async volume(v) { if (P.audio) P.audio.volume = v; },
       async about() { return { version: "demo", ffmpeg: null, dataDir: "", cache: await this.cacheInfo() }; },
+      async libraryInfo() { return { ...music }; },
+      async librarySetRoot(path) {
+        Object.assign(music, { root: path, watching: true, error: null, last: null, lastScan: null });
+        fakeScan();
+        return { ...music };
+      },
+      async libraryScan() { if (music.root && !music.scanning) fakeScan(); },
+      async libraryWriteTags(jobs) {
+        const out = { tracks: [], failed: [] };
+        await sleep(250);
+        for (const j of jobs) {
+          const t = tracks.get(j.trackId);
+          try {
+            if (!t || !inMusic(t)) throw new Error("That file isn't in your music folder, so it's left as it is.");
+            if (t.codec === "wma") throw new Error("tags can't be written into WMA files");
+            const next = applyEdit(t, j.edit);
+            tracks.set(t.id, next);
+            out.tracks.push(next);
+          } catch (e) {
+            out.failed.push({ trackId: j.trackId, error: e.message });
+          }
+        }
+        return out;
+      },
+      async libraryRename(jobs) {
+        const out = { tracks: [], failed: [] };
+        await sleep(150);
+        const taken = new Set([...tracks.values()].map((t) => t.path.toLowerCase()));
+        for (const j of jobs) {
+          const t = tracks.get(j.trackId);
+          const dir = t ? t.path.slice(0, t.path.lastIndexOf("/") + 1) : "";
+          const dot = j.name.lastIndexOf(".");
+          const ext = (p) => p.slice(p.lastIndexOf(".")).toLowerCase();
+          const dst = dir + j.name;
+          if (!t || !inMusic(t)) out.failed.push({ trackId: j.trackId, error: "That file isn't in your music folder, so it's left as it is." });
+          else if (ext(dst) !== ext(t.path)) out.failed.push({ trackId: j.trackId, error: `${j.name} would change the file's type.` });
+          else if (dst.toLowerCase() !== t.path.toLowerCase() && taken.has(dst.toLowerCase())) out.failed.push({ trackId: j.trackId, error: `A file named ${j.name} is already there.` });
+          else {
+            taken.delete(t.path.toLowerCase());
+            taken.add(dst.toLowerCase());
+            const next = { ...t, path: dst, filename: j.name.slice(0, dot) };
+            tracks.set(t.id, next);
+            out.tracks.push(next);
+          }
+        }
+        return out;
+      },
+      async pickFolder() { return "~/Music"; },
       on: ev.on,
     };
   }

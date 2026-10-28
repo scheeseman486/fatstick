@@ -66,6 +66,18 @@
     scan: null,
     ffmpegError: null,
     version: "",
+    settings: {},
+    /** "playlist", or "library" while the library view has the middle of the window. */
+    view: "playlist",
+    /** The sidebar shows the search panel. */
+    searching: false,
+    /** The playlist row showing its tags. */
+    expanded: null,
+    /** The music folder and its scan, and the scan's progress. */
+    music: null,
+    libProgress: null,
+    /** Bumped whenever a track changes, so search indexes know to rebuild. */
+    tracksVersion: 0,
     player: { entryId: null, playlistId: null, playing: false, pos: 0, dur: 0, asOnStick: false, volume: 0.8, silent: false, error: null, from: "source" },
   };
   const hostTheme = document.documentElement.getAttribute("data-theme");
@@ -77,6 +89,24 @@
   const unknownTrack = (id) => ({ id, path: "", filename: "(a track the library lost)", title: "", artist: "", album: "", codec: "", exists: false, duration: 0, size: 0 });
   const track = (id) => S.tracks.get(id) || unknownTrack(id);
   const device = (id) => S.sticks.find((s) => s.id === id);
+  /** A track from the library, new or changed. */
+  function putTrack(t) {
+    const old = S.tracks.get(t.id);
+    S.tracks.set(t.id, old && old.analysisError && t.lufs == null ? { ...t, analysisError: old.analysisError } : t);
+    S.tracksVersion++;
+  }
+  /** Tracks changed outside the window (a scan, a tag edit, a rename): show them. */
+  function putTracks(ts) {
+    for (const t of ts) putTrack(t);
+    if (ts.length) {
+      scheduleRender();
+      scheduleWork();
+    }
+    lib.refresh();
+  }
+  const lib = P.librarySetup({
+    S, api, DEMO, track, pl, collator, insertTracks, newPlaylist, putTracks, renderSide, renderDisplay, saveSetting, setView, startTrackDrag,
+  });
   /** What a USB stick holds, going by the note its last sync left on it (or,
    * for a stick the OS hasn't mounted, the volume serial that sync recorded):
    * `{ set, note, ours }`, where `set` is this library's stick (set) on it,
@@ -529,6 +559,7 @@
   function openPlaylist(id) {
     if (S.current === id) return;
     S.current = id;
+    S.expanded = null;
     selectOnly(null);
     const sets = setsFor(id);
     if (sets.length && !sets.includes(stickSet())) S.setId = sets[0].id;
@@ -539,16 +570,26 @@
   }
 
   // ---- rendering: sidebar ------------------------------------------------------------------
+  /** The foot of the sidebar: the search button, bottom left. */
+  function sideFoot() {
+    return h("div", { class: "side-foot" },
+      h("button", {
+        type: "button", class: `srch-btn${S.searching ? " on" : ""}`, id: "srch-btn", "aria-pressed": String(S.searching),
+        title: S.searching ? "Close the search (Esc)" : "Search your music (Ctrl+F)",
+        onclick: () => (S.searching ? lib.closeSearch() : lib.openSearch()),
+      }, icon("search"), h("span", { text: S.searching ? "Close search" : "Search" })));
+  }
   function renderSide() {
     if (S.renaming) return;
     const side = $("side");
+    if (S.searching) { lib.renderSearch(side, sideFoot()); return; }
     const plItems = S.playlists.map((p) => {
       const ts = p.entries.map((e) => track(e.trackId));
       const dur = ts.reduce((a, t) => a + (t.exists ? t.duration || 0 : 0), 0);
       return h("li", null, h("button", {
         type: "button", class: `side-item${p.id === S.current ? " current" : ""}`, dataset: { pl: p.id },
         "aria-current": p.id === S.current ? "page" : null,
-        onclick: () => openPlaylist(p.id),
+        onclick: () => { if (S.view !== "playlist") setView("playlist"); openPlaylist(p.id); },
         ondblclick: () => startRename("playlist", p.id),
         oncontextmenu: (e) => { e.preventDefault(); playlistMenu(p, { x: e.clientX, y: e.clientY }); },
       }, h("span", { class: "nm", text: p.name }), h("span", { class: "mt", text: `${plural(p.entries.length, "track")}${p.join ? " as one" : ""}, ${length(dur)}` })));
@@ -563,7 +604,7 @@
         : st.never ? h("span", { class: "flag ok", text: "not synced" }) : st.current ? null : h("span", { class: "flag", text: "out of date" });
       return h("li", null, h("button", {
         type: "button", class: `side-item${s.id === S.setId ? " current" : ""}${inNow ? " plugged" : ""}`, dataset: { set: s.id },
-        onclick: () => selectSet(s.id),
+        onclick: () => { if (S.view !== "playlist") setView("playlist"); selectSet(s.id); },
         ondblclick: () => openLayout(s.id),
         title: "Double-click to see everything on this stick",
         oncontextmenu: (e) => { e.preventDefault(); setMenu(s, { x: e.clientX, y: e.clientY }); },
@@ -580,6 +621,7 @@
         h("div", { class: "side-h" }, h("h2", { text: "Sticks" }),
           h("button", { type: "button", class: "btn quiet small icon", title: "New stick", "aria-label": "New stick", onclick: newSet }, icon("plus"))),
         h("ul", null, setItems)),
+      sideFoot(),
     );
   }
 
@@ -893,11 +935,13 @@
       const it = byEntry.get(e.id);
       const t = it.t;
       const playing = pp.entryId === e.id && pp.playlistId === p.id;
+      const open = S.expanded === e.id;
       const r = h("div", {
-        class: `row${S.sel.has(e.id) ? " sel" : ""}${S.focus === e.id ? " focus" : ""}${t.exists ? "" : " missing"}${playing ? " playing" : ""}`,
-        role: "option", id: `row-${e.id}`, dataset: { id: e.id }, "aria-selected": String(S.sel.has(e.id)), title: t.path,
+        class: `row${S.sel.has(e.id) ? " sel" : ""}${S.focus === e.id ? " focus" : ""}${t.exists ? "" : " missing"}${playing ? " playing" : ""}${open ? " open" : ""}`,
+        role: "option", id: `row-${e.id}`, dataset: { id: e.id }, "aria-selected": String(S.sel.has(e.id)), "aria-expanded": String(open), title: t.path,
       });
       for (const c of cols) r.append(cell(c, it, i, padN, playing, cols, prf));
+      if (open) r.append(lib.rowTags(t, selectedInOrder().map((x) => x.trackId)));
       return r;
     });
     list.replaceChildren(...rows);
@@ -976,7 +1020,7 @@
       const dur = selectedInOrder().reduce((a, e) => a + (track(e.trackId).duration || 0), 0);
       foot.textContent = `${n} selected, ${clock(dur)}. Drag them anywhere in the list, or onto a playlist on the left to add them there.`;
     } else {
-      foot.textContent = "Drag tracks to reorder them, or select and press Alt+↑ or Alt+↓. Removing a track never deletes its file.";
+      foot.textContent = "Click a track to see its tags. Drag tracks to reorder them, or select and press Alt+↑ or Alt+↓. Removing a track never deletes its file.";
     }
   }
 
@@ -1341,6 +1385,8 @@
       count = String(Math.floor(S.sync.pct));
       unit = "%";
       sub = S.sync.msg;
+    } else if (S.view === "library" && !pp.entryId) {
+      ({ main, count, unit, time, sub } = lib.display());
     } else if (S.scan) {
       main = "READING";
       count = S.scan.total ? String(Math.floor((100 * S.scan.done) / S.scan.total)) : "";
@@ -1383,6 +1429,7 @@
     renderStick();
     renderPlayer();
     renderDisplay();
+    if (S.view === "library") lib.renderView();
   }
 
   // ---- stick layout windows ------------------------------------------------------------------
@@ -1450,7 +1497,7 @@
         body: [h("p", { text: `The playlist points at ${t.path}, and there's no file there now. Point the entry at the file's new place; the file itself isn't changed.` })],
         buttons: [
           h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal }),
-          h("button", { type: "button", class: "btn primary", text: "Use the demo copy", onclick: async () => { await api.locate(t.id); closeModal(); renderAll(); scheduleWork(); toast(`Located ${t.title} in ~/Music/Old library.`); } }),
+          h("button", { type: "button", class: "btn primary", text: "Use the demo copy", onclick: async () => { await api.locate(t.id); S.tracksVersion++; closeModal(); renderAll(); scheduleWork(); toast(`Located ${t.title} in ~/Music/Old library.`); } }),
         ],
       });
       return;
@@ -1464,7 +1511,7 @@
       toast(`Couldn't use that file: ${e}`);
       return;
     }
-    S.tracks.set(r.track.id, r.track);
+    putTrack(r.track);
     if (r.track.id !== t.id) {
       edit(`Locate ${r.track.title || r.track.filename}`, () => {
         for (const p of S.playlists) for (const e of p.entries) if (e.trackId === t.id) e.trackId = r.track.id;
@@ -1487,7 +1534,7 @@
               for (const [id, p] of r.matches) {
                 try {
                   const x = await api.locate(id, p);
-                  S.tracks.set(x.track.id, x.track);
+                  putTrack(x.track);
                 } catch { /* left missing */ }
               }
               renderAll();
@@ -1749,6 +1796,7 @@
       renderList();
       renderStick();
       renderSide();
+      lib.refresh();
     }, 150);
   }
   function onPrepared(p) {
@@ -2041,7 +2089,7 @@
     if (!audioFiles.length) { if (!lists.length) toast("Those aren't audio files this app reads."); return; }
     toast(`Reading ${plural(audioFiles.length, "file")}…`);
     const ts = await api.addFileObjects(audioFiles);
-    for (const t of ts) S.tracks.set(t.id, t);
+    for (const t of ts) putTrack(t);
     sortDropped(ts);
     insertTracks(ts.map((t) => t.id), target);
   }
@@ -2073,7 +2121,7 @@
       S.scan = null;
       renderDisplay();
     }
-    for (const t of r.tracks) S.tracks.set(t.id, t);
+    for (const t of r.tracks) putTrack(t);
     // A new playlist made from one folder takes the folder's name.
     const one = paths.length === 1 && paths[0].replace(/[\\/]+$/, "");
     const folderName = one && r.trackIds.some((id) => track(id).path !== one) ? one.split(/[\\/]/).pop() : null;
@@ -2224,7 +2272,7 @@
     else { pending = { collapse: id }; S.focus = id; }
     syncSelection();
     if (!canDrag) { pending = null; return; }
-    drag = { x: e.clientX, y: e.clientY, started: false, pointerId: e.pointerId, target: null, rowId: id };
+    drag = { x: e.clientX, y: e.clientY, started: false, pointerId: e.pointerId, target: null, rowId: id, plain: !e.shiftKey && !mod };
     $("list").setPointerCapture(e.pointerId);
   }
   function onListPointerMove(e) {
@@ -2285,7 +2333,11 @@
       // (no text selection while dragging), which also stops dblclick events.
       const now = performance.now();
       if (commit && lastTap && lastTap.id === d.rowId && now - lastTap.t < 450 && Math.hypot(lastTap.x - d.x, lastTap.y - d.y) < 6) { lastTap = null; playEntry(d.rowId); }
-      else lastTap = { id: d.rowId, t: now, x: d.x, y: d.y };
+      else {
+        lastTap = { id: d.rowId, t: now, x: d.x, y: d.y };
+        // A plain click shows the track's tags under it, or hides them again.
+        if (commit && d.plain) toggleTags(d.rowId);
+      }
       return;
     }
     if (!commit || !d.target) return;
@@ -2294,6 +2346,116 @@
       const tids = d.ids.map((id) => pl().entries.find((x) => x.id === id).trackId);
       addTracks(tids, d.target.id);
       toast(`Added ${plural(tids.length, "track")} to ${pl(d.target.id).name}.`, { label: "Undo", run: undo });
+    }
+  }
+
+  function toggleTags(entryId) {
+    S.expanded = S.expanded === entryId ? null : entryId;
+    renderList();
+  }
+
+  // ---- dragging tracks in from the search panel and the library ----------------------------------------
+  // The same drop targets as the list's own drag: a place in the list, a
+  // playlist on the left, or the space under them for a new playlist.
+  let tdrag = null;
+  function startTrackDrag(e, el, getIds, opts = {}) {
+    tdrag = { x: e.clientX, y: e.clientY, started: false, pointerId: e.pointerId, el, getIds, opts, target: null, ids: [] };
+    try { el.setPointerCapture(e.pointerId); } catch { /* the pointer is gone already */ }
+    el.addEventListener("pointermove", tdragMove);
+    el.addEventListener("pointerup", tdragUp);
+    el.addEventListener("pointercancel", tdragCancel);
+    el.addEventListener("lostpointercapture", tdragLost);
+  }
+  function tdragMove(e) {
+    const d = tdrag;
+    if (!d || e.pointerId !== d.pointerId) return;
+    if (!d.started) {
+      if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 5) return;
+      d.ids = d.getIds();
+      if (!d.ids.length) { endTrackDrag(false); return; }
+      d.started = true;
+      for (const r of d.el.querySelectorAll(".sel")) r.classList.add("dragging");
+      $("drag-badge").hidden = false;
+      tdragScroll();
+    }
+    d.px = e.clientX;
+    d.py = e.clientY;
+    tdragUpdate();
+  }
+  function tdragUpdate() {
+    const d = tdrag;
+    const badge = $("drag-badge");
+    badge.style.left = `${d.px + 14}px`;
+    badge.style.top = `${d.py + 12}px`;
+    const t = targetAt(d.px, d.py);
+    d.target = t && !(t.kind === "list" && (S.view !== "playlist" || !pl())) ? t : null;
+    if (d.target && d.target.kind === "list") showLine(d.target.index);
+    else hideLine();
+    markSideTarget(d.target && d.target.kind === "playlist" ? d.target.id : null);
+    $("side").classList.toggle("drop-new", !!d.target && d.target.kind === "new");
+    badge.classList.toggle("nowhere", !d.target);
+    const what = d.ids.length === 1 ? (track(d.ids[0]).title || track(d.ids[0]).filename) : `${d.ids.length} tracks`;
+    const n = d.ids.length === 1 ? "1 track" : `${d.ids.length} tracks`;
+    badge.textContent = !d.target ? what
+      : d.target.kind === "playlist" ? `Add ${n} to ${pl(d.target.id).name}`
+        : d.target.kind === "new" ? `New playlist with ${n}` : `Add ${what} here`;
+  }
+  function tdragScroll() {
+    const d = tdrag;
+    if (!d || !d.started) return;
+    if (S.view === "playlist") {
+      const list = $("list");
+      const r = list.getBoundingClientRect();
+      const edge = 36;
+      let v = 0;
+      if (d.px > r.left && d.px < r.right) {
+        if (d.py < r.top + edge && d.py > r.top - 20) v = -Math.ceil((r.top + edge - d.py) / 3);
+        else if (d.py > r.bottom - edge && d.py < r.bottom + 20) v = Math.ceil((d.py - (r.bottom - edge)) / 3);
+      }
+      if (v) { list.scrollTop += v; tdragUpdate(); }
+    }
+    requestAnimationFrame(tdragScroll);
+  }
+  function endTrackDrag(commit) {
+    const d = tdrag;
+    tdrag = null;
+    if (!d) return;
+    d.el.removeEventListener("pointermove", tdragMove);
+    d.el.removeEventListener("pointerup", tdragUp);
+    d.el.removeEventListener("pointercancel", tdragCancel);
+    d.el.removeEventListener("lostpointercapture", tdragLost);
+    hideLine();
+    markSideTarget(null);
+    $("side").classList.remove("drop-new");
+    $("drag-badge").hidden = true;
+    for (const r of d.el.querySelectorAll(".dragging")) r.classList.remove("dragging");
+    if (!d.started) { if (commit && d.opts.onTap) d.opts.onTap(); return; }
+    if (!commit || !d.target) return;
+    insertTracks(d.ids, d.target, d.opts.name || (d.ids.length === 1 ? track(d.ids[0]).title || "New playlist" : "From the library"));
+  }
+  function tdragUp(e) { if (tdrag && e.pointerId === tdrag.pointerId) endTrackDrag(true); }
+  function tdragCancel(e) { if (tdrag && e.pointerId === tdrag.pointerId) endTrackDrag(false); }
+  function tdragLost() { if (tdrag) endTrackDrag(true); }
+
+  // ---- the library view ----------------------------------------------------------------------------
+  function setView(v) {
+    if (v === S.view) { if (v === "library") lib.renderView(); return; }
+    S.view = v;
+    if (v === "library" && S.searching) { S.searching = false; $("app").classList.remove("searching"); }
+    $("app").classList.toggle("lib-mode", v === "library");
+    $("libview").hidden = v !== "library";
+    const b = $("lib-btn");
+    b.setAttribute("aria-pressed", String(v === "library"));
+    b.classList.toggle("on", v === "library");
+    if (v === "library") {
+      lib.renderView();
+      renderSide();
+      renderDisplay();
+      const q = $("lib-q");
+      if (q && S.music && S.music.root) q.focus({ preventScroll: true });
+    } else {
+      renderAll();
+      $("list").focus({ preventScroll: true });
     }
   }
 
@@ -2357,13 +2519,17 @@
   function onKey(e) {
     if (modalOpen() || !$("menu").hidden) return;
     if (drag && e.key === "Escape") { e.preventDefault(); endDrag(false); return; }
+    if (tdrag && e.key === "Escape") { e.preventDefault(); endTrackDrag(false); return; }
+    if (lib.onKey(e)) return;
+    if (S.searching && e.key === "Escape" && !e.target.closest("input, select, textarea")) { e.preventDefault(); lib.closeSearch(); return; }
     if (e.target.closest("input, select, textarea")) return;
     const mod = e.ctrlKey || e.metaKey;
     const k = e.key.toLowerCase();
     if (mod && k === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (mod && k === "y") { e.preventDefault(); redo(); return; }
     if (mod && k === "o") { e.preventDefault(); addFiles(false); return; }
-    if (e.key === " " && !e.target.closest("button")) { e.preventDefault(); togglePlay(); return; }
+    if (e.key === " " && !e.target.closest("button, [role=listbox]:not(#list)")) { e.preventDefault(); togglePlay(); return; }
+    if (S.view !== "playlist") return;
     const inList = document.activeElement === $("list") || document.activeElement === document.body;
     if (!inList) return;
     const ids = entryIds();
@@ -2388,6 +2554,7 @@
     if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); removeSelected(); return; }
     if (e.key === "Enter" && S.focus) { e.preventDefault(); playEntry(S.focus); return; }
     if (k === "e" && !mod && !e.altKey && S.sel.size) { e.preventDefault(); edgesDialog([...S.sel]); return; }
+    if (k === "t" && !mod && !e.altKey && S.focus) { e.preventDefault(); toggleTags(S.focus); return; }
     if (e.key === "Escape") { selectOnly(null); syncSelection(); }
   }
 
@@ -2410,9 +2577,13 @@
       "-",
       { label: n === 1 ? "Start and end…" : `Start and end of ${n} tracks…`, key: "E", action: () => edgesDialog([...S.sel]) },
       "-",
+      n === 1 ? { label: S.expanded === id ? "Hide the tags" : "Show the tags", key: "T", action: () => toggleTags(id) } : null,
+      { label: n === 1 ? "Edit tags…" : `Edit the tags of ${n} tracks…`, action: () => lib.editTagsDialog(tids()), disabled: !tids().some((x) => lib.canTag(track(x))) },
+      lib.inMusic(t) ? { label: "Show in the library", action: () => lib.revealInLibrary(t.id) } : null,
+      "-",
       t.exists ? { label: "Show where the file is", action: () => toast(t.path) } : { label: "Locate…", action: () => locate(t) },
       { label: n === 1 ? "Remove from playlist" : `Remove ${n} from playlist`, key: "Delete", action: removeSelected },
-    ]);
+    ].filter(Boolean));
   }
 
   // ---- theme and the app menu -----------------------------------------------------------------------
@@ -2428,6 +2599,9 @@
       { label: "Add a folder…", action: () => addFiles(true) },
       { label: "Import a playlist file…", action: importPlaylist },
       { label: "Export this playlist…", action: exportPlaylist, disabled: !pl() },
+      "-",
+      { label: "Search your music", key: "Ctrl+F", action: () => lib.openSearch() },
+      { label: S.view === "library" ? "Back to the playlist" : "Music library", action: () => setView(S.view === "library" ? "playlist" : "library") },
       "-",
       { heading: "Theme" },
       theme("system", "Same as the system"),
@@ -2482,6 +2656,7 @@
   async function init() {
     buildStick();
     $("app-menu").addEventListener("click", (e) => appMenu(e.currentTarget));
+    $("lib-btn").addEventListener("click", () => setView(S.view === "library" ? "playlist" : "library"));
     const list = $("list");
     list.addEventListener("pointerdown", onListPointerDown);
     list.addEventListener("pointermove", onListPointerMove);
@@ -2497,6 +2672,8 @@
     api.on("player", onPlayer);
     api.on("sync-progress", onSyncProgress);
     api.on("scan-progress", (p) => { S.scan = p; renderDisplay(); });
+    api.on("library-progress", (p) => lib.onProgress(p));
+    api.on("library-scanned", (x) => lib.onScanned(x));
 
     let d;
     try {
@@ -2510,11 +2687,14 @@
     S.libraryId = d.libraryId;
     S.ffmpegError = d.ffmpegError;
     const st = d.settings || {};
+    S.settings = st;
+    lib.initial(d.music);
+    lib.loaded();
     if (["system", "light", "dark"].includes(st.theme)) S.theme = st.theme;
     applyTheme();
     try { Object.assign(S.cols, JSON.parse(st.columns || "{}")); } catch { /* keep the defaults */ }
     if (st.volume) S.player.volume = Number(st.volume) || 0.8;
-    for (const t of d.tracks) S.tracks.set(t.id, { ...t });
+    for (const t of d.tracks) putTrack({ ...t });
     S.playlists = clone(d.playlists);
     S.profiles = clone(d.profiles);
     S.sets = clone(d.sets);
@@ -2544,15 +2724,13 @@
     persist();
     scheduleWork();
     // For the app's self-test (tests/app_e2e.py) and for poking around in the inspector.
-    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, stopPlayback, refreshSticks, holder, selectSet, openLayout, layoutData, ready: true };
+    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, stopPlayback, refreshSticks, holder, selectSet, openLayout, layoutData, setView, lib, toggleTags, ready: true };
     if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Playlist2USB to get it back.");
     if (!DEMO) {
       stickPoll = setInterval(() => { if (!(S.sync && S.sync.running)) refreshSticks(true); }, 3000);
       api.refreshTracks().then((ts) => {
-        for (const t of ts) {
-          const old = S.tracks.get(t.id);
-          S.tracks.set(t.id, old && old.analysisError ? { ...t, analysisError: old.analysisError } : t);
-        }
+        for (const t of ts) putTrack(t);
+        lib.refresh();
         scheduleRender();
         scheduleWork();
       }).catch(() => {});
