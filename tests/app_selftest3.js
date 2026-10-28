@@ -5,7 +5,7 @@
 // copies one in once the renames are on disk) show up by itself. The files
 // are checked with ffprobe afterwards.
 (async () => {
-  const cfg = window.__P2U_SELFTEST_CONFIG;
+  const cfg = window.__FATSTICK_SELFTEST_CONFIG;
   const T = window.__TAURI__;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const lines = [];
@@ -42,7 +42,7 @@
   const rowOf = (title) => $$(".lr").find((r) => r.querySelector(".t").textContent === title);
   const toast = () => ($("#toast").hidden ? "" : $("#toast").textContent);
   try {
-    const A = await until(() => window.P2U.app && window.P2U.app.ready && window.P2U.app, 20000);
+    const A = await until(() => window.Fatstick.app && window.Fatstick.app.ready && window.Fatstick.app, 20000);
     if (!check("the window started", !!A)) throw new Error("no app");
     const S = A.S;
     const before = new Map(S.playlists[0].entries.map((e) => [e.trackId, A.track(e.trackId).path]));

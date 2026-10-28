@@ -8,10 +8,10 @@ order from the image bytes.
 
 Needs: qemu-system-x86, busybox-static, an Ubuntu kernel + its modules
 (apt-get download linux-image-<ver>-generic linux-modules-<ver>-generic;
-dpkg -x both into one folder), a static p2u (cargo build --release -p p2u-cli
+dpkg -x both into one folder), a static fatstick (cargo build --release -p fatstick-cli
 --target x86_64-unknown-linux-musl), dosfstools, fatsort.
 
-    python3 tests/kernel_vfat.py --kroot <extracted kernel dir> --p2u <static p2u>
+    python3 tests/kernel_vfat.py --kroot <extracted kernel dir> --fatstick <static fatstick>
 """
 import argparse
 import glob
@@ -33,16 +33,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCENARIOS = [
     {
         "name": "fresh",
-        "label": "Freshly formatted stick, p2u copy into a new folder",
+        "label": "Freshly formatted stick, fatstick copy into a new folder",
         "mkfs": ["-F", "32", "-s", "1"],
         "size_mb": 48,
         "setup": "",
-        "copy": 'p2u copy /pl/A.m3u8 --dest $M --folder "Road Trip"',
+        "copy": 'fatstick copy /pl/A.m3u8 --dest $M --folder "Road Trip"',
         "names": "A_numbered",
     },
     {
         "name": "used",
-        "label": "Used, nearly full stick: old folder and half the root files deleted, then p2u copy",
+        "label": "Used, nearly full stick: old folder and half the root files deleted, then fatstick copy",
         "mkfs": ["-F", "32", "-s", "1"],
         "size_mb": 40,
         "setup": """
@@ -54,7 +54,7 @@ rm -r "$M/Old Mix"
 i=0; for f in $M/*.dat; do i=$((i+1)); [ $((i % 2)) -eq 0 ] && rm "$f"; done
 sync
 """,
-        "copy": 'p2u copy /pl/A.m3u8 --dest $M --folder "Road Trip"',
+        "copy": 'fatstick copy /pl/A.m3u8 --dest $M --folder "Road Trip"',
         "names": "A_numbered",
     },
     {
@@ -97,7 +97,7 @@ sync
     },
     {
         "name": "toplevel_p2u",
-        "label": "Top level of a used stick via p2u copy --top-level",
+        "label": "Top level of a used stick via fatstick copy --top-level",
         "mkfs": ["-F", "32", "-s", "8"],
         "size_mb": 300,
         "setup": """
@@ -106,13 +106,13 @@ sync
 i=0; for f in $M/*.dat; do i=$((i+1)); [ $((i % 2)) -eq 0 ] && rm "$f"; done
 sync
 """,
-        "copy": "p2u copy /pl/A.m3u8 --dest $M --top-level",
+        "copy": "fatstick copy /pl/A.m3u8 --dest $M --top-level",
         "names": "A_numbered_top",
         "dir": "/",
     },
     {
         "name": "fat16_used",
-        "label": "Used FAT16 stick (fixed-size root): old folder deleted, then p2u copy",
+        "label": "Used FAT16 stick (fixed-size root): old folder deleted, then fatstick copy",
         "mkfs": ["-F", "16"],
         "size_mb": 64,
         "setup": """
@@ -122,14 +122,14 @@ sync
 rm -r "$M/Old Mix"; i=0; for f in $M/*.dat; do i=$((i+1)); [ $((i % 2)) -eq 0 ] && rm "$f"; done
 sync
 """,
-        "copy": 'p2u copy /pl/A.m3u8 --dest $M --folder "Road Trip"',
+        "copy": 'fatstick copy /pl/A.m3u8 --dest $M --folder "Road Trip"',
         "names": "A_numbered",
     },
 ]
 
 TRACKS = 60
 
-# How the VM's p2u derives names (and expected sizes) from the playlist.
+# How the VM's fatstick derives names (and expected sizes) from the playlist.
 SORT_ARGS = {
     "A_numbered": '--playlist /pl/A.m3u8 --folder "Road Trip"',
     "A_plain": '--playlist /pl/A.m3u8 --folder "Road Trip" --no-number',
@@ -177,12 +177,12 @@ def build_payload(work, rng):
     return order_a, order_b
 
 
-def build_initramfs(work, kroot, p2u, scenarios):
+def build_initramfs(work, kroot, fatstick, scenarios):
     ir = os.path.join(work, "ir")
     for d in ("bin", "dev", "proc", "sys", "mnt", "mods", "tmp"):
         os.makedirs(os.path.join(ir, d), exist_ok=True)
     shutil.copy("/bin/busybox", os.path.join(ir, "bin", "busybox"))
-    shutil.copy(p2u, os.path.join(ir, "bin", "p2u"))
+    shutil.copy(fatstick, os.path.join(ir, "bin", "fatstick"))
     for sub in ("music", "pl", "old", "root_files"):
         shutil.copytree(os.path.join(work, sub), os.path.join(ir, sub))
     for mod in ("nls_iso8859-1",):
@@ -207,11 +207,11 @@ def build_initramfs(work, kroot, p2u, scenarios):
             sc["copy"] + " >/dev/null 2>&1 || echo COPYFAIL",
             "sync; umount $M",
             # Raw order as the copy left it (read straight from the block device).
-            f'p2u verify {dev} {SORT_ARGS[sc["names"]]} > /tmp/before.json 2>&1; echo "<<BEFORE"; cat /tmp/before.json; echo ">>"',
+            f'fatstick verify {dev} {SORT_ARGS[sc["names"]]} > /tmp/before.json 2>&1; echo "<<BEFORE"; cat /tmp/before.json; echo ">>"',
             # FAT-level reorder + verify, then let the kernel mount and read it.
-            f'p2u sort {dev} {SORT_ARGS[sc["names"]]} --backup-dir /tmp > /tmp/sort.json 2>&1; echo "<<SORT"; cat /tmp/sort.json; echo ">>"',
+            f'fatstick sort {dev} {SORT_ARGS[sc["names"]]} --backup-dir /tmp > /tmp/sort.json 2>&1; echo "<<SORT"; cat /tmp/sort.json; echo ">>"',
             f"mount -t vfat -o utf8 {dev} $M || echo MOUNTFAIL2",
-            f'p2u os-listing "$M{d if d != "/" else ""}" {SORT_ARGS[sc["names"]]} > /tmp/after.json 2>/dev/null; echo "<<KERNEL_READDIR"; cat /tmp/after.json; echo ">>"',
+            f'fatstick os-listing "$M{d if d != "/" else ""}" {SORT_ARGS[sc["names"]]} > /tmp/after.json 2>/dev/null; echo "<<KERNEL_READDIR"; cat /tmp/after.json; echo ">>"',
             f'cd "$M{d if d != "/" else ""}"; bad=0; while read -r n; do [ -z "$n" ] && continue; case "$n" in \\#*) continue;; esac; f="$n"; s=$(echo "$f" | sed "s/^[0-9]* - //"); cmp -s "$f" "/music/$s" || bad=$((bad+1)); done < /pl/{sc["names"].replace("_top", "")}.order; echo "CONTENT_MISMATCHES $bad"; cd /',
             "umount $M",
         ]
@@ -229,11 +229,11 @@ def build_initramfs(work, kroot, p2u, scenarios):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--kroot", required=True)
-    ap.add_argument("--p2u", required=True)
+    ap.add_argument("--fatstick", required=True)
     ap.add_argument("--keep", action="store_true")
     a = ap.parse_args()
     rng = random.Random(2026)
-    work = tempfile.mkdtemp(prefix="p2u-kvfat-")
+    work = tempfile.mkdtemp(prefix="fatstick-kvfat-")
     order_a, order_b = build_payload(work, rng)
     width = max(2, len(str(TRACKS)))
     numbered = [f"{i + 1:0{width}d} - {n}" for i, n in enumerate(order_a)]
@@ -254,7 +254,7 @@ def main():
             sc["filler_blocks"] = max(0, (free - 1_000_000 - 70 * 8_000 - 40 * 5_000) // 65536)
         disks.append(img)
 
-    cpio = build_initramfs(work, a.kroot, a.p2u, SCENARIOS)
+    cpio = build_initramfs(work, a.kroot, a.fatstick, SCENARIOS)
     kernel = glob.glob(os.path.join(a.kroot, "boot", "vmlinuz-*"))[0]
     cmd = ["qemu-system-x86_64", "-m", "768", "-nographic", "-no-reboot", "-kernel", kernel, "-initrd", cpio,
            "-append", "console=ttyS0 panic=-1 quiet loglevel=3"]
@@ -290,20 +290,20 @@ def main():
             cur["content_mismatches"] = int(line.split()[1])
         elif cur is not None and line in ("MOUNTFAIL", "COPYFAIL", "MOUNTFAIL2"):
             cur.setdefault("errors", []).append(line)
-    p2u_host = os.path.join(ROOT, "target", "debug", "p2u")
+    fatstick_host = os.path.join(ROOT, "target", "debug", "fatstick")
     for sc, r, img in zip(SCENARIOS, results, disks):
         r["label"] = sc["label"]
         fsck = subprocess.run(["fsck.fat", "-n", img], capture_output=True, text=True)
         r["fsck_clean"] = fsck.returncode == 0
         # Physical order: are the files' first clusters ascending in playlist order?
         d = sc.get("dir", "/Road Trip")
-        ls = json.loads(sh([p2u_host, "ls", img, "--dir", d, "--json"]).stdout)
+        ls = json.loads(sh([fatstick_host, "ls", img, "--dir", d, "--json"]).stdout)
         want = numbered if sc["names"].startswith("A_numbered") else order_a
         clusters = {g["long_name"] or g["short_name"]: g["first_cluster"] for g in ls["groups"]}
         seq = [clusters.get(n) for n in want if n in clusters]
         r["clusters_ascending_in_playlist_order"] = all(x < y for x, y in zip(seq, seq[1:]))
         r["cluster_order_breaks"] = sum(1 for x, y in zip(seq, seq[1:]) if x >= y)
-        root = json.loads(sh([p2u_host, "ls", img, "--json"]).stdout)
+        root = json.loads(sh([fatstick_host, "ls", img, "--json"]).stdout)
         r["root_slot_of_folder"] = next((g["first_slot"] for g in root["groups"] if g["long_name"] == "Road Trip"), None)
         r["root_entries"] = len(root["groups"])
     print(json.dumps(results, indent=2))

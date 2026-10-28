@@ -3,7 +3,7 @@
 // Vorbis comments. The app proper gets all of this from ffprobe; this only
 // makes the browser demo show your own files with their own tags.
 "use strict";
-(function (P2U) {
+(function (Fatstick) {
   const EXT = {
     mp3: "mp3", flac: "flac", m4a: "aac", aac: "aac", mp4: "aac", ogg: "vorbis", oga: "vorbis", opus: "opus",
     wma: "wma", wav: "wav", aif: "aiff", aiff: "aiff", wv: "wavpack", ape: "ape",
@@ -184,5 +184,5 @@
     };
   }
 
-  P2U.sniff = { fromFile, isPlaylist: (n) => PLAYLIST.test(n), isAudio: (n) => !!EXT[ext(n)], codecFor: (n) => EXT[ext(n)], stem };
-})(window.P2U = window.P2U || {});
+  Fatstick.sniff = { fromFile, isPlaylist: (n) => PLAYLIST.test(n), isAudio: (n) => !!EXT[ext(n)], codecFor: (n) => EXT[ext(n)], stem };
+})(window.Fatstick = window.Fatstick || {});

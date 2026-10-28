@@ -1,9 +1,9 @@
 // Demo data for the window in a browser: a small library, four playlists,
 // three profiles, two sticks to sync and four USB sticks, two of them written
-// by Playlist2USB. Tags and lengths are real; paths, sizes and loudness
+// by Fatstick. Tags and lengths are real; paths, sizes and loudness
 // figures are made up but plausible.
 "use strict";
-(function (P2U) {
+(function (Fatstick) {
   const KBPS = { flac16: 880, flac24: 2900, alac: 860, wav: 1411 };
 
   function secs(mss) {
@@ -198,7 +198,7 @@
       volumes: [{ label: "CAR", fs_type: "vfat", size_bytes: 15_630_073_856, summary: "2 folders, 31 files, 1.4 GB" }],
       // The note the Car stick's last sync left on it.
       note: {
-        app: "Playlist2USB", format: 1, libraryId: "lib-demo", setId: "set-car", setName: "Car stick",
+        app: "Fatstick", format: 1, libraryId: "lib-demo", setId: "set-car", setName: "Car stick",
         profile: { id: "prof-generic", name: "Generic" },
         playlists: [{ id: "p-road", name: "Road Trip", tracks: 19 }, { id: "p-kids", name: "Kids' car", tracks: 12 }],
         files: 31, syncedAt: Date.now() - 3 * DAY,
@@ -215,9 +215,9 @@
     {
       id: "dev-verbatim", device: "/dev/sde", name: "Verbatim Store n Go", size_bytes: 7_747_397_632, bus: "usb",
       volumes: [{ label: "DADS CAR", fs_type: "vfat", size_bytes: 7_746_349_056, summary: "1 folder, 40 files, 310 MB" }],
-      // Set up by Playlist2USB on someone else's computer.
+      // Set up by Fatstick on someone else's computer.
       note: {
-        app: "Playlist2USB", format: 1, libraryId: "lib-elsewhere", setId: "set-dad", setName: "Dad's car",
+        app: "Fatstick", format: 1, libraryId: "lib-elsewhere", setId: "set-dad", setName: "Dad's car",
         profile: { id: "prof-x", name: "Car stereo, 256 kbps" },
         playlists: [{ id: "p-x", name: "Road songs", tracks: 40 }],
         files: 40, syncedAt: Date.now() - 41 * DAY,
@@ -231,5 +231,5 @@
     last: { files: tracks.filter((t) => t.path.startsWith("~/Music/") && t.exists).length, changed: [], added: 0, moved: 0, missing: 1, failed: 0 },
   };
 
-  P2U.demo = { tracks, playlists, profiles, stickSets, sticks, music, libraryId: "lib-demo", nextEntry: () => `e${++n}` };
-})(window.P2U = window.P2U || {});
+  Fatstick.demo = { tracks, playlists, profiles, stickSets, sticks, music, libraryId: "lib-demo", nextEntry: () => `e${++n}` };
+})(window.Fatstick = window.Fatstick || {});

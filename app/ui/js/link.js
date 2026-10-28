@@ -6,10 +6,10 @@
 //   layout:gone     {setId}        a layout window closed
 //   layout:rendered {setId, ...}   a layout window drew what it got (tests)
 "use strict";
-(function (P2U) {
+(function (Fatstick) {
   const T = window.__TAURI__;
   let bc = null;
-  const chan = () => bc || (bc = new BroadcastChannel("p2u-layout"));
+  const chan = () => bc || (bc = new BroadcastChannel("fatstick-layout"));
 
   function emit(name, payload) {
     if (T) return T.event.emit(name, payload);
@@ -30,5 +30,5 @@
     return null;
   }
 
-  P2U.link = { emit, on, open };
-})(window.P2U = window.P2U || {});
+  Fatstick.link = { emit, on, open };
+})(window.Fatstick = window.Fatstick || {});

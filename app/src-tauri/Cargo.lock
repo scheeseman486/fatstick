@@ -1152,6 +1152,93 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
+name = "fatstick"
+version = "0.1.0"
+dependencies = [
+ "cpal",
+ "fatstick-audio",
+ "fatstick-core",
+ "fatstick-device",
+ "fatstick-library",
+ "id3",
+ "image",
+ "notify",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tempfile",
+]
+
+[[package]]
+name = "fatstick-audio"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "deunicode",
+ "fatstick-stretch",
+ "filetime",
+ "id3",
+ "image",
+ "lofty",
+ "mp3rgain",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fatstick-core"
+version = "0.1.0"
+dependencies = [
+ "deunicode",
+ "encoding_rs",
+ "filetime",
+ "libc",
+ "percent-encoding",
+ "quick-xml 0.38.4",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "fatstick-device"
+version = "0.1.0"
+dependencies = [
+ "fatstick-core",
+ "libc",
+ "plist",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "windows-sys 0.60.2",
+ "zbus",
+]
+
+[[package]]
+name = "fatstick-library"
+version = "0.1.0"
+dependencies = [
+ "fatstick-audio",
+ "fatstick-core",
+ "percent-encoding",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fatstick-stretch"
+version = "0.1.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "fdeflate"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2851,73 +2938,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "p2u-audio"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "deunicode",
- "filetime",
- "id3",
- "image",
- "lofty",
- "mp3rgain",
- "p2u-stretch",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "p2u-core"
-version = "0.1.0"
-dependencies = [
- "deunicode",
- "encoding_rs",
- "filetime",
- "libc",
- "percent-encoding",
- "quick-xml 0.38.4",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "unicode-normalization",
-]
-
-[[package]]
-name = "p2u-device"
-version = "0.1.0"
-dependencies = [
- "libc",
- "p2u-core",
- "plist",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "windows-sys 0.60.2",
- "zbus",
-]
-
-[[package]]
-name = "p2u-library"
-version = "0.1.0"
-dependencies = [
- "p2u-audio",
- "p2u-core",
- "percent-encoding",
- "rusqlite",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "p2u-stretch"
-version = "0.1.0"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "pango"
 version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3058,26 +3078,6 @@ name = "pkg-config"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
-
-[[package]]
-name = "playlist2usb"
-version = "0.1.0"
-dependencies = [
- "cpal",
- "id3",
- "image",
- "notify",
- "p2u-audio",
- "p2u-core",
- "p2u-device",
- "p2u-library",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tempfile",
-]
 
 [[package]]
 name = "plist"

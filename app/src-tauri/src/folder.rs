@@ -12,10 +12,10 @@ use std::time::{Duration, Instant};
 
 use notify::event::{AccessKind, AccessMode};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use p2u_audio::tagwrite::{write_tags, TagEdit};
-use p2u_audio::Tools;
-use p2u_library::folder::{inside, root_path, scan_folder, FolderProgress, FolderScan};
-use p2u_library::{scan, Library, Track};
+use fatstick_audio::tagwrite::{write_tags, TagEdit};
+use fatstick_audio::Tools;
+use fatstick_library::folder::{inside, root_path, scan_folder, FolderProgress, FolderScan};
+use fatstick_library::{scan, Library, Track};
 use serde::{Deserialize, Serialize};
 
 pub const SETTING: &str = "libraryRoot";
@@ -403,7 +403,7 @@ pub fn rename(folder: &MusicFolder, jobs: &[RenameJob]) -> FileOps {
             if same_file {
                 // Only the case changes: go through another name, as some
                 // systems treat the two names as one file.
-                let tmp = src.with_file_name(format!(".p2u-rename-{}", j.track_id));
+                let tmp = src.with_file_name(format!(".fatstick-rename-{}", j.track_id));
                 std::fs::rename(&src, &tmp).map_err(|e| e.to_string())?;
                 std::fs::rename(&tmp, &dst).map_err(|e| e.to_string())?;
             } else {
@@ -436,7 +436,7 @@ mod tests {
         assert!(changes_files(&ev(EventKind::Access(AccessKind::Close(AccessMode::Write)), "/m/a.flac")));
         assert!(!changes_files(&ev(EventKind::Access(AccessKind::Open(AccessMode::Any)), "/m/a.flac")), "reading a file");
         assert!(!changes_files(&ev(EventKind::Access(AccessKind::Close(AccessMode::Read)), "/m/Album")), "listing a folder");
-        assert!(!changes_files(&ev(EventKind::Create(CreateKind::File), "/m/.p2u-rename-t1")));
+        assert!(!changes_files(&ev(EventKind::Create(CreateKind::File), "/m/.fatstick-rename-t1")));
         assert!(!changes_files(&ev(EventKind::Modify(ModifyKind::Any), "/m/Album/cover.jpg")));
     }
 

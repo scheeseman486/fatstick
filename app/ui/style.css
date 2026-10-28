@@ -1,4 +1,4 @@
-/* Playlist2USB: layout and components. Colours, type and shape come from the
+/* Fatstick: layout and components. Colours, type and shape come from the
    look tokens in looks.css; nothing here sets a colour directly.
    Layout: display band on top, playlists | track list | stick in the middle,
    player along the bottom. The track list is the widest column, because a

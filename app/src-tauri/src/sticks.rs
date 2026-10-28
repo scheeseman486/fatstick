@@ -1,21 +1,24 @@
 //! The sticks the window offers: removable USB/SD disks from the device layer,
-//! plus, for testing, disk images named in `P2U_TEST_STICKS` (a list of image
+//! plus, for testing, disk images named in `FATSTICK_TEST_STICKS` (a list of image
 //! paths separated like PATH). An image behaves like a stick throughout,
 //! except that writing it needs no OS prompt and there's nothing to eject.
 
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
-use p2u_core::fat::stick::read_top_level_file;
-use p2u_core::fat::{EntryKind, Volume};
-use p2u_device::{StickInfo, StickVolume};
+use fatstick_core::fat::stick::read_top_level_file;
+use fatstick_core::fat::{EntryKind, Volume};
+use fatstick_device::{StickInfo, StickVolume};
 use serde::Serialize;
 
 pub const IMAGE_PREFIX: &str = "image:";
-/// Playlist2USB's note of what a stick holds: a small hidden JSON file at the
+/// Fatstick's note of what a stick holds: a small hidden JSON file at the
 /// top level, written last by every sync. Read from wherever the OS mounted
 /// the stick, so recognizing a stick needs no password.
-pub const NOTE_NAME: &str = ".playlist2usb.json";
+pub const NOTE_NAME: &str = ".fatstick.json";
+/// The note a stick got when this app was called Playlist2USB: still read,
+/// so sticks synced before the rename are recognized.
+const OLD_NOTE_NAME: &str = ".playlist2usb.json";
 const NOTE_MAX: u64 = 256 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
@@ -38,21 +41,24 @@ pub struct StickView {
 /// A note is ours if it says so; anything else is ignored.
 fn parse_note(bytes: &[u8]) -> Option<serde_json::Value> {
     let v: serde_json::Value = serde_json::from_slice(bytes).ok()?;
-    (v.get("app").and_then(|a| a.as_str()) == Some("Playlist2USB") && v.get("setId").is_some_and(|s| s.is_string())).then_some(v)
+    let app = v.get("app").and_then(|a| a.as_str());
+    (matches!(app, Some("Fatstick" | "Playlist2USB")) && v.get("setId").is_some_and(|s| s.is_string())).then_some(v)
 }
 
 fn note_in_folder(mount: &Path) -> Option<serde_json::Value> {
-    let p = mount.join(NOTE_NAME);
-    if std::fs::metadata(&p).ok()?.len() > NOTE_MAX {
-        return None;
-    }
-    parse_note(&std::fs::read(p).ok()?)
+    [NOTE_NAME, OLD_NOTE_NAME].iter().find_map(|name| {
+        let p = mount.join(name);
+        if std::fs::metadata(&p).ok()?.len() > NOTE_MAX {
+            return None;
+        }
+        parse_note(&std::fs::read(p).ok()?)
+    })
 }
 
 fn note_in_image(path: &Path) -> (Option<serde_json::Value>, Vec<String>) {
     let Ok(mut f) = OpenOptions::new().read(true).open(path) else { return (None, vec![]) };
     let serial = Volume::open(&mut f).ok().map(|v| serial_text(v.geometry().volume_serial)).into_iter().collect();
-    let note = read_top_level_file(&mut f, NOTE_NAME, NOTE_MAX).ok().flatten().and_then(|b| parse_note(&b));
+    let note = [NOTE_NAME, OLD_NOTE_NAME].iter().find_map(|name| read_top_level_file(&mut f, name, NOTE_MAX).ok().flatten().and_then(|b| parse_note(&b)));
     (note, serial)
 }
 
@@ -62,7 +68,7 @@ pub fn serial_text(serial: u32) -> String {
 }
 
 fn test_images() -> Vec<PathBuf> {
-    std::env::var_os("P2U_TEST_STICKS").map(|v| std::env::split_paths(&v).filter(|p| p.is_file()).collect()).unwrap_or_default()
+    std::env::var_os("FATSTICK_TEST_STICKS").map(|v| std::env::split_paths(&v).filter(|p| p.is_file()).collect()).unwrap_or_default()
 }
 
 fn fs_name(t: &str) -> &str {
@@ -89,7 +95,7 @@ fn describe_image(path: &Path) -> Vec<String> {
     let Ok(f) = OpenOptions::new().read(true).open(path) else { return vec![] };
     let Ok(mut vol) = Volume::open(f) else { return vec!["Not FAT32 (or blank)".into()] };
     let label = vol.geometry().volume_label.trim().to_string();
-    let Ok(root) = vol.list_dir(p2u_core::fat::DirRef::Root) else { return vec![format!("{label} (FAT32)")] };
+    let Ok(root) = vol.list_dir(fatstick_core::fat::DirRef::Root) else { return vec![format!("{label} (FAT32)")] };
     let dirs = root.groups.iter().filter(|g| g.kind == EntryKind::Dir).count();
     let files = root.groups.iter().filter(|g| g.kind == EntryKind::File && !g.is_hidden()).count();
     let mut parts = vec![format!("{} (FAT32)", if label.is_empty() { "no label" } else { &label })];
@@ -105,7 +111,7 @@ fn describe_image(path: &Path) -> Vec<String> {
 pub fn list() -> (Vec<StickView>, Option<String>) {
     let mut out = Vec::new();
     let mut error = None;
-    match p2u_device::list_sticks() {
+    match fatstick_device::list_sticks() {
         Ok(v) => out.extend(v.into_iter().map(|s| StickView {
             note: s.volumes.iter().filter_map(|v| v.mount_point.as_deref()).find_map(note_in_folder),
             serials: s.volumes.iter().filter(|v| !v.serial.is_empty()).map(|v| v.serial.clone()).collect(),
@@ -150,10 +156,26 @@ pub fn find(id: &str) -> Result<Target, String> {
         }
         return Err("That disk image isn't offered any more.".into());
     }
-    p2u_device::list_sticks()
+    fatstick_device::list_sticks()
         .map_err(|e| e.to_string())?
         .into_iter()
         .find(|s| s.id == id)
         .map(Target::Stick)
         .ok_or_else(|| "The stick was removed or changed. Plug it in and pick it again.".into())
+}
+
+#[cfg(test)]
+mod note_tests {
+    use super::*;
+
+    #[test]
+    fn notes_from_before_the_rename_are_still_read() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join(".playlist2usb.json"), br#"{"app":"Playlist2USB","format":1,"setId":"set-old"}"#).unwrap();
+        assert_eq!(note_in_folder(d.path()).unwrap()["setId"], "set-old");
+        // A sync since writes the new note (and erases the old one); the new one wins anyway.
+        std::fs::write(d.path().join(".fatstick.json"), br#"{"app":"Fatstick","format":1,"setId":"set-new"}"#).unwrap();
+        assert_eq!(note_in_folder(d.path()).unwrap()["setId"], "set-new");
+        assert!(parse_note(br#"{"app":"Something else","setId":"x"}"#).is_none());
+    }
 }

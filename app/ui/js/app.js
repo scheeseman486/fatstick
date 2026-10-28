@@ -1,13 +1,13 @@
-// Playlist2USB's window. Plain DOM, no framework.
+// Fatstick's window. Plain DOM, no framework.
 // State lives in S. Every playlist edit goes through edit(), so it can be
 // undone, and is saved to the library straight away. Rendering is a few
 // functions that rebuild their own area; the stick panel is split into
 // sections so typing a name template doesn't lose focus. Everything outside
-// the window goes through P2U.api: the app's own commands, or a demo version
+// the window goes through Fatstick.api: the app's own commands, or a demo version
 // in a plain browser.
 "use strict";
 (function () {
-  const P = window.P2U;
+  const P = window.Fatstick;
   const { h, fill, icon, clock, length, bytes, ago, plural, db, menu, popover, closeMenu, modal, closeModal, modalOpen, toast } = P.ui;
   const R = P.rules;
   const N = P.names;
@@ -114,7 +114,7 @@
   /** What a USB stick holds, going by the note its last sync left on it (or,
    * for a stick the OS hasn't mounted, the volume serial that sync recorded):
    * `{ set, note, ours }`, where `set` is this library's stick (set) on it,
-   * if it still has it. Null for a stick Playlist2USB didn't write. */
+   * if it still has it. Null for a stick Fatstick didn't write. */
   function holder(d) {
     if (!d) return null;
     if (d.note) {
@@ -2524,7 +2524,7 @@
   }
   /** The app: files, folders and playlist files by path, read by the library. */
   async function addPaths(paths, target) {
-    if (S.ffmpegError) { toast("Files can't be read: ffmpeg wasn't found. Reinstall Playlist2USB to get it back."); return; }
+    if (S.ffmpegError) { toast("Files can't be read: ffmpeg wasn't found. Reinstall Fatstick to get it back."); return; }
     S.scan = { done: 0, total: 0 };
     renderDisplay();
     let r;
@@ -3029,7 +3029,7 @@
       theme("dark", "Dark"),
       "-",
       { label: "Clear the cache…", action: clearCacheDialog },
-      { label: "About Playlist2USB", action: aboutDialog },
+      { label: "About Fatstick", action: aboutDialog },
     ]);
   }
   async function clearCacheDialog() {
@@ -3057,7 +3057,7 @@
   async function aboutDialog() {
     const a = await api.about();
     modal({
-      title: "About Playlist2USB",
+      title: "About Fatstick",
       body: [
         h("p", { text: "Writes playlists onto USB sticks in FAT order, the order cheap MP3 players and car stereos actually play." }),
         h("dl", { class: "kv" },
@@ -3149,7 +3149,7 @@
     scheduleWork();
     // For the app's self-test (tests/app_e2e.py) and for poking around in the inspector.
     P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, seekTo, refreshSticks, holder, selectSet, openLayout, layoutData, setView, lib, toggleTags, ready: true };
-    if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Playlist2USB to get it back.");
+    if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Fatstick to get it back.");
     if (!DEMO) {
       stickPoll = setInterval(() => { if (!(S.sync && S.sync.running)) refreshSticks(true); }, 3000);
       api.refreshTracks().then((ts) => {

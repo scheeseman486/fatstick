@@ -18,15 +18,15 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-use p2u_audio::encode::{output_rate, EncodeSpec};
-use p2u_audio::prepare::{copy_allowed, prepare, Prepared, Recipe};
-use p2u_audio::render::{self, RenderSpec};
-use p2u_audio::tags::{id3v1, id3v2, TagSpec};
-use p2u_audio::{cover, Cache, Probe, Tags, Tools};
-use p2u_core::fat::stick::{plan_content, Part, StickContent, StickFolder, WriteItem, WriteProgress};
-use p2u_core::fat::Device;
-use p2u_core::job::{run_stick, StickJob, StickOutcome};
-use p2u_library::Library;
+use fatstick_audio::encode::{output_rate, EncodeSpec};
+use fatstick_audio::prepare::{copy_allowed, prepare, Prepared, Recipe};
+use fatstick_audio::render::{self, RenderSpec};
+use fatstick_audio::tags::{id3v1, id3v2, TagSpec};
+use fatstick_audio::{cover, Cache, Probe, Tags, Tools};
+use fatstick_core::fat::stick::{plan_content, Part, StickContent, StickFolder, WriteItem, WriteProgress};
+use fatstick_core::fat::Device;
+use fatstick_core::job::{run_stick, StickJob, StickOutcome};
+use fatstick_library::Library;
 use serde::{Deserialize, Serialize};
 
 use crate::sticks::{self, Target};
@@ -387,7 +387,7 @@ pub fn run(
     // it is recognized when it's plugged in again.
     let library_id = lib.lock().unwrap().library_id().unwrap_or_default();
     let note = serde_json::json!({
-        "app": "Playlist2USB",
+        "app": "Fatstick",
         "format": 1,
         "version": env!("CARGO_PKG_VERSION"),
         "libraryId": library_id,
@@ -441,7 +441,7 @@ pub fn run(
         },
         Target::Stick(info) => {
             say("authorize", 0, 1, "", "Waiting for your password or fingerprint.".into());
-            match p2u_device::acquire(info) {
+            match fatstick_device::acquire(info) {
                 Ok(mut raw) => {
                     let mut o = run_stick(&mut raw, &job, &mut prog, Some(cancel));
                     if o.ok {
@@ -454,9 +454,9 @@ pub fn run(
                     o.erased |= o.cancelled;
                     o
                 }
-                Err(p2u_device::DeviceError::NeedsElevation) | Err(p2u_device::DeviceError::NoBroker(_)) => {
+                Err(fatstick_device::DeviceError::NeedsElevation) | Err(fatstick_device::DeviceError::NoBroker(_)) => {
                     say("write", 0, exact.total_bytes, "", "Writing with administrator rights (no progress is shown).".into());
-                    match p2u_device::write_via_helper(info, &job) {
+                    match fatstick_device::write_via_helper(info, &job) {
                         Ok(o) => {
                             ejected = o.ok && o.error.is_none();
                             o
@@ -464,7 +464,7 @@ pub fn run(
                         Err(e) => StickOutcome::fail(format!("nothing was written: {e}")),
                     }
                 }
-                Err(p2u_device::DeviceError::NotAuthorized) => StickOutcome::fail("authorization was cancelled. Nothing was written"),
+                Err(fatstick_device::DeviceError::NotAuthorized) => StickOutcome::fail("authorization was cancelled. Nothing was written"),
                 Err(e) => StickOutcome::fail(format!("nothing was written: {e}")),
             }
         }

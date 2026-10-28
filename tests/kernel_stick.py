@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""`p2u write` on whole virtual disks, then the real Linux vfat driver.
+"""`fatstick write` on whole virtual disks, then the real Linux vfat driver.
 
 In a QEMU VM (Ubuntu kernel, busybox), for each virtual stick that starts out
-with an awkward layout (made on the host): run `p2u write` on the whole block
+with an awkward layout (made on the host): run `fatstick write` on the whole block
 device, have the kernel re-read the partition table, mount the new partition
 with the kernel's vfat driver, check the order the kernel lists and every
 byte, then let the kernel keep using the stick (add a file, delete a track)
 and check the result on the host with fsck.fat, mshowfat and blkid.
 
-    python3 tests/kernel_stick.py --kroot <kernel dir> --p2u <static p2u>
+    python3 tests/kernel_stick.py --kroot <kernel dir> --fatstick <static fatstick>
 """
 import argparse
 import glob
@@ -43,16 +43,16 @@ def sh(cmd, **kw):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--kroot", required=True)
-    ap.add_argument("--p2u", required=True)
+    ap.add_argument("--fatstick", required=True)
     a = ap.parse_args()
     rng = random.Random(4243)
-    work = tempfile.mkdtemp(prefix="p2u-kstick-")
+    work = tempfile.mkdtemp(prefix="fatstick-kstick-")
     env = e2e.mtools_env(work)
     ir = os.path.join(work, "ir")
     for d in ("bin", "dev", "proc", "sys", "mnt", "mods", "tmp", "music", "pl"):
         os.makedirs(os.path.join(ir, d), exist_ok=True)
     shutil.copy("/bin/busybox", os.path.join(ir, "bin", "busybox"))
-    shutil.copy(a.p2u, os.path.join(ir, "bin", "p2u"))
+    shutil.copy(a.fatstick, os.path.join(ir, "bin", "fatstick"))
     src = glob.glob(os.path.join(a.kroot, "lib/modules/*/kernel/fs/nls/nls_iso8859-1.ko.zst"))[0]
     sh(["zstd", "-q", "-d", "-f", src, "-o", os.path.join(ir, "mods", "nls.ko")])
 
@@ -93,7 +93,7 @@ def main():
         md = "/mnt" + ("" if d == "/" else d)
         lines += [
             f'echo "=== {st["name"]}"',
-            f'p2u write {dev} --playlist "/pl/Road Trip.m3u8" {st["args"]} --yes --json > /tmp/w.json 2>&1; echo "<<WRITE"; cat /tmp/w.json; echo ">>"',
+            f'fatstick write {dev} --playlist "/pl/Road Trip.m3u8" {st["args"]} --yes --json > /tmp/w.json 2>&1; echo "<<WRITE"; cat /tmp/w.json; echo ">>"',
             f"blockdev --rereadpt {dev}; sleep 1",
             f'echo "PARTS $(ls {dev}* | tr "\\n" " ")"',
             f"mount -t vfat -o utf8 {dev}1 /mnt || echo MOUNTFAIL",

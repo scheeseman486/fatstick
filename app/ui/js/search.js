@@ -9,7 +9,7 @@
 //
 // Accents and case don't matter. Pure functions, no DOM.
 "use strict";
-(function (P2U) {
+(function (Fatstick) {
   /** Fields searched, with how much a match there counts. */
   const FIELDS = [
     ["title", 3], ["artist", 3], ["albumartist", 2], ["album", 2], ["genre", 2], ["labels", 2],
@@ -169,5 +169,5 @@
     return { exact: exact.slice(0, limit), close: close.slice(0, Math.min(limit, 100)) };
   }
 
-  P2U.search = { build, search, norm, distance, closeness, FIELDS, WEIGHT };
-})(typeof window !== "undefined" ? (window.P2U = window.P2U || {}) : (globalThis.P2U = globalThis.P2U || {}));
+  Fatstick.search = { build, search, norm, distance, closeness, FIELDS, WEIGHT };
+})(typeof window !== "undefined" ? (window.Fatstick = window.Fatstick || {}) : (globalThis.Fatstick = globalThis.Fatstick || {}));

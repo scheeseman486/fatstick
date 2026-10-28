@@ -45,12 +45,12 @@ jobs:
       # The tests find the bundled ffmpeg in app/src-tauri/binaries, as the app does.
       - run: cargo test --workspace
       - name: The audio engine against the distribution's ffmpeg too (people may swap theirs in)
-        run: P2U_FFMPEG_DIR=/usr/bin cargo test -p p2u-audio
+        run: FATSTICK_FFMPEG_DIR=/usr/bin cargo test -p fatstick-audio
       - run: cargo build --workspace
       - name: End-to-end tests on disk images with awkward prior layouts
         run: python3 tests/stick_e2e.py
       - name: Helper sidecar (the app's build needs it present)
-        run: cp target/debug/p2u-helper app/src-tauri/binaries/p2u-helper-x86_64-unknown-linux-gnu
+        run: cp target/debug/fatstick-helper app/src-tauri/binaries/fatstick-helper-x86_64-unknown-linux-gnu
       - name: The app's backend tests (a sync to a disk image, the player)
         run: cargo test --manifest-path app/src-tauri/Cargo.toml
       - name: The app end to end (a debug build under Xvfb, then the image read by fsck.fat, mtools, ffprobe)
@@ -97,12 +97,12 @@ jobs:
           [ -f $B/ffmpeg-x86_64-pc-windows-msvc.exe ] || packaging/ffmpeg/build-ffmpeg.sh x86_64-pc-windows-gnu
       - name: Helper sidecars
         run: |
-          cargo build --release -p p2u-helper
-          cargo build --release -p p2u-helper --target x86_64-pc-windows-gnu
+          cargo build --release -p fatstick-helper
+          cargo build --release -p fatstick-helper --target x86_64-pc-windows-gnu
           mkdir -p app/src-tauri/binaries
-          cp target/release/p2u-helper app/src-tauri/binaries/p2u-helper-x86_64-unknown-linux-gnu
+          cp target/release/fatstick-helper app/src-tauri/binaries/fatstick-helper-x86_64-unknown-linux-gnu
           # The helper is a standalone exe, so the mingw build serves the MSVC-built app too.
-          cp target/x86_64-pc-windows-gnu/release/p2u-helper.exe app/src-tauri/binaries/p2u-helper-x86_64-pc-windows-msvc.exe
+          cp target/x86_64-pc-windows-gnu/release/fatstick-helper.exe app/src-tauri/binaries/fatstick-helper-x86_64-pc-windows-msvc.exe
       - name: Linux bundles (.deb, .rpm, AppImage)
         working-directory: app/src-tauri
         run: npx --yes @tauri-apps/cli@^2 build
@@ -156,14 +156,14 @@ jobs:
       - name: Keep the .app's permissions (artifact zips drop them)
         run: |
           cd app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos
-          tar czf Playlist2USB.app.tar.gz Playlist2USB.app
+          tar czf Fatstick.app.tar.gz Fatstick.app
       - uses: actions/upload-artifact@v4
         with:
           name: macos
           path: |
             app/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-            app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Playlist2USB.app.tar.gz
+            app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Fatstick.app.tar.gz
       - name: Tests on macOS, after the upload so a failure doesn't hold up the build (FAT writer, audio engine, library; the app's sync and player)
         run: |
-          cargo test -p p2u-core -p p2u-audio -p p2u-library
+          cargo test -p fatstick-core -p fatstick-audio -p fatstick-library
           cargo test --manifest-path app/src-tauri/Cargo.toml

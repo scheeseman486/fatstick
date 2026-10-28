@@ -1,10 +1,10 @@
 // Phase 1 of tests/app_e2e.py, run inside the real app's window (a debug
-// build started with P2U_SELFTEST). From an empty library: add a folder of
+// build started with FATSTICK_SELFTEST). From an empty library: add a folder of
 // real audio, even out the volume, put a second playlist on the stick, pick
 // the disk image as the stick, sync through the button and its confirmation,
 // and play a track. Reports back through the selftest_report command.
 (async () => {
-  const cfg = window.__P2U_SELFTEST_CONFIG;
+  const cfg = window.__FATSTICK_SELFTEST_CONFIG;
   const T = window.__TAURI__;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const lines = [];
@@ -27,7 +27,7 @@
   };
   const $ = (sel) => document.querySelector(sel);
   try {
-    const A = await until(() => window.P2U.app && window.P2U.app.ready && window.P2U.app, 20000);
+    const A = await until(() => window.Fatstick.app && window.Fatstick.app.ready && window.Fatstick.app, 20000);
     if (!check("the window started", !!A)) throw new Error("no app");
     const S = A.S;
     check("first run: one empty playlist and one stick", S.playlists.length === 1 && S.sets.length === 1 && S.playlists[0].entries.length === 0);

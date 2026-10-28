@@ -2,7 +2,7 @@
 // menus, popovers, dialogs and the toast. Text is only ever set with
 // textContent; the icon markup below is the only innerHTML, and it is constant.
 "use strict";
-(function (P2U) {
+(function (Fatstick) {
   const ICONS = {
     play: '<svg viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>',
     pause: '<svg viewBox="0 0 24 24"><rect x="6.5" y="5" width="4" height="14" rx="1"/><rect x="13.5" y="5" width="4" height="14" rx="1"/></svg>',
@@ -237,5 +237,5 @@
     document.getElementById("toast").hidden = true;
   }
 
-  P2U.ui = { h, fill, icon, clock, length, bytes, ago, plural, db, menu, popover, closeMenu, modal, closeModal, modalOpen, toast };
-})(window.P2U = window.P2U || {});
+  Fatstick.ui = { h, fill, icon, clock, length, bytes, ago, plural, db, menu, popover, closeMenu, modal, closeModal, modalOpen, toast };
+})(window.Fatstick = window.Fatstick || {});

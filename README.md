@@ -1,6 +1,6 @@
-# Playlist2USB
+# Fatstick
 
-![Playlist2USB main window](docs/gui.png)
+![Fatstick main window](docs/gui.png)
 
 Puts your playlists onto a USB stick so that cheap MP3 players and car
 stereos play them in playlist order. Those players play files in **FAT
@@ -135,7 +135,7 @@ FAT32 file system itself:
   aligned to 4 MiB (1 MiB on sticks under 2 GiB);
 - at the top level the volume label, then the playlist folders in stick order
   (or one playlist's tracks themselves), then the hidden note
-  `.playlist2usb.json`;
+  `.fatstick.json`;
 - in each folder, `.` and `..`, then one entry per track in playlist order;
 - every track's data in one unbroken run of clusters, back to back in stick
   order, straight after the folder tables, with the note's data last;
@@ -171,7 +171,7 @@ before you unplug it.
 |---------|----------------------------------------------------------|------------------------------------------|
 | Linux   | unmount every partition, udisks2 `Block.OpenDevice` (O_EXCL) returns an fd | polkit agent; fingerprint if PAM has `pam_fprintd` |
 | macOS   | `diskutil unmountDisk`, `/usr/libexec/authopen -stdoutpipe /dev/rdiskN` returns an fd | authd dialog (Touch ID untested) |
-| Windows | `p2u-helper.exe` (UAC) locks + dismounts every volume, opens `\\.\PhysicalDriveN` | UAC; Windows Hello when configured |
+| Windows | `fatstick-helper.exe` (UAC) locks + dismounts every volume, opens `\\.\PhysicalDriveN` | UAC; Windows Hello when configured |
 
 Only USB and SD disks are listed, and the disk the system runs from is refused
 on all three. The app never runs as root/admin. No in-app biometric check is
@@ -192,35 +192,40 @@ now.
 
 | What | Linux | macOS | Windows |
 |------|-------|-------|---------|
-| Library (`library.db`, SQLite: tracks, measurements, playlists, profiles, sticks, past syncs) | `~/.local/share/playlist2usb` | `~/Library/Application Support/playlist2usb` | `%APPDATA%\playlist2usb` |
-| Prepared files (safe to clear, from the menu) | `~/.cache/playlist2usb` | `~/Library/Caches/playlist2usb` | `%LOCALAPPDATA%\playlist2usb` |
+| Library (`library.db`, SQLite: tracks, measurements, playlists, profiles, sticks, past syncs) | `~/.local/share/fatstick` | `~/Library/Application Support/fatstick` | `%APPDATA%\fatstick` |
+| Prepared files (safe to clear, from the menu) | `~/.cache/fatstick` | `~/Library/Caches/fatstick` | `%LOCALAPPDATA%\fatstick` |
 
-`P2U_DATA_DIR` and `P2U_CACHE_DIR` override these. `P2U_FFMPEG_DIR` points the
+`FATSTICK_DATA_DIR` and `FATSTICK_CACHE_DIR` override these. `FATSTICK_FFMPEG_DIR` points the
 app at your own `ffmpeg` and `ffprobe` instead of the bundled ones.
+
+Fatstick used to be called Playlist2USB. On its first start it moves the
+`playlist2usb` folders above to their new names, so the library, playlists
+and prepared files carry over, and it still recognizes sticks synced under
+the old name (their note is `.playlist2usb.json`).
 
 ## Layout
 
 ```
-crates/p2u-core      playlists, naming plan, FAT32 layout + writer + read-back check, FAT32 reader
-crates/p2u-device    USB stick discovery and OS-brokered raw disk access (linux/macos/windows)
-crates/p2u-audio     the ffmpeg engine: probing, MP3 frame scan, loudness, LAME encodes, lossless gain,
-                     covers, ID3 tags, the prepared-file cache, PCM for the player
-crates/p2u-stretch   key shifting: Signalsmith Stretch (MIT, vendored C++) behind a small C interface
-crates/p2u-library   the SQLite library, reading files, folders and playlist files into it, and the
-                     music folder's scan (new, changed, moved and missing files)
-crates/p2u-cli       `p2u` command-line tool
-crates/p2u-helper    tiny privileged helper (Windows UAC, Linux pkexec fallback)
-app/src-tauri        the app: commands, background preparation, sync, sticks, the player (cpal)
-app/ui               the window: plain HTML/CSS/JS. js/api.js talks to the app (or to demo data in a
-                     browser); js/names.js and js/rules.js hold the naming and copy-or-encode rules;
-                     js/library.js is the library view, the search panel and the tag editor, and
-                     js/search.js the search itself
-packaging/ffmpeg     builds the bundled LGPL ffmpeg and ffprobe, with LAME, from source
-packaging/licenses   LGPL texts and third-party notices, installed with the app
-packaging/linux      polkit policy for the pkexec fallback
-tests/               see Test below
-research/            the copy-order measurement (needs commit 93f9b75), the lossless gain test, the ffmpeg build test
-.github/workflows    CI draft: tests, Linux + Windows built on Linux, macOS on a macOS runner
+crates/fatstick-core      playlists, naming plan, FAT32 layout + writer + read-back check, FAT32 reader
+crates/fatstick-device    USB stick discovery and OS-brokered raw disk access (linux/macos/windows)
+crates/fatstick-audio     the ffmpeg engine: probing, MP3 frame scan, loudness, LAME encodes, lossless gain,
+                          covers, ID3 tags, the prepared-file cache, PCM for the player
+crates/fatstick-stretch   key shifting: Signalsmith Stretch (MIT, vendored C++) behind a small C interface
+crates/fatstick-library   the SQLite library, reading files, folders and playlist files into it, and the
+                          music folder's scan (new, changed, moved and missing files)
+crates/fatstick-cli       `fatstick` command-line tool
+crates/fatstick-helper    tiny privileged helper (Windows UAC, Linux pkexec fallback)
+app/src-tauri             the app: commands, background preparation, sync, sticks, the player (cpal)
+app/ui                    the window: plain HTML/CSS/JS. js/api.js talks to the app (or to demo data in a
+                          browser); js/names.js and js/rules.js hold the naming and copy-or-encode rules;
+                          js/library.js is the library view, the search panel and the tag editor, and
+                          js/search.js the search itself
+packaging/ffmpeg          builds the bundled LGPL ffmpeg and ffprobe, with LAME, from source
+packaging/licenses        LGPL texts and third-party notices, installed with the app
+packaging/linux           polkit policy for the pkexec fallback
+tests/                    see Test below
+research/                 the copy-order measurement (needs commit 93f9b75), the lossless gain test, the ffmpeg build test
+.github/workflows         CI draft: tests, Linux + Windows built on Linux, macOS on a macOS runner
 ```
 
 ## Build
@@ -231,15 +236,15 @@ Linux (Ubuntu 24.04 packages):
 sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev \
   libxdo-dev libasound2-dev nasm
 packaging/ffmpeg/build-ffmpeg.sh x86_64-unknown-linux-gnu   # ffmpeg + ffprobe into app/src-tauri/binaries
-cargo build --release                                       # p2u, p2u-helper
-cp target/release/p2u-helper app/src-tauri/binaries/p2u-helper-x86_64-unknown-linux-gnu
+cargo build --release                                       # fatstick, fatstick-helper
+cp target/release/fatstick-helper app/src-tauri/binaries/fatstick-helper-x86_64-unknown-linux-gnu
 cd app/src-tauri && npx @tauri-apps/cli@^2 build             # .deb, .rpm, AppImage
 ```
 
 Windows, from Linux: `packaging/ffmpeg/build-ffmpeg.sh x86_64-pc-windows-gnu`
 (needs mingw-w64; the files serve both the GNU and MSVC builds), the helper
 built with `--target x86_64-pc-windows-gnu` and copied to
-`binaries/p2u-helper-x86_64-pc-windows-msvc.exe`, then Tauri's documented
+`binaries/fatstick-helper-x86_64-pc-windows-msvc.exe`, then Tauri's documented
 route: `npx @tauri-apps/cli@^2 build --runner cargo-xwin --target
 x86_64-pc-windows-msvc` (NSIS, LLVM and cargo-xwin installed; see the CI
 workflow).
@@ -260,18 +265,18 @@ cd app/ui && python3 -m http.server 8000      # then open http://localhost:8000
 ## CLI
 
 ```sh
-p2u sticks                                            # USB sticks and what is on them
-p2u plan "Road Trip.xspf"                             # names and order, writes nothing
-p2u write <stick> --playlist "Road Trip.xspf"         # ERASES the stick: asks you to type "erase", then the OS prompt
-p2u write <stick> --playlist "Road Trip.xspf" --top-level --label ROADTRIP
-p2u write-job <stick> --job job.json                  # several folders, files given as parts (what the app writes)
+fatstick sticks                                            # USB sticks and what is on them
+fatstick plan "Road Trip.xspf"                             # names and order, writes nothing
+fatstick write <stick> --playlist "Road Trip.xspf"         # ERASES the stick: asks you to type "erase", then the OS prompt
+fatstick write <stick> --playlist "Road Trip.xspf" --top-level --label ROADTRIP
+fatstick write-job <stick> --job job.json                  # several folders, files given as parts (what the app writes)
 # Disk images, and whole-disk device nodes you can open yourself:
 truncate -s 1G stick.img
-p2u write stick.img --playlist "Road Trip.xspf" --yes
-p2u write stick.img --playlist "Road Trip.xspf" --dry-run   # the layout as JSON, writes nothing
-p2u ls stick.img --dir "/Road Trip"                   # FAT order, as a player reads it
-p2u verify stick.img --playlist "Road Trip.xspf"      # order and sizes
-p2u inspect stick.img
+fatstick write stick.img --playlist "Road Trip.xspf" --yes
+fatstick write stick.img --playlist "Road Trip.xspf" --dry-run   # the layout as JSON, writes nothing
+fatstick ls stick.img --dir "/Road Trip"                   # FAT order, as a player reads it
+fatstick verify stick.img --playlist "Road Trip.xspf"      # order and sizes
+fatstick inspect stick.img
 ```
 
 The CLI copies files as they are; converting and evening out the volume are
@@ -282,7 +287,7 @@ the app's.
 ```sh
 sudo apt install ffmpeg xvfb dosfstools mtools fatsort fdisk gdisk exfatprogs ntfs-3g e2fsprogs
 cargo test --workspace                                  # unit tests; the audio engine against the bundled ffmpeg
-P2U_FFMPEG_DIR=/usr/bin cargo test -p p2u-audio         # ... and against the system's
+FATSTICK_FFMPEG_DIR=/usr/bin cargo test -p fatstick-audio  # ... and against the system's
 cargo build --workspace && python3 tests/stick_e2e.py   # 84 checks on disk images with awkward prior layouts
 cargo test --manifest-path app/src-tauri/Cargo.toml     # the app's backend: a full sync to a disk image, the player
 cargo build --manifest-path app/src-tauri/Cargo.toml && python3 tests/app_e2e.py
@@ -290,8 +295,8 @@ node tests/ui_names.js                                  # the file name rules
 node tests/ui_search.js                                 # search: exact and close matches, and its speed
 node tests/ui_check.js                                  # the window on demo data (needs playwright)
 # Real Linux driver (needs qemu-system-x86, busybox-static and an extracted Ubuntu kernel):
-cargo build --release -p p2u-cli --target x86_64-unknown-linux-musl
-python3 tests/kernel_stick.py --kroot <kernel dir> --p2u target/x86_64-unknown-linux-musl/release/p2u
+cargo build --release -p fatstick-cli --target x86_64-unknown-linux-musl
+python3 tests/kernel_stick.py --kroot <kernel dir> --fatstick target/x86_64-unknown-linux-musl/release/fatstick
 ```
 
 `tests/app_e2e.py` runs the real app under Xvfb, three times. The first run starts
@@ -334,7 +339,7 @@ Working, and tested on disk images; not yet tried on real hardware.
 
 ## Licence
 
-Playlist2USB is free software: you can redistribute it and/or modify it under
+Fatstick is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
 Foundation, either version 3 of the License, or (at your option) any later
 version. See `COPYING`.

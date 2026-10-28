@@ -2,7 +2,7 @@
 """The real app, end to end, on a disk image standing in for a USB stick.
 
 Makes real audio (FLAC, Opus, MP3s at 320 kbps and at 22.05 kHz, WAV), then
-runs a debug build of the app twice under Xvfb with P2U_SELFTEST:
+runs a debug build of the app twice under Xvfb with FATSTICK_SELFTEST:
 
 1. tests/app_selftest.js drives the window from an empty library to a
    finished sync of two playlists, with silence between them, the first
@@ -39,7 +39,7 @@ import threading
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-APP = os.path.join(ROOT, "app", "src-tauri", "target", "debug", "playlist2usb")
+APP = os.path.join(ROOT, "app", "src-tauri", "target", "debug", "fatstick")
 RESULTS = []
 
 
@@ -104,7 +104,7 @@ def run_app(phase, script, cfg, env):
         if chk.returncode != 0:
             record(f"app {phase}: {script} parses", False, chk.stderr.strip().splitlines()[-1] if chk.stderr.strip() else "")
             return {}
-    e = dict(env, P2U_SELFTEST=os.path.join(ROOT, "tests", script), P2U_SELFTEST_CONFIG=json.dumps(cfg))
+    e = dict(env, FATSTICK_SELFTEST=os.path.join(ROOT, "tests", script), FATSTICK_SELFTEST_CONFIG=json.dumps(cfg))
     r = subprocess.run(["xvfb-run", "-a", "-s", "-screen 0 1280x800x24", APP], env=e, capture_output=True, text=True, timeout=900)
     lines = [l for l in r.stdout.splitlines() if l.startswith(("PASS", "FAIL", "INFO", "SELFTEST"))]
     info = {}
@@ -115,8 +115,8 @@ def run_app(phase, script, cfg, env):
         elif l.startswith("INFO "):
             k, v = l[5:].split("=", 1)
             info[k] = v
-    if os.environ.get("P2U_E2E_LOG"):
-        with open(os.environ["P2U_E2E_LOG"] + f".{phase.replace(' ', '')}", "w") as f:
+    if os.environ.get("FATSTICK_E2E_LOG"):
+        with open(os.environ["FATSTICK_E2E_LOG"] + f".{phase.replace(' ', '')}", "w") as f:
             f.write(r.stdout + "\n--- stderr ---\n" + r.stderr)
     record(f"app {phase}: the app reported and exited", r.returncode == 0 and any(l.startswith("SELFTEST") for l in lines),
            f"exit {r.returncode}; {r.stderr.strip().splitlines()[-1] if r.stderr.strip() else ''}")
@@ -133,14 +133,14 @@ def mtools_env(work):
 def main():
     if not os.path.exists(APP):
         sys.exit(f"build the app first: {APP}")
-    work = tempfile.mkdtemp(prefix="p2u-app-e2e-")
+    work = tempfile.mkdtemp(prefix="fatstick-app-e2e-")
     cfg = make_fixtures(work)
     img = os.path.join(work, "stick.img")
     with open(img, "wb") as f:
         f.write(b"\xa5" * (64 << 20))  # old junk where the stick's contents were
-    env = dict(os.environ, P2U_DATA_DIR=os.path.join(work, "data"), P2U_CACHE_DIR=os.path.join(work, "cache"),
-               P2U_TEST_STICKS=img, P2U_NULL_AUDIO="1")
-    env.pop("P2U_FFMPEG_DIR", None)  # use the bundled sidecar next to the debug build's sources
+    env = dict(os.environ, FATSTICK_DATA_DIR=os.path.join(work, "data"), FATSTICK_CACHE_DIR=os.path.join(work, "cache"),
+               FATSTICK_TEST_STICKS=img, FATSTICK_NULL_AUDIO="1")
+    env.pop("FATSTICK_FFMPEG_DIR", None)  # use the bundled sidecar next to the debug build's sources
 
     info = run_app("phase 1", "app_selftest.js", cfg, env)
     names = json.loads(info.get("names", "[]"))

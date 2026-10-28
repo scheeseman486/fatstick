@@ -1,4 +1,4 @@
-// Playlist2USB desktop app. The window (../ui) owns playlists, profiles and
+// Fatstick desktop app. The window (../ui) owns playlists, profiles and
 // sticks and plans each sync; this side reads files, keeps the library,
 // measures, converts and caches audio, plays previews, and writes sticks.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -17,9 +17,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use p2u_audio::prepare::Recipe;
-use p2u_audio::{Cache, Tools};
-use p2u_library::{scan, Library, Track};
+use fatstick_audio::prepare::Recipe;
+use fatstick_audio::{Cache, Tools};
+use fatstick_library::{scan, Library, Track};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -61,7 +61,7 @@ struct InitView {
     settings: serde_json::Value,
     ffmpeg: Option<String>,
     ffmpeg_error: Option<String>,
-    cache: p2u_audio::cache::CacheStats,
+    cache: fatstick_audio::cache::CacheStats,
     data_dir: String,
     version: String,
     /// This library's id, which every stick it writes carries.
@@ -222,7 +222,7 @@ async fn refresh_tracks(app: AppHandle) -> Res<Vec<Track>> {
             l.tracks()
                 .map_err(err)?
                 .into_iter()
-                .filter(|t| !root.as_deref().is_some_and(|r| p2u_library::folder::inside(r, Path::new(&t.path))))
+                .filter(|t| !root.as_deref().is_some_and(|r| fatstick_library::folder::inside(r, Path::new(&t.path))))
                 .filter(|t| t.exists && !scan::is_current(&l, t))
                 .map(|t| PathBuf::from(t.path))
                 .collect()
@@ -257,12 +257,12 @@ fn prepare_queue(st: State<AppState>, jobs: Vec<work::PrepJob>) -> Vec<String> {
 }
 
 #[tauri::command]
-fn cache_info(st: State<AppState>) -> p2u_audio::cache::CacheStats {
+fn cache_info(st: State<AppState>) -> fatstick_audio::cache::CacheStats {
     st.cache.stats()
 }
 
 #[tauri::command]
-fn clear_cache(st: State<AppState>) -> p2u_audio::cache::CacheStats {
+fn clear_cache(st: State<AppState>) -> fatstick_audio::cache::CacheStats {
     st.cache.clear();
     st.cache.stats()
 }
@@ -361,8 +361,8 @@ fn shape_of(duration: f64, cut_start: f64, cut_end: f64, fade_in: f64, fade_out:
     player::Shape { start: ok(cut_start), end, fade_in: ok(fade_in), fade_out: ok(fade_out) }
 }
 
-fn key_of(pitch: f64, keep_formants: bool) -> Option<p2u_audio::stretch::Key> {
-    (pitch != 0.0 && pitch.is_finite()).then(|| p2u_audio::stretch::Key { semitones: pitch.clamp(-24.0, 24.0) as f32, keep_formants })
+fn key_of(pitch: f64, keep_formants: bool) -> Option<fatstick_audio::stretch::Key> {
+    (pitch != 0.0 && pitch.is_finite()).then(|| fatstick_audio::stretch::Key { semitones: pitch.clamp(-24.0, 24.0) as f32, keep_formants })
 }
 
 #[derive(Serialize)]
@@ -386,7 +386,7 @@ fn player_play(st: State<AppState>, args: PlayArgs) -> Res<Playing> {
     let (path, gain, from, dur, key, shape) = match cached {
         // A prepared file can be longer or shorter than its source (cut, padded).
         Some(p) => {
-            let d = p2u_audio::mp3::scan(&p).ok().flatten().map(|i| i.duration).unwrap_or(dur);
+            let d = fatstick_audio::mp3::scan(&p).ok().flatten().map(|i| i.duration).unwrap_or(dur);
             (p, 0.0, "cache", d, None, player::Shape::default())
         }
         None => (path, args.gain_db, "source", dur, key_of(args.pitch, args.keep_formants), shape_of(dur, args.cut_start, args.cut_end, args.fade_in, args.fade_out)),
@@ -405,7 +405,7 @@ fn player_shape(st: State<AppState>, duration: f64, cut_start: f64, cut_end: f64
 /// The key slider, live: another key for what's playing (0 for its own).
 #[tauri::command]
 fn player_key(st: State<AppState>, pitch: f64, keep_formants: bool) {
-    st.player.send(player::Cmd::Key(key_of(pitch, keep_formants).or_else(|| (pitch == 0.0).then_some(p2u_audio::stretch::Key { semitones: 0.0, keep_formants }))));
+    st.player.send(player::Cmd::Key(key_of(pitch, keep_formants).or_else(|| (pitch == 0.0).then_some(fatstick_audio::stretch::Key { semitones: 0.0, keep_formants }))));
 }
 
 #[tauri::command]
@@ -497,7 +497,7 @@ struct About {
     ffmpeg: Option<String>,
     ffmpeg_path: Option<String>,
     data_dir: String,
-    cache: p2u_audio::cache::CacheStats,
+    cache: fatstick_audio::cache::CacheStats,
 }
 
 #[tauri::command]
@@ -512,14 +512,14 @@ fn about(st: State<AppState>) -> About {
 }
 
 // ---- self-test -------------------------------------------------------------------------------
-// With P2U_SELFTEST=<script.js>, the window runs that script once the page has
-// loaded (P2U_SELFTEST_CONFIG is handed to it as JSON), and the script's report
+// With FATSTICK_SELFTEST=<script.js>, the window runs that script once the page has
+// loaded (FATSTICK_SELFTEST_CONFIG is handed to it as JSON), and the script's report
 // ends the app: tests/app_e2e.py drives the real app this way. Nothing happens
 // without the variable.
 
 #[tauri::command]
 fn selftest_report(app: AppHandle, ok: bool, report: String) {
-    if std::env::var_os("P2U_SELFTEST").is_none() {
+    if std::env::var_os("FATSTICK_SELFTEST").is_none() {
         return;
     }
     println!("{report}");
@@ -528,17 +528,17 @@ fn selftest_report(app: AppHandle, ok: bool, report: String) {
 }
 
 fn selftest_script() -> Option<String> {
-    let path = std::env::var_os("P2U_SELFTEST")?;
+    let path = std::env::var_os("FATSTICK_SELFTEST")?;
     let body = std::fs::read_to_string(&path).ok()?;
-    let config = std::env::var("P2U_SELFTEST_CONFIG").unwrap_or_else(|_| "{}".into());
-    Some(format!("window.__P2U_SELFTEST_CONFIG = {config};\n{body}"))
+    let config = std::env::var("FATSTICK_SELFTEST_CONFIG").unwrap_or_else(|_| "{}".into());
+    Some(format!("window.__FATSTICK_SELFTEST_CONFIG = {config};\n{body}"))
 }
 
 fn main() {
     #[cfg(target_os = "linux")]
     graphics::apply();
-    let data_dir = std::env::var_os("P2U_DATA_DIR").map(PathBuf::from).unwrap_or_else(p2u_library::default_dir);
-    let cache_dir = std::env::var_os("P2U_CACHE_DIR").map(PathBuf::from).unwrap_or_else(Cache::default_dir);
+    let data_dir = std::env::var_os("FATSTICK_DATA_DIR").map(PathBuf::from).unwrap_or_else(fatstick_library::default_dir);
+    let cache_dir = std::env::var_os("FATSTICK_CACHE_DIR").map(PathBuf::from).unwrap_or_else(Cache::default_dir);
     let lib = Library::open(&data_dir.join("library.db")).expect("opening the library database");
     let cache = Cache::open(&cache_dir).expect("opening the cache folder");
     let (tools, tools_error) = match Tools::locate() {
@@ -623,5 +623,5 @@ fn main() {
             selftest_report,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Playlist2USB");
+        .expect("error while running Fatstick");
 }

@@ -4,7 +4,7 @@
 // copy against every frame header again and encodes anything the profile
 // can't take. Pure functions, no DOM.
 "use strict";
-(function (P2U) {
+(function (Fatstick) {
   const LOSSLESS = new Set(["flac", "alac", "wav", "aiff", "wavpack", "ape", "wmalossless"]);
   const CODEC_NAME = {
     mp3: "MP3", flac: "FLAC", alac: "ALAC", wav: "WAV", aiff: "AIFF", wavpack: "WavPack", ape: "APE",
@@ -228,8 +228,8 @@
     return { ...g, used, free: g.dataBytes - used, fits: used <= g.dataBytes, runs };
   }
 
-  P2U.rules = {
+  Fatstick.rules = {
     LOSSLESS, CODEC_NAME, formatLabel, decide, gains, outBytes, geometry, layout, outputRate, recipe, describe, STEP,
     edges, hasEdges, key, hasKey, fades, hasFades, fadeCurve, reworks, stickSeconds, part, render, hash,
   };
-})(typeof window !== "undefined" ? (window.P2U = window.P2U || {}) : (globalThis.P2U = globalThis.P2U || {}));
+})(typeof window !== "undefined" ? (window.Fatstick = window.Fatstick || {}) : (globalThis.Fatstick = globalThis.Fatstick || {}));

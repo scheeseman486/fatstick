@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Playlist2USB",
+  "productName": "Fatstick",
   "version": "0.1.0",
-  "identifier": "net.playlist2usb.desktop",
+  "identifier": "net.fatstick.desktop",
   "build": {
     "frontendDist": "../ui"
   },
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Playlist2USB",
+        "title": "Fatstick",
         "width": 1180,
         "height": 760,
         "minWidth": 860,

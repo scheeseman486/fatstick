@@ -14,7 +14,7 @@ const http = require('http');
 const { execFileSync } = require('child_process');
 
 const UI = path.join(__dirname, '..', 'app', 'ui');
-const work = fs.mkdtempSync(path.join(os.tmpdir(), 'p2u-ui-'));
+const work = fs.mkdtempSync(path.join(os.tmpdir(), 'fatstick-ui-'));
 const out = process.argv[2] || work;
 fs.mkdirSync(out, { recursive: true });
 const ff = (args) => execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
@@ -37,7 +37,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   const errs = [];
   p.on('pageerror', e => errs.push(e.message));
   p.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
-  await p.addInitScript(() => localStorage.setItem('p2u-proto', JSON.stringify({ look: 'backlit', theme: 'light', shell: 0 })));
+  await p.addInitScript(() => localStorage.setItem('fatstick-proto', JSON.stringify({ look: 'backlit', theme: 'light', shell: 0 })));
   await p.goto(URL);
   await p.waitForTimeout(600);
   const titles = () => p.$$eval('#list .row .c-title .t', els => els.map(e => e.textContent));
@@ -230,7 +230,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   await p.getByRole('button', { name: 'Apply' }).click();
   const edgeCell = await p.locator('#list .row').nth(1).locator('.c-edges').textContent();
   check('the start / end column shows the cut and the silence', edgeCell === '−2 / +1.5 s', edgeCell);
-  const r2 = await p.evaluate(() => { const A = window.P2U.app; const it = A.planSet(A.stickSet()).folders[0].files[1]; return [it.recipe.kind, it.recipe.parts[0].cutStart, it.recipe.parts[0].padEnd, it.d.action]; });
+  const r2 = await p.evaluate(() => { const A = window.Fatstick.app; const it = A.planSet(A.stickSet()).folders[0].files[1]; return [it.recipe.kind, it.recipe.parts[0].cutStart, it.recipe.parts[0].padEnd, it.d.action]; });
   check('a cut track is rendered (encoded) on the stick', JSON.stringify(r2) === JSON.stringify(['render', 2, 1.5, 'encode']), JSON.stringify(r2));
 
   // 15. Silence between playlists, 10 s.
@@ -238,7 +238,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   await p.locator('#stick input[aria-label="Seconds of silence"]').fill('10');
   await p.locator('#stick input[aria-label="Seconds of silence"]').press('Enter');
   await p.locator('#stick input[aria-label="Seconds of silence"]').blur();
-  const gapPlan = await p.evaluate(() => { const A = window.P2U.app; const f = A.planSet(A.stickSet()).folders.at(-1); return [f.folder, f.files.length, f.files[0].name, f.files[0].secs]; });
+  const gapPlan = await p.evaluate(() => { const A = window.Fatstick.app; const f = A.planSet(A.stickSet()).folders.at(-1); return [f.folder, f.files.length, f.files[0].name, f.files[0].secs]; });
   check('silence gets a folder of its own, with one file', JSON.stringify(gapPlan) === JSON.stringify(["03 Silence", 1, "01 - Silence.mp3", 10]), JSON.stringify(gapPlan));
 
   // 16. Kids' car joined into one track: still a playlist here, one file on the stick.
@@ -249,7 +249,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   const chips = await p.locator('#list .c-stick .chip').allTextContents();
   check('every track shows where it starts in the joined track', chips.length === 12 && chips[0] === 'Joined, 0:00' && chips.every((c) => c.startsWith('Joined, ')), chips.slice(0, 3).join(' | '));
   check('the sidebar says the playlist goes on as one track', /12 tracks as one/.test(await p.locator('[data-pl="p-kids"] .mt').textContent()));
-  const joinPlan = await p.evaluate(() => { const A = window.P2U.app; const f = A.planSet(A.stickSet()).folders[1]; return [f.files.length, f.present.length, f.files[0].name, f.files[0].recipe ? f.files[0].recipe.parts.length : -1]; });
+  const joinPlan = await p.evaluate(() => { const A = window.Fatstick.app; const f = A.planSet(A.stickSet()).folders[1]; return [f.files.length, f.present.length, f.files[0].name, f.files[0].recipe ? f.files[0].recipe.parts.length : -1]; });
   check('the stick gets one file for it, made of its 12 tracks', JSON.stringify(joinPlan) === JSON.stringify([1, 12, "01 - Kids' car.mp3", 12]), JSON.stringify(joinPlan));
   check("the stick panel counts it as joined", /12 tracks joined into one/.test(await p.locator('#stick .folders').textContent()));
 
@@ -330,8 +330,8 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('double-clicking a result plays it, on its own', (await p.locator('#player .np-t').textContent()) === 'Go Your Own Way' && /From the library/.test(await p.locator('#player .np-s').textContent()) && (await titles()).length === before19 + 1);
     check('the song playing is marked in the results', (await p.locator('.srch-res .sr.playing .eq').count()) === 1);
     check('a song on its own has no next', await p.locator('#player button[aria-label="Next"]').isDisabled());
-    await p.evaluate(() => P2U.api.seek(P2U.app.S.player.dur - 0.3));
-    await p.waitForFunction(() => !P2U.app.S.player.trackId, null, { timeout: 3000 }).catch(() => {});
+    await p.evaluate(() => Fatstick.api.seek(Fatstick.app.S.player.dur - 0.3));
+    await p.waitForFunction(() => !Fatstick.app.S.player.trackId, null, { timeout: 3000 }).catch(() => {});
     check('it plays once: then the player stops', (await p.locator('#player .np-t').textContent()) === 'Nothing playing');
     await p.locator('.srch-res .sr').first().click();
     await p.keyboard.press('Shift+Enter');
@@ -366,8 +366,8 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('the playlist gets them', parseInt(await p.locator('[data-pl="p-gym"] .mt').textContent(), 10) === gymWas + 2, `${gymWas} -> ${await p.locator('[data-pl="p-gym"] .mt').textContent()}`);
 
     // 22. Tags written into the files, after a preview, with undo.
-    const tagsOf = (ids) => p.evaluate((ids) => ids.map((id) => { const t = P2U.app.S.tracks.get(id); return `${t.genre}|${t.labels.join(',')}`; }), ids);
-    const selIds = await p.evaluate(() => P2U.app.lib.state.L.ids.filter((x) => P2U.app.lib.state.L.sel.has(x)));
+    const tagsOf = (ids) => p.evaluate((ids) => ids.map((id) => { const t = Fatstick.app.S.tracks.get(id); return `${t.genre}|${t.labels.join(',')}`; }), ids);
+    const selIds = await p.evaluate(() => Fatstick.app.lib.state.L.ids.filter((x) => Fatstick.app.lib.state.L.sel.has(x)));
     const tagsBefore = await tagsOf(selIds);
     await p.locator('.lib-edit input[id^="ted-genre"]').fill('Kids');
     await p.locator('.lib-edit input[id^="ted-lbl"]').fill('car');
@@ -395,7 +395,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.locator('.lib-edit .ted-foot .btn', { hasText: 'Revert' }).click();
 
     // 24. File names cleaned up from the tags, with undo.
-    const pathsOf = (ids) => p.evaluate((ids) => ids.map((id) => P2U.app.S.tracks.get(id).path), ids);
+    const pathsOf = (ids) => p.evaluate((ids) => ids.map((id) => Fatstick.app.S.tracks.get(id).path), ids);
     const pathsBefore = await pathsOf(selIds);
     await p.locator('.lib-head .btn', { hasText: 'Clean up file names' }).click();
     await p.locator('#modal select').selectOption({ label: '01 - Artist - Title' });
@@ -418,8 +418,8 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('double-clicking a library track plays it', (await p.locator('#player .np-t').textContent()) === playMe && (await p.locator('.lr.playing').count()) === 1 && /^PLAY/.test(await p.locator('#disp-text').textContent()), playMe);
     check('without adding it anywhere', (await p.locator('[data-pl="p-road"] .mt').textContent()) === roadWas);
     await p.keyboard.press('Space');
-    check('Space pauses it', !(await p.evaluate(() => P2U.app.S.player.playing)));
-    await p.evaluate(() => P2U.app.stopPlayback());
+    check('Space pauses it', !(await p.evaluate(() => Fatstick.app.S.player.playing)));
+    await p.evaluate(() => Fatstick.app.stopPlayback());
     await p.screenshot({ path: `${out}/library.png` });
 
     // 25. Back to the playlist: click one on the left.
@@ -440,7 +440,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.locator('[data-pl="p-road"]').click();
     await row(2).click();
     await row(2).click();
-    const kid = await p.evaluate(() => P2U.app.pl().entries[2].id);
+    const kid = await p.evaluate(() => Fatstick.app.pl().entries[2].id);
     await p.keyboard.press('k');
     check('K opens the key dialog', /^Key of /.test(await p.locator('#modal-title').textContent()) && (await p.locator('#key-words').textContent()) === 'The original key');
     for (let i = 0; i < 3; i++) await p.locator('#key-semis').press('ArrowRight');
@@ -450,39 +450,39 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.locator('#key-keep').uncheck();
     await p.screenshot({ path: `${out}/key.png` });
     await p.locator('#modal .btn.primary').click();
-    const ent = await p.evaluate((id) => P2U.app.pl().entries.find((e) => e.id === id), kid);
+    const ent = await p.evaluate((id) => Fatstick.app.pl().entries.find((e) => e.id === id), kid);
     check('Apply sets the entry\'s key', ent.pitch === 3.15 && ent.keepFormants === false, JSON.stringify(ent));
     check('the Key column shows it', (await p.locator(`#row-${kid} .c-key`).textContent()) === '+3 +15¢');
     const plan = await p.evaluate((id) => {
-      const A = P2U.app;
+      const A = Fatstick.app;
       const f = A.planSet(A.stickSet()).folders.find((x) => x.items.some((it) => it.entry && it.entry.id === id));
       const it = f.items.find((x) => x.entry && x.entry.id === id);
       return { recipe: it.recipe, reason: it.d.reason };
     }, kid);
     check('it goes on the stick rendered, in its key', plan.recipe && plan.recipe.kind === 'render' && plan.recipe.parts[0].pitch === 3.15 && plan.recipe.parts[0].keepFormants === false, JSON.stringify(plan));
     await p.keyboard.press('Control+z');
-    check('undo puts it back in its own key', !(await p.evaluate((id) => P2U.app.pl().entries.find((e) => e.id === id).pitch, kid)));
+    check('undo puts it back in its own key', !(await p.evaluate((id) => Fatstick.app.pl().entries.find((e) => e.id === id).pitch, kid)));
     await p.keyboard.press('Control+y');
     // Cancel leaves it as it was.
     await row(2).click({ button: 'right' });
     await p.getByRole('menuitem', { name: 'Key…' }).click();
     await p.locator('#key-semis').press('ArrowLeft');
     await p.getByRole('button', { name: 'Cancel' }).click();
-    check('Cancel changes nothing', (await p.evaluate((id) => P2U.app.pl().entries.find((e) => e.id === id).pitch, kid)) === 3.15);
+    check('Cancel changes nothing', (await p.evaluate((id) => Fatstick.app.pl().entries.find((e) => e.id === id).pitch, kid)) === 3.15);
     // A joined playlist keeps each track's key.
-    await p.evaluate((id) => { const A = P2U.app; A.pl().join = true; }, kid);
-    const parts = await p.evaluate(() => { const A = P2U.app; const f = A.planSet(A.stickSet()).folders.find((x) => x.p.id === A.pl().id); return f.files[0].recipe.parts.map((x) => x.pitch || 0); });
+    await p.evaluate((id) => { const A = Fatstick.app; A.pl().join = true; }, kid);
+    const parts = await p.evaluate(() => { const A = Fatstick.app; const f = A.planSet(A.stickSet()).folders.find((x) => x.p.id === A.pl().id); return f.files[0].recipe.parts.map((x) => x.pitch || 0); });
     check('a joined playlist keeps each track\'s key', parts.filter((x) => x === 3.15).length === 1 && parts.length > 10, JSON.stringify(parts));
-    await p.evaluate(() => { P2U.app.pl().join = false; });
+    await p.evaluate(() => { Fatstick.app.pl().join = false; });
   }
 
   // 28. Fades: the dialog, its sliders and curves, hearing it, Apply, Cancel and undo.
   {
     await p.locator('[data-pl="p-road"]').click();
     // A track long enough for both fades.
-    const fi = await p.evaluate(() => { const A = P2U.app; return A.pl().entries.findIndex((e, i) => i > 2 && A.track(e.trackId).duration >= 40 && !e.pitch); });
+    const fi = await p.evaluate(() => { const A = Fatstick.app; return A.pl().entries.findIndex((e, i) => i > 2 && A.track(e.trackId).duration >= 40 && !e.pitch); });
     await row(fi).click();
-    const fid = await p.evaluate((i) => P2U.app.pl().entries[i].id, fi);
+    const fid = await p.evaluate((i) => Fatstick.app.pl().entries[i].id, fi);
     await p.keyboard.press('f');
     check('F opens the fade dialog', /^Fades of /.test(await p.locator('#modal-title').textContent()) && (await p.locator('.fade-panel').count()) === 2);
     const curve = () => p.locator('.fade-panel.in .fade-line').getAttribute('d');
@@ -499,38 +499,38 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     }));
     await p.getByRole('button', { name: 'Hear the end' }).click();
     await p.waitForTimeout(100);
-    const heard = await p.evaluate(() => ({ id: P2U.app.S.player.entryId, pos: P2U.app.S.player.pos, dur: P2U.app.S.player.dur }));
+    const heard = await p.evaluate(() => ({ id: Fatstick.app.S.player.entryId, pos: Fatstick.app.S.player.pos, dur: Fatstick.app.S.player.dur }));
     check('"Hear the end" plays it just before the fade out', heard.id === fid && Math.abs(heard.pos - (heard.dur - 6.5 - 3)) < 0.6, JSON.stringify(heard));
     await p.locator('#player .pbtn.play').click();
-    check('the player bar works with the dialog open', !(await p.evaluate(() => P2U.app.S.player.playing)) && !(await p.locator('#modal-back').isHidden()));
+    check('the player bar works with the dialog open', !(await p.evaluate(() => Fatstick.app.S.player.playing)) && !(await p.locator('#modal-back').isHidden()));
     await p.screenshot({ path: `${out}/fades.png` });
     await p.locator('#modal .btn.primary').click();
-    const fe = await p.evaluate((id) => P2U.app.pl().entries.find((e) => e.id === id), fid);
+    const fe = await p.evaluate((id) => Fatstick.app.pl().entries.find((e) => e.id === id), fid);
     check('Apply sets the entry\'s fades', fe.fadeIn === 4 && fe.fadeOut === 6.5, JSON.stringify(fe));
     check('the Fades column shows them', (await p.locator(`#row-${fid} .c-fades`).textContent()) === '4 / 6.5 s');
     check('the dialog let go of the player bar', !(await p.evaluate(() => document.body.classList.contains('modal-player'))));
     const fplan = await p.evaluate((id) => {
-      const A = P2U.app;
+      const A = Fatstick.app;
       const f = A.planSet(A.stickSet()).folders.find((x) => x.items.some((it) => it.entry && it.entry.id === id));
       const it = f.items.find((x) => x.entry && x.entry.id === id);
       return { recipe: it.recipe, reason: it.d.reason };
     }, fid);
     check('it goes on the stick rendered, with its fades', fplan.recipe && fplan.recipe.kind === 'render' && fplan.recipe.parts[0].fadeIn === 4 && fplan.recipe.parts[0].fadeOut === 6.5 && !/Cut or padded/.test(fplan.reason), JSON.stringify(fplan));
     await p.keyboard.press('Control+z');
-    check('undo takes the fades off', !(await p.evaluate((id) => { const e = P2U.app.pl().entries.find((x) => x.id === id); return e.fadeIn || e.fadeOut; }, fid)));
+    check('undo takes the fades off', !(await p.evaluate((id) => { const e = Fatstick.app.pl().entries.find((x) => x.id === id); return e.fadeIn || e.fadeOut; }, fid)));
     await p.keyboard.press('Control+y');
     // Cancel leaves them; "No fades" then Apply takes them off.
     await row(fi).click({ button: 'right' });
     await p.getByRole('menuitem', { name: 'Fade in and out…' }).click();
     await p.locator('#fade-in').fill('10');
     await p.getByRole('button', { name: 'Cancel' }).click();
-    check('Cancel changes nothing', (await p.evaluate((id) => P2U.app.pl().entries.find((e) => e.id === id).fadeIn, fid)) === 4);
+    check('Cancel changes nothing', (await p.evaluate((id) => Fatstick.app.pl().entries.find((e) => e.id === id).fadeIn, fid)) === 4);
     await p.keyboard.press('f');
     await p.getByRole('button', { name: 'No fades' }).click();
     await p.locator('#modal .btn.primary').click();
-    check('"No fades" takes them off', !(await p.evaluate((id) => { const e = P2U.app.pl().entries.find((x) => x.id === id); return e.fadeIn || e.fadeOut; }, fid)) && (await p.locator('.c-fades').count()) === 0);
+    check('"No fades" takes them off', !(await p.evaluate((id) => { const e = Fatstick.app.pl().entries.find((x) => x.id === id); return e.fadeIn || e.fadeOut; }, fid)) && (await p.locator('.c-fades').count()) === 0);
     await p.keyboard.press('Control+z');
-    await p.evaluate(() => P2U.app.stopPlayback());
+    await p.evaluate(() => Fatstick.app.stopPlayback());
   }
 
   check('no console errors', errs.length === 0, errs.join(' / '));

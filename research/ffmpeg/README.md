@@ -1,4 +1,4 @@
-# Audio-only ffmpeg for Playlist2USB
+# Audio-only ffmpeg for Fatstick
 
 `build-audio-ffmpeg.sh` builds the ffmpeg the app bundles: decoders for MP1/2/3,
 FLAC, ALAC, AAC, Vorbis, Opus, WMA 1, 2, Pro and Lossless, APE, WavPack and PCM;

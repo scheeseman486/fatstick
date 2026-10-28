@@ -12,10 +12,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use p2u_audio::prepare::{prepare, ready, Recipe};
-use p2u_audio::render::{self, RenderSpec, Source};
-use p2u_audio::{loudness, Cache, Tools};
-use p2u_library::{scan, Library, Track};
+use fatstick_audio::prepare::{prepare, ready, Recipe};
+use fatstick_audio::render::{self, RenderSpec, Source};
+use fatstick_audio::{loudness, Cache, Tools};
+use fatstick_library::{scan, Library, Track};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -176,7 +176,7 @@ impl Work {
 
 /// The track's file as last read, re-read first if it changed on disk, or
 /// if it was only read quickly (the music folder's scan).
-pub fn current_probe(lib: &Mutex<Library>, tools: &Tools, track_id: &str) -> Result<(std::path::PathBuf, String, p2u_audio::Probe), String> {
+pub fn current_probe(lib: &Mutex<Library>, tools: &Tools, track_id: &str) -> Result<(std::path::PathBuf, String, fatstick_audio::Probe), String> {
     let (path, _, probe) = lib.lock().unwrap().probe_of(track_id).map_err(|e| e.to_string())?.ok_or_else(|| format!("{track_id} hasn't been read yet"))?;
     let stale = probe.quick || {
         let l = lib.lock().unwrap();

@@ -1,6 +1,6 @@
-# Third-party software in Playlist2USB
+# Third-party software in Fatstick
 
-Playlist2USB is free software under the GNU General Public License, version 3
+Fatstick is free software under the GNU General Public License, version 3
 or later (see `COPYING`). It ships with the following parts made by others.
 
 ## FFmpeg (the `ffmpeg` and `ffprobe` programs)
@@ -9,14 +9,14 @@ or later (see `COPYING`). It ships with the following parts made by others.
 - Licence: GNU Lesser General Public License, version 2.1 or later
   (`LGPL-2.1.txt`). The build uses neither `--enable-gpl` nor
   `--enable-nonfree`.
-- Built by `packaging/ffmpeg/build-ffmpeg.sh` in the Playlist2USB source,
+- Built by `packaging/ffmpeg/build-ffmpeg.sh` in the Fatstick source,
   which fetches the exact sources and holds the full configure line: an
   audio-only build with decoders for MP3, FLAC, ALAC, WAV, AIFF, AAC, Vorbis,
   Opus, WMA, WavPack and APE, the libmp3lame encoder, and the aresample,
   volume and ebur128 filters.
-- FFmpeg runs as a separate program; Playlist2USB starts it and reads its
+- FFmpeg runs as a separate program; Fatstick starts it and reads its
   output. You may replace the bundled `ffmpeg` and `ffprobe` with your own
-  build: set `P2U_FFMPEG_DIR` to the folder holding them.
+  build: set `FATSTICK_FFMPEG_DIR` to the folder holding them.
 
 ## LAME (inside the bundled ffmpeg)
 
@@ -30,9 +30,9 @@ or later (see `COPYING`). It ships with the following parts made by others.
 
 ## Written offer
 
-For three years from the date you received a copy of Playlist2USB, the
+For three years from the date you received a copy of Fatstick, the
 source code of the exact FFmpeg and LAME versions above is available from the
-same place you got Playlist2USB: every release carries the source archives
+same place you got Fatstick: every release carries the source archives
 alongside the installers. The build script fetches them too.
 
 ## Fonts (in the window)
@@ -68,11 +68,11 @@ wrapper is adapted from the signalsmith-stretch crate by Colin Marc. All MIT:
 > FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 > IN THE SOFTWARE.
 
-Sources: `crates/p2u-stretch/vendor` in the Playlist2USB source.
+Sources: `crates/fatstick-stretch/vendor` in the Fatstick source.
 
 ## Rust libraries
 
-Compiled into the Playlist2USB programs. All are under licences compatible
+Compiled into the Fatstick programs. All are under licences compatible
 with the GPL version 3: mostly MIT and/or Apache-2.0, with a few under BSD,
 ISC, Zlib, Unicode-3.0 or MPL-2.0 terms. Among them: Tauri, rusqlite (with
 SQLite, public domain), id3, image, mp3rgain (MIT), cpal, blake3, serde,

@@ -1,0 +1,17 @@
+[package]
+name = "fatstick-cli"
+description = "Command-line front end for Fatstick"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "fatstick"
+path = "src/main.rs"
+
+[dependencies]
+fatstick-core.workspace = true
+fatstick-device.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+clap = { version = "4", features = ["derive"] }

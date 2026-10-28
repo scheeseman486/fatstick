@@ -560,6 +560,98 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
+name = "fatstick-audio"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "deunicode",
+ "fatstick-stretch",
+ "filetime",
+ "id3",
+ "image",
+ "lofty",
+ "mp3rgain",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "fatstick-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "fatstick-core",
+ "fatstick-device",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "fatstick-core"
+version = "0.1.0"
+dependencies = [
+ "deunicode",
+ "encoding_rs",
+ "filetime",
+ "libc",
+ "percent-encoding",
+ "quick-xml 0.38.4",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "fatstick-device"
+version = "0.1.0"
+dependencies = [
+ "fatstick-core",
+ "libc",
+ "plist",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "windows-sys 0.60.2",
+ "zbus",
+]
+
+[[package]]
+name = "fatstick-helper"
+version = "0.1.0"
+dependencies = [
+ "embed-manifest",
+ "fatstick-core",
+ "fatstick-device",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "fatstick-library"
+version = "0.1.0"
+dependencies = [
+ "fatstick-audio",
+ "fatstick-core",
+ "percent-encoding",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "fatstick-stretch"
+version = "0.1.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "fdeflate"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -958,98 +1050,6 @@ checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
 dependencies = [
  "futures-core",
  "pin-project-lite",
-]
-
-[[package]]
-name = "p2u-audio"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "deunicode",
- "filetime",
- "id3",
- "image",
- "lofty",
- "mp3rgain",
- "p2u-stretch",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
-]
-
-[[package]]
-name = "p2u-cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "p2u-core",
- "p2u-device",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "p2u-core"
-version = "0.1.0"
-dependencies = [
- "deunicode",
- "encoding_rs",
- "filetime",
- "libc",
- "percent-encoding",
- "quick-xml 0.38.4",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "unicode-normalization",
-]
-
-[[package]]
-name = "p2u-device"
-version = "0.1.0"
-dependencies = [
- "libc",
- "p2u-core",
- "plist",
- "serde",
- "serde_json",
- "thiserror",
- "windows-sys 0.60.2",
- "zbus",
-]
-
-[[package]]
-name = "p2u-helper"
-version = "0.1.0"
-dependencies = [
- "embed-manifest",
- "p2u-core",
- "p2u-device",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "p2u-library"
-version = "0.1.0"
-dependencies = [
- "p2u-audio",
- "p2u-core",
- "percent-encoding",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
-]
-
-[[package]]
-name = "p2u-stretch"
-version = "0.1.0"
-dependencies = [
- "cc",
 ]
 
 [[package]]

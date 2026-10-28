@@ -1,7 +1,7 @@
 {
   "bundle": {
     "externalBin": [
-      "binaries/p2u-helper",
+      "binaries/fatstick-helper",
       "binaries/ffmpeg",
       "binaries/ffprobe"
     ],
@@ -11,7 +11,7 @@
           "udisks2"
         ],
         "files": {
-          "/usr/share/polkit-1/actions/net.playlist2usb.helper.policy": "../../packaging/linux/net.playlist2usb.helper.policy"
+          "/usr/share/polkit-1/actions/net.fatstick.helper.policy": "../../packaging/linux/net.fatstick.helper.policy"
         }
       }
     }

@@ -2,7 +2,7 @@
 // doc, the FAT clean-up rules, and the notes the preview shows. Pure functions,
 // no DOM, so the same code runs in node for tests (tests/ui_names.js).
 "use strict";
-(function (P2U) {
+(function (Fatstick) {
   const FIELDS = ["n", "title", "artist", "album", "albumartist", "year", "genre", "track", "disc", "filename", "playlist"];
   const FORBIDDEN = /["*/:<>?\\|\u0000-\u001f\u007f]/g;
   const DEVICE = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
@@ -215,5 +215,5 @@
     return asciiFold(s || "").text.toUpperCase().replace(/[^A-Z0-9 _\-!#$%&'()@^`{}~]/g, "").trim().slice(0, 11);
   }
 
-  P2U.names = { FIELDS, parse, fileNames, folderNames, libraryNames, volumeLabel, asciiFold };
-})(typeof window !== "undefined" ? (window.P2U = window.P2U || {}) : (globalThis.P2U = globalThis.P2U || {}));
+  Fatstick.names = { FIELDS, parse, fileNames, folderNames, libraryNames, volumeLabel, asciiFold };
+})(typeof window !== "undefined" ? (window.Fatstick = window.Fatstick || {}) : (globalThis.Fatstick = globalThis.Fatstick || {}));

@@ -1,0 +1,26 @@
+[package]
+name = "fatstick-audio"
+description = "Fatstick's audio engine: probing, loudness, MP3 encoding and lossless gain through a bundled ffmpeg, tags, cover art and the prepared-audio cache"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+fatstick-stretch = { path = "../fatstick-stretch" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+blake3 = "1"
+deunicode = "1"
+filetime = "0.2"
+id3 = "1.17"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "webp"] }
+# Lossless MP3 gain (global_gain steps), as mp3gain does it. The library only:
+# its CLI features pull in a decoder we don't need.
+mp3rgain = { version = "=3.14.0", default-features = false }
+# Writing tags into library files (ID3v2, Vorbis comments, MP4, APE, RIFF INFO).
+lofty = "0.25"
+
+[dev-dependencies]
+tempfile = "3"

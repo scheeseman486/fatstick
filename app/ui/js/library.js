@@ -14,10 +14,10 @@
 // Nothing here writes a file outside the music folder, and the app's Rust
 // side checks that again before it touches one.
 "use strict";
-(function (P2U) {
-  const { h, fill, icon, clock, length, plural, ago, menu, modal, closeModal, toast } = P2U.ui;
-  const SR = P2U.search;
-  const N = P2U.names;
+(function (Fatstick) {
+  const { h, fill, icon, clock, length, plural, ago, menu, modal, closeModal, toast } = Fatstick.ui;
+  const SR = Fatstick.search;
+  const N = Fatstick.names;
 
   /** Library table row height, px (the table only draws the rows in view). */
   const RH = 30;
@@ -107,7 +107,7 @@
     return out;
   }
 
-  P2U.librarySetup = function (core) {
+  Fatstick.librarySetup = function (core) {
     const { S, api, track } = core;
     const $ = (id) => document.getElementById(id);
 
@@ -505,7 +505,7 @@
       let done = [];
       try {
         if (items.some((x) => { const o = cur.get(target(x)); return o && o !== x.t.id; })) {
-          const r1 = await api.libraryRename(items.map((x) => ({ trackId: x.t.id, name: `p2u-renaming-${x.t.id}${splitPath(x.t.path).ext}` })));
+          const r1 = await api.libraryRename(items.map((x) => ({ trackId: x.t.id, name: `fatstick-renaming-${x.t.id}${splitPath(x.t.path).ext}` })));
           core.putTracks(r1.tracks);
           failed.push(...r1.failed);
           const okIds = new Set(r1.tracks.map((t) => t.id));
@@ -974,7 +974,7 @@
       fill(V.start,
         h("div", { class: "lib-start-in" },
           h("h2", { text: "Choose the folder your music is in" }),
-          h("p", { text: "Playlist2USB reads every song in it, and keeps up as you add, move and retag files. Search it, browse it by tag, and drag songs onto your playlists." }),
+          h("p", { text: "Fatstick reads every song in it, and keeps up as you add, move and retag files. Search it, browse it by tag, and drag songs onto your playlists." }),
           h("p", { text: "You sort the files into folders yourself. Tags and file names only change when you ask, after a preview, and nothing outside the folder is touched." }),
           h("button", { type: "button", class: "btn primary", text: "Choose your music folder…", onclick: chooseFolder })));
     }
@@ -1440,4 +1440,4 @@
       state: { L, SE },
     };
   };
-})(window.P2U = window.P2U || {});
+})(window.Fatstick = window.Fatstick || {});

@@ -23,4 +23,4 @@ all six files, +3.0 dB (+3.1 on MPEG-2 mono) and an amplitude ratio of 1.41421;
 normalized files landed within 0.7 dB of -18 LUFS (1.5 dB steps); the re-encode
 path landed at -18.0 LUFS. mp3rgain's undo restored the file byte for byte except
 one bit in the last frame of the VBR file (decoded audio identical). The design
-doc is "Playlist2USB design: playlists, sync, conversion and playback".
+doc is "Fatstick design: playlists, sync, conversion and playback".

@@ -1,13 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/p2u-core",
-    "crates/p2u-device",
-    "crates/p2u-cli",
-    "crates/p2u-helper",
-    "crates/p2u-audio",
-    "crates/p2u-library",
-    "crates/p2u-stretch",
+    "crates/fatstick-core",
+    "crates/fatstick-device",
+    "crates/fatstick-cli",
+    "crates/fatstick-helper",
+    "crates/fatstick-audio",
+    "crates/fatstick-library",
+    "crates/fatstick-stretch",
 ]
 # The Tauri shell lives in app/src-tauri and is its own workspace member when
 # its system dependencies (webkit2gtk-4.1 on Linux) are installed:
@@ -21,10 +21,10 @@ license = "GPL-3.0-or-later"
 rust-version = "1.80"
 
 [workspace.dependencies]
-p2u-core = { path = "crates/p2u-core" }
-p2u-device = { path = "crates/p2u-device" }
-p2u-audio = { path = "crates/p2u-audio" }
-p2u-library = { path = "crates/p2u-library" }
+fatstick-core = { path = "crates/fatstick-core" }
+fatstick-device = { path = "crates/fatstick-device" }
+fatstick-audio = { path = "crates/fatstick-audio" }
+fatstick-library = { path = "crates/fatstick-library" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

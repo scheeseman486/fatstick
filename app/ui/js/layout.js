@@ -3,12 +3,12 @@
 // main window plans the stick and sends the plan whenever it changes; this
 // window only draws it.
 "use strict";
-(function (P2U) {
-  const { h, fill, clock, length, bytes, plural } = P2U.ui;
-  const link = P2U.link;
+(function (Fatstick) {
+  const { h, fill, clock, length, bytes, plural } = Fatstick.ui;
+  const link = Fatstick.link;
   const setId = new URLSearchParams(location.search).get("set") || "";
   const root = document.getElementById("lay");
-  const storeKey = `p2u-layout-closed:${setId}`;
+  const storeKey = `fatstick-layout-closed:${setId}`;
   let closed = new Set();
   try { closed = new Set(JSON.parse(localStorage.getItem(storeKey) || "[]")); } catch { /* a fresh window */ }
   const remember = () => { try { localStorage.setItem(storeKey, JSON.stringify([...closed])); } catch { /* not kept */ } };
@@ -114,4 +114,4 @@
   // Ask again until the main window answers (it may still be starting).
   const retry = setInterval(() => { if (last) clearInterval(retry); else link.emit("layout:want", { setId }); }, 1000);
   window.addEventListener("beforeunload", () => link.emit("layout:gone", { setId }));
-})(window.P2U = window.P2U || {});
+})(window.Fatstick = window.Fatstick || {});

@@ -22,10 +22,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use p2u_audio::decode::PcmStream;
-use p2u_audio::render::fade_curve;
-use p2u_audio::stretch::{Key, Shifter};
-use p2u_audio::Tools;
+use fatstick_audio::decode::PcmStream;
+use fatstick_audio::render::fade_curve;
+use fatstick_audio::stretch::{Key, Shifter};
+use fatstick_audio::Tools;
 use serde::Serialize;
 
 /// Where a playlist entry starts and ends in its file (seconds, after the
@@ -180,7 +180,7 @@ enum Output {
 }
 
 fn open_output(shared: &Arc<Shared>) -> Result<(Output, u32), String> {
-    if std::env::var_os("P2U_NULL_AUDIO").is_none() {
+    if std::env::var_os("FATSTICK_NULL_AUDIO").is_none() {
         let host = cpal::default_host();
         if let Some(dev) = host.default_output_device() {
             let cfg = dev.default_output_config().map_err(|e| e.to_string())?;
@@ -227,7 +227,7 @@ fn open_output(shared: &Arc<Shared>) -> Result<(Output, u32), String> {
             stream.play().map_err(|e| e.to_string())?;
             return Ok((Output::Device(stream), rate));
         }
-        if std::env::var_os("P2U_NULL_AUDIO_FALLBACK").is_none() {
+        if std::env::var_os("FATSTICK_NULL_AUDIO_FALLBACK").is_none() {
             return Err("No audio output device was found.".into());
         }
     }

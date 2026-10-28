@@ -2,7 +2,7 @@
 //   node tests/ui_search.js
 const assert = require("assert");
 require("../app/ui/js/search.js");
-const Q = globalThis.P2U.search;
+const Q = globalThis.Fatstick.search;
 
 const t = (id, title, artist, extra = {}) => ({ id, title, artist, album: "", genre: "", labels: [], filename: title, ...extra });
 const tracks = [

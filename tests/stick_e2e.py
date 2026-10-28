@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""End-to-end tests of `p2u write` (erase the stick, write a fresh FAT32) on
+"""End-to-end tests of `fatstick write` (erase the stick, write a fresh FAT32) on
 disk images that start out with awkward layouts, checked with tools that share
-no code with p2u: sfdisk, blkid, wipefs, fsck.fat, fatsort and mtools.
+no code with fatstick: sfdisk, blkid, wipefs, fsck.fat, fatsort and mtools.
 
-    python3 tests/stick_e2e.py [path/to/p2u]
+    python3 tests/stick_e2e.py [path/to/fatstick]
 
 Needs: dosfstools, mtools, fatsort, fdisk (sfdisk), util-linux (blkid, wipefs),
 gdisk (sgdisk), exfatprogs, ntfs-3g, e2fsprogs.
@@ -19,7 +19,7 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-P2U = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "target", "debug", "p2u")
+FATSTICK = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "target", "debug", "fatstick")
 MIB = 1 << 20
 GIB = 1 << 30
 RESULTS = []
@@ -222,7 +222,7 @@ def make_music(work, rng, n, tag):
 
 def write(img, playlist, *extra, env_extra=None):
     env = dict(os.environ, **(env_extra or {}))
-    r = run([P2U, "write", img, "--playlist", playlist, "--yes", "--json", *extra], check=False, env=env)
+    r = run([FATSTICK, "write", img, "--playlist", playlist, "--yes", "--json", *extra], check=False, env=env)
     try:
         out = json.loads(r.stdout)
     except ValueError:
@@ -248,7 +248,7 @@ def check_case(work, env, rng, label, layout, size, cluster, where):
     args = ["--top-level"] if where == "top" else ["--folder", folder]
     out = write(img, pl, *args)
     v = out.get("verification") or {}
-    record(f"{label}: p2u write ok, read back from the image (partition, boot sectors, FATs, tables, order, placement, every byte)",
+    record(f"{label}: fatstick write ok, read back from the image (partition, boot sectors, FATs, tables, order, placement, every byte)",
            out.get("ok") and all(v.get(k) for k in ("partition_table_ok", "boot_sectors_ok", "fats_ok", "tables_ok", "order_ok", "layout_ok"))
            and v.get("data_checked") and not v.get("data_mismatches"), out.get("error") or "")
     plan = (out.get("result") or {}).get("plan") or {}
@@ -344,7 +344,7 @@ def pull_sweep(work, env, rng):
     k = 0
     while True:
         shutil.copyfile(base, img)
-        out = write(img, pl, "--folder", "Pull", env_extra={"P2U_FAIL_AFTER_WRITES": str(k)})
+        out = write(img, pl, "--folder", "Pull", env_extra={"FATSTICK_FAIL_AFTER_WRITES": str(k)})
         if out.get("ok"):
             record(f"pull sweep: completes once no write fails (after {k} write points)", True)
             break
@@ -371,7 +371,7 @@ def pull_sweep(work, env, rng):
            True, ", ".join(f"{v}x {s}" for s, v in states.items()))
     # Writing again after a pull gives a complete, verified stick.
     shutil.copyfile(base, img)
-    write(img, pl, "--folder", "Pull", env_extra={"P2U_FAIL_AFTER_WRITES": str(k // 2)})
+    write(img, pl, "--folder", "Pull", env_extra={"FATSTICK_FAIL_AFTER_WRITES": str(k // 2)})
     out = write(img, pl, "--folder", "Pull")
     record("pull sweep: writing again after a pull gives a complete, verified stick", out.get("ok"), out.get("error") or "")
 
@@ -396,17 +396,17 @@ def refusals(work, env, rng):
     out = write(img, plb)
     record("refusal: a playlist that doesn't fit is refused before anything is written",
            not out.get("ok") and "needs" in (out.get("error") or "") and sha(img) == h, out.get("error") or "")
-    r = run([P2U, "write", img, "--playlist", pl, "--dry-run"], check=False)
+    r = run([FATSTICK, "write", img, "--playlist", pl, "--dry-run"], check=False)
     record("dry run writes nothing", r.returncode == 0 and sha(img) == h)
-    r = run([P2U, "write", img, "--playlist", pl], check=False, stdin=subprocess.DEVNULL)
+    r = run([FATSTICK, "write", img, "--playlist", pl], check=False, stdin=subprocess.DEVNULL)
     record("without --yes and no terminal to ask on, nothing is written", r.returncode != 0 and sha(img) == h, r.stderr.strip()[:120])
 
 
 def main():
-    if not os.path.exists(P2U):
-        sys.exit(f"build first: {P2U} not found")
+    if not os.path.exists(FATSTICK):
+        sys.exit(f"build first: {FATSTICK} not found")
     rng = random.Random(1029)
-    work = tempfile.mkdtemp(prefix="p2u-stick-")
+    work = tempfile.mkdtemp(prefix="fatstick-stick-")
     env = mtools_env(work)
     try:
         for c in CASES:

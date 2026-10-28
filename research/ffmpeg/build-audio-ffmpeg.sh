@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds the audio-only ffmpeg that Playlist2USB bundles: decoders for every
+# Builds the audio-only ffmpeg that Fatstick bundles: decoders for every
 # supported source format, LAME for MP3 output, and the filters the converter
 # and player use. Without --enable-gpl this is an LGPL 2.1+ build.
 #

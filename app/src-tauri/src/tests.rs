@@ -8,12 +8,12 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use p2u_audio::encode::EncodeSpec;
-use p2u_audio::prepare::Recipe;
-use p2u_audio::render::{RenderPart, RenderSpec};
-use p2u_audio::{mp3, probe, Cache, Tools};
-use p2u_core::fat::{DirRef, EntryKind, Volume};
-use p2u_library::{scan, Library};
+use fatstick_audio::encode::EncodeSpec;
+use fatstick_audio::prepare::Recipe;
+use fatstick_audio::render::{RenderPart, RenderSpec};
+use fatstick_audio::{mp3, probe, Cache, Tools};
+use fatstick_core::fat::{DirRef, EntryKind, Volume};
+use fatstick_library::{scan, Library};
 
 use crate::sync::{run, FilePlan, FolderPlan, ProfilePlan, SyncPlan, SyncProgress};
 
@@ -94,7 +94,7 @@ fn sync_to_a_disk_image() {
 
     let img = dir.path().join("stick.img");
     std::fs::File::create(&img).unwrap().set_len(256 << 20).unwrap();
-    std::env::set_var("P2U_TEST_STICKS", &img);
+    std::env::set_var("FATSTICK_TEST_STICKS", &img);
     let enc = |gain_db: f64, rate: u32| Recipe::Encode(EncodeSpec { cap: 320, vbr: false, sample_rate: rate, gain_db });
     let file = |name: &str, i: usize, recipe: Recipe, position: u32, total: u32| FilePlan {
         name: name.into(),
@@ -239,7 +239,7 @@ fn sync_to_a_disk_image() {
     let big = dir.path().join("big.flac");
     ff(&["-f", "lavfi", "-i", "sine=frequency=100:duration=1500", "-ac", "2", "-c:a", "flac", &big.display().to_string()]);
     let big_id = scan::read_file(&lib, &tools, &big).unwrap();
-    std::env::set_var("P2U_TEST_STICKS", std::env::join_paths([&img, &small]).unwrap());
+    std::env::set_var("FATSTICK_TEST_STICKS", std::env::join_paths([&img, &small]).unwrap());
     let mut p4 = plan.clone();
     p4.stick_id = format!("{}{}", crate::sticks::IMAGE_PREFIX, small.display());
     p4.stick_size = Some(40 << 20);
@@ -303,7 +303,7 @@ fn player_plays_seeks_and_ends() {
     if Command::new("ffmpeg").arg("-version").output().is_err() {
         return;
     }
-    std::env::set_var("P2U_NULL_AUDIO", "1");
+    std::env::set_var("FATSTICK_NULL_AUDIO", "1");
     let dir = tempfile::tempdir().unwrap();
     let f = dir.path().join("two.flac");
     ff(&["-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-ac", "2", "-c:a", "flac", &f.display().to_string()]);
@@ -330,7 +330,7 @@ fn player_plays_seeks_and_ends() {
     assert!((1.7..3.5).contains(&took), "real time: {took}");
     assert!(max_pos > 1.5);
     // Seeking near the end ends sooner.
-    p.send(crate::player::Cmd::Play { path: f.clone(), from: 0.0, gain_db: -6.0, duration: 2.0, token: "e2".into(), key: Some(p2u_audio::stretch::Key { semitones: 3.0, keep_formants: true }), shape: crate::player::Shape { start: 0.0, end: 1.5, fade_in: 0.5, fade_out: 0.5 } });
+    p.send(crate::player::Cmd::Play { path: f.clone(), from: 0.0, gain_db: -6.0, duration: 2.0, token: "e2".into(), key: Some(fatstick_audio::stretch::Key { semitones: 3.0, keep_formants: true }), shape: crate::player::Shape { start: 0.0, end: 1.5, fade_in: 0.5, fade_out: 0.5 } });
     std::thread::sleep(std::time::Duration::from_millis(200));
     p.send(crate::player::Cmd::Seek(1.6));
     let start = std::time::Instant::now();
@@ -402,7 +402,7 @@ fn music_folder_scans_writes_tags_and_renames() {
     let outside = scan::read_file(&lib, &tools, &dir.path().join("Elsewhere").join("outside.flac")).unwrap();
 
     // Tags: written into the file inside the folder, refused outside it.
-    let edit = p2u_audio::tagwrite::TagEdit { artist: Some("The Band".into()), labels: Some(vec!["chill".into()]), ..Default::default() };
+    let edit = fatstick_audio::tagwrite::TagEdit { artist: Some("The Band".into()), labels: Some(vec!["chill".into()]), ..Default::default() };
     let r = crate::folder::write(&music, &[crate::folder::TagJob { track_id: id.clone(), edit: edit.clone() }, crate::folder::TagJob { track_id: outside.clone(), edit }]);
     assert_eq!(r.tracks.len(), 1);
     assert_eq!((r.tracks[0].artist.as_str(), r.tracks[0].labels.clone()), ("The Band", vec!["chill".to_string()]));

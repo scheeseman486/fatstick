@@ -34,7 +34,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out")
     ap.add_argument("--fragment", action="store_true")
-    ap.add_argument("--title", default="Playlist2USB Prototype")
+    ap.add_argument("--title", default="Fatstick Prototype")
     a = ap.parse_args()
 
     html = read("index.html")

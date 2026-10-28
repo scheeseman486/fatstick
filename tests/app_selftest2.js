@@ -3,7 +3,7 @@
 // prepared files, and an edit must make the stick out of date (undo: up to
 // date again).
 (async () => {
-  const cfg = window.__P2U_SELFTEST_CONFIG;
+  const cfg = window.__FATSTICK_SELFTEST_CONFIG;
   const T = window.__TAURI__;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const lines = [];
@@ -25,7 +25,7 @@
     return null;
   };
   try {
-    const A = await until(() => window.P2U.app && window.P2U.app.ready && window.P2U.app, 20000);
+    const A = await until(() => window.Fatstick.app && window.Fatstick.app.ready && window.Fatstick.app, 20000);
     const S = A.S;
     const $sync = () => document.getElementById("sync-btn");
     check("both playlists were kept", S.playlists.length === 2 && S.playlists[0].entries.length === cfg.titles.length && S.playlists[1].entries.length === cfg.titles2.length);

@@ -2,7 +2,7 @@
 //   node tests/ui_names.js
 const assert = require("assert");
 require("../app/ui/js/names.js");
-const N = globalThis.P2U.names;
+const N = globalThis.Fatstick.names;
 
 const e = (title, artist, filename = "x") => ({ tags: { title, artist }, filename });
 const names = (entries, opts) => N.fileNames(entries, opts).names.map((x) => x.name);

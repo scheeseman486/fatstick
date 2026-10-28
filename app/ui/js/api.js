@@ -6,7 +6,7 @@
 //   built-in demo library and simulates the slow parts: preparation, the
 //   sync and the player. It never touches a disk.
 "use strict";
-(function (P2U) {
+(function (Fatstick) {
   const T = window.__TAURI__;
   const AUDIO_EXT = ["mp3", "mp2", "flac", "m4a", "aac", "mp4", "ogg", "oga", "opus", "wma", "wav", "aif", "aiff", "wv", "ape"];
   const LIST_EXT = ["m3u", "m3u8", "xspf", "pls"];
@@ -84,7 +84,7 @@
 
   // ---- the demo ---------------------------------------------------------------------
   function demoApi() {
-    const D = P2U.demo;
+    const D = Fatstick.demo;
     const ev = bus();
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const tracks = new Map(D.tracks.map((t) => [t.id, t]));
@@ -182,8 +182,8 @@
       async addFileObjects(files) {
         const ts = [];
         for (const f of files) {
-          if (!P2U.sniff.isAudio(f.name)) continue;
-          const t = await P2U.sniff.fromFile(f, `t${Math.random().toString(36).slice(2, 9)}`);
+          if (!Fatstick.sniff.isAudio(f.name)) continue;
+          const t = await Fatstick.sniff.fromFile(f, `t${Math.random().toString(36).slice(2, 9)}`);
           if (t) { tracks.set(t.id, t); ts.push(t); }
         }
         return ts;
@@ -256,9 +256,9 @@
         say("eject", 0, 1, "Ejecting the stick.");
         await sleep(500);
         const dev = sticks.find((s) => s.id === plan.stickId);
-        const label = P2U.names.volumeLabel(plan.label || plan.setName);
+        const label = Fatstick.names.volumeLabel(plan.label || plan.setName);
         if (dev) dev.volumes = [`${label || "no label"} (FAT32), ${plan.folders.length > 1 || plan.folders[0].name ? `${plan.folders.length} folder${plan.folders.length === 1 ? "" : "s"}, ` : ""}${files.length} files`];
-        if (dev) dev.note = { app: "Playlist2USB", format: 1, libraryId: D.libraryId, setId: plan.setId, setName: plan.setName, ...plan.note, files: files.length, syncedAt: Date.now() };
+        if (dev) dev.note = { app: "Fatstick", format: 1, libraryId: D.libraryId, setId: plan.setId, setName: plan.setName, ...plan.note, files: files.length, syncedAt: Date.now() };
         const record = { ...plan.record, setId: plan.setId, at: Date.now(), stickId: plan.stickId, stickName: dev ? dev.name : "", files: files.length, bytes: total };
         return { ok: true, cancelled: false, erased: true, error: null, notes: ["Demo: nothing was written."], files: files.length, bytes: total, ejected: true, record };
       },
@@ -344,6 +344,6 @@
     };
   }
 
-  P2U.api = T && T.core ? tauriApi() : demoApi();
-  P2U.isAudioPath = (p) => AUDIO_EXT.includes((p.split(".").pop() || "").toLowerCase());
-})(window.P2U = window.P2U || {});
+  Fatstick.api = T && T.core ? tauriApi() : demoApi();
+  Fatstick.isAudioPath = (p) => AUDIO_EXT.includes((p.split(".").pop() || "").toLowerCase());
+})(window.Fatstick = window.Fatstick || {});
