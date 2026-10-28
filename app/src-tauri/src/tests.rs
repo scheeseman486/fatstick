@@ -407,3 +407,44 @@ fn music_folder_scans_writes_tags_and_renames() {
     let r = crate::folder::rename(&music, &[crate::folder::RenameJob { track_id: id.clone(), name: "01 - the band - song.mp3".into() }]);
     assert!(r.failed.is_empty() && r.tracks[0].path.ends_with("01 - the band - song.mp3"), "{:?}", r);
 }
+
+/// A big first scan sends the tracks to the window as it reads them, each
+/// once: in batches while reading, the rest when it's done.
+#[test]
+fn music_folder_sends_tracks_as_it_reads() {
+    if Command::new("ffmpeg").arg("-version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("Music");
+    let one = dir.path().join("one.mp3");
+    ff(&["-f", "lavfi", "-i", "sine=frequency=440:duration=0.3", "-c:a", "libmp3lame", "-b:a", "64k", &one.display().to_string()]);
+    for a in 0..35 {
+        let album = root.join(format!("Artist {a}")).join("Album");
+        std::fs::create_dir_all(&album).unwrap();
+        for t in 0..20 {
+            std::fs::copy(&one, album.join(format!("{t:02} song.mp3"))).unwrap();
+        }
+    }
+    let lib = std::sync::Arc::new(Mutex::new(Library::open_in_memory().unwrap()));
+    let tools = Tools::locate().unwrap();
+    let events = std::sync::Arc::new(Mutex::new(Vec::<(String, serde_json::Value)>::new()));
+    let ev = events.clone();
+    let music = crate::folder::MusicFolder::start(lib.clone(), Some(tools), move |name, v| ev.lock().unwrap().push((name.to_string(), v)));
+    music.set_root(&root).unwrap();
+    let t0 = std::time::Instant::now();
+    while !events.lock().unwrap().iter().any(|(n, _)| n == "library-scanned") && t0.elapsed().as_secs() < 120 {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let evs = events.lock().unwrap();
+    let ids = |name: &str| -> Vec<String> {
+        evs.iter().filter(|(n, _)| n == name).flat_map(|(_, v)| v["tracks"].as_array().cloned().unwrap_or_default()).map(|t| t["id"].as_str().unwrap().to_string()).collect()
+    };
+    let batched = ids("library-tracks");
+    let last = ids("library-scanned");
+    assert!(!batched.is_empty(), "tracks went out while reading");
+    let all: std::collections::HashSet<_> = batched.iter().chain(&last).collect();
+    assert_eq!((all.len(), batched.len() + last.len()), (700, 700), "every track once");
+    let progress = evs.iter().filter(|(n, _)| n == "library-progress").count();
+    assert!(progress < 200, "progress is sent ten times a second, not for every file: {progress}");
+}

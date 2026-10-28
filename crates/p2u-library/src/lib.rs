@@ -14,6 +14,8 @@
 pub mod folder;
 pub mod scan;
 
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -105,6 +107,9 @@ pub struct Track {
     pub size: u64,
     pub cover: bool,
     pub exists: bool,
+    /// Read quickly (see `p2u_audio::Probe::quick`): read in full before it goes on a stick.
+    #[serde(default)]
+    pub quick: bool,
     pub drm: bool,
     pub lufs: Option<f64>,
     pub true_peak: Option<f64>,
@@ -156,6 +161,14 @@ fn now() -> i64 {
 
 pub struct Library {
     conn: Connection,
+    /// Whether each track's file is there, as the music folder's last walk
+    /// found it; files elsewhere are looked at each time. A folder on a
+    /// network drive can hold thousands of files, and looking at each one
+    /// costs a round trip.
+    seen: RefCell<HashMap<PathBuf, bool>>,
+    /// The music folder (canonical). Until its first walk, its files count
+    /// as there; the walk says which aren't.
+    music_root: RefCell<Option<PathBuf>>,
 }
 
 impl Library {
@@ -167,13 +180,51 @@ impl Library {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.execute_batch(SCHEMA)?;
-        Ok(Library { conn })
+        Ok(Library { conn, seen: RefCell::default(), music_root: RefCell::default() })
     }
 
     pub fn open_in_memory() -> Result<Library> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA)?;
-        Ok(Library { conn })
+        Ok(Library { conn, seen: RefCell::default(), music_root: RefCell::default() })
+    }
+
+    // ---- whether files are there ---------------------------------------------
+
+    pub fn set_music_root(&self, root: Option<&Path>) {
+        *self.music_root.borrow_mut() = root.map(Path::to_path_buf);
+    }
+
+    /// What the window has been told about a file being there.
+    fn present(&self, path: &Path) -> Option<bool> {
+        if let Some(&b) = self.seen.borrow().get(path) {
+            return Some(b);
+        }
+        self.music_root.borrow().as_deref().filter(|r| folder::inside(r, path)).map(|_| true)
+    }
+
+    fn exists(&self, path: &Path) -> bool {
+        self.present(path).unwrap_or_else(|| path.is_file())
+    }
+
+    /// After a walk of the music folder: which of its tracks' files are there.
+    /// Returns the tracks that came or went since the window was last told.
+    pub fn set_seen_under(&self, root: &Path, here: &HashSet<&PathBuf>) -> Result<Vec<String>> {
+        let mut changed = Vec::new();
+        for s in self.stamps_under(root)? {
+            // A file not in the walk may still be there (in a hidden folder).
+            let now = here.contains(&s.path) || s.path.is_file();
+            if self.present(&s.path) != Some(now) {
+                changed.push(s.id);
+            }
+            self.seen.borrow_mut().insert(s.path, now);
+        }
+        Ok(changed)
+    }
+
+    /// A file just read is there.
+    pub fn mark_seen(&self, path: &Path) {
+        self.seen.borrow_mut().insert(path.to_path_buf(), true);
     }
 
     // ---- tracks -----------------------------------------------------------
@@ -190,7 +241,7 @@ impl Library {
         let peak: Option<f64> = row.get(9)?;
         let p: Probe = probe.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
         let filename = Path::new(&path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-        let exists = Path::new(&path).is_file();
+        let exists = self.exists(Path::new(&path));
         let mut title = p.tags.title.clone();
         if title.is_empty() && p.codec.is_empty() {
             title = hint.unwrap_or_default();
@@ -219,6 +270,7 @@ impl Library {
             size: size as u64,
             cover: p.cover,
             exists,
+            quick: p.quick,
             drm: p.drm,
             lufs,
             true_peak: peak,

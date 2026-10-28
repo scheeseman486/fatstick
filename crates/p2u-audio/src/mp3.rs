@@ -190,27 +190,150 @@ pub fn scan(path: &Path) -> io::Result<Option<Mp3Info>> {
     }))
 }
 
-/// Scan frames in `data` (the bytes between the tags). The first frame is the
-/// first sync whose next frame also parses, so a stray 0xFF in junk doesn't count.
-pub fn scan_bytes(data: &[u8]) -> Option<Mp3Info> {
+/// The first frame in `data`: the first sync whose next frame also parses,
+/// so a stray 0xFF in junk doesn't count.
+fn first_frame(data: &[u8]) -> Option<(usize, FrameHeader)> {
     let at = |p: usize| data.get(p..p + 4).and_then(FrameHeader::parse);
-    let mut first = None;
     for p in 0..data.len().min(1 << 20) {
         if let Some(h) = at(p) {
             match at(p + h.len) {
-                Some(n) if n.version == h.version && n.layer == h.layer && n.sample_rate == h.sample_rate => {
-                    first = Some((p, h));
-                    break;
-                }
-                None if p + h.len == data.len() => {
-                    first = Some((p, h));
-                    break;
-                }
+                Some(n) if n.version == h.version && n.layer == h.layer && n.sample_rate == h.sample_rate => return Some((p, h)),
+                None if p + h.len == data.len() => return Some((p, h)),
                 _ => {}
             }
         }
     }
-    let (p0, h0) = first?;
+    None
+}
+
+fn samples_per_frame(h: &FrameHeader) -> f64 {
+    match (h.layer, h.version) {
+        (1, _) => 384.0,
+        (2, _) | (3, 1) => 1152.0,
+        _ => 576.0,
+    }
+}
+
+/// What the start of an MP3 says, without reading every frame: the first
+/// frame's header, and the Xing/Info or VBRI header in it if there is one.
+/// For the library's first look at a folder (over a network, reading every
+/// frame of every file takes as long as copying the whole collection);
+/// `scan` reads every frame before a file goes on a stick.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Head {
+    pub version: u8,
+    pub layer: u8,
+    pub sample_rate: u32,
+    pub channels: u32,
+    /// "Xing" or VBRI: VBR. LAME writes "Info" for CBR.
+    pub vbr: bool,
+    /// The first frame's bitrate: every frame's, in a CBR file.
+    pub bitrate: u32,
+    /// The highest bitrate a frame of this version and layer can have.
+    pub max_bitrate: u32,
+    /// From the Xing/VBRI header, when it has them.
+    pub frames: Option<u64>,
+    pub bytes: Option<u64>,
+}
+
+impl Head {
+    pub fn duration(&self) -> Option<f64> {
+        let h = FrameHeader { version: self.version, layer: self.layer, crc: false, bitrate: 0, sample_rate: self.sample_rate, padding: false, mono: false, len: 0 };
+        self.frames.filter(|&f| f > 0).map(|f| f as f64 * samples_per_frame(&h) / self.sample_rate as f64)
+    }
+    pub fn avg_bitrate(&self) -> u32 {
+        if !self.vbr {
+            return self.bitrate;
+        }
+        match (self.bytes, self.duration()) {
+            (Some(b), Some(d)) if d > 0.0 => ((b as f64 * 8.0 / d) / 1000.0).round() as u32,
+            _ => self.bitrate,
+        }
+    }
+    /// The highest frame bitrate, as far as the start can tell: a CBR file's
+    /// own, or the most a VBR file's frames could have.
+    pub fn peak_bitrate(&self) -> u32 {
+        if self.vbr {
+            self.max_bitrate
+        } else {
+            self.bitrate
+        }
+    }
+}
+
+fn be32(b: &[u8]) -> Option<u64> {
+    Some(u32::from_be_bytes(b.get(0..4)?.try_into().ok()?) as u64)
+}
+
+/// Read the first frame (after any ID3v2 tags) and its VBR header.
+pub fn head(path: &Path) -> io::Result<Option<Head>> {
+    let mut f = File::open(path)?;
+    let len = f.metadata()?.len();
+    let mut start = 0u64;
+    let mut h = [0u8; 10];
+    while start + 10 <= len {
+        f.seek(SeekFrom::Start(start))?;
+        f.read_exact(&mut h)?;
+        if &h[0..3] != b"ID3" || h[3] == 0xFF || h[4] == 0xFF {
+            break;
+        }
+        let footer = if h[5] & 0x10 != 0 { 10 } else { 0 };
+        start += 10 + syncsafe(&h[6..10]) + footer;
+    }
+    // Usually the first frame is right there; junk before it can push it further.
+    for want in [16 * 1024u64, 1 << 20] {
+        f.seek(SeekFrom::Start(start))?;
+        let mut data = Vec::new();
+        (&mut f).take(want).read_to_end(&mut data)?;
+        if let Some((p0, h0)) = first_frame(&data) {
+            let side = 4 + if h0.crc { 2 } else { 0 } + h0.side_info_len();
+            let max_bitrate = if h0.version == 1 { BR_V1[(h0.layer - 1) as usize][14] } else { BR_V2[if h0.layer == 1 { 0 } else { 1 }][14] };
+            let mut head = Head {
+                version: h0.version,
+                layer: h0.layer,
+                sample_rate: h0.sample_rate,
+                channels: if h0.mono { 1 } else { 2 },
+                vbr: false,
+                bitrate: h0.bitrate,
+                max_bitrate,
+                frames: None,
+                bytes: None,
+            };
+            let x = p0 + side;
+            match data.get(x..x + 4) {
+                Some(tag) if tag == b"Xing" || tag == b"Info" => {
+                    head.vbr = tag == b"Xing";
+                    let flags = be32(&data[x + 4..]).unwrap_or(0);
+                    let mut at = x + 8;
+                    if flags & 1 != 0 {
+                        head.frames = be32(&data[at.min(data.len())..]);
+                        at += 4;
+                    }
+                    if flags & 2 != 0 {
+                        head.bytes = be32(&data[at.min(data.len())..]);
+                    }
+                }
+                _ => {
+                    if data.get(p0 + 36..p0 + 40) == Some(b"VBRI") {
+                        head.vbr = true;
+                        head.bytes = be32(&data[(p0 + 46).min(data.len())..]);
+                        head.frames = be32(&data[(p0 + 50).min(data.len())..]);
+                    }
+                }
+            }
+            return Ok(Some(head));
+        }
+        if start + want >= len {
+            break;
+        }
+    }
+    Ok(None)
+}
+
+/// Scan frames in `data` (the bytes between the tags).
+pub fn scan_bytes(data: &[u8]) -> Option<Mp3Info> {
+    let at = |p: usize| data.get(p..p + 4).and_then(FrameHeader::parse);
+    let (p0, h0) = first_frame(data)?;
     let mut info = Mp3Info {
         audio_start: p0 as u64,
         version: h0.version,
@@ -243,12 +366,7 @@ pub fn scan_bytes(data: &[u8]) -> Option<Mp3Info> {
         p += h.len;
     }
     info.audio_len = (p - p0) as u64;
-    let spf = match (h0.layer, h0.version) {
-        (1, _) => 384.0,
-        (2, _) | (3, 1) => 1152.0,
-        _ => 576.0,
-    };
-    info.duration = info.frames as f64 * spf / h0.sample_rate as f64;
+    info.duration = info.frames as f64 * samples_per_frame(&h0) / h0.sample_rate as f64;
     if info.duration > 0.0 {
         info.avg_bitrate = ((bytes as f64 * 8.0 / info.duration) / 1000.0).round() as u32;
     }
@@ -321,5 +439,46 @@ mod tests {
         }
         let i = scan_bytes(&d).unwrap();
         assert_eq!((i.vbr, i.peak_bitrate, i.avg_bitrate, i.frames), (false, 256, 256, 10));
+    }
+
+    /// A first frame carrying a Xing ("Xing" or "Info") header.
+    fn xing_frame(kbps: u32, tag: &[u8; 4], frames: u32, bytes: u32) -> Vec<u8> {
+        let mut f = frame(kbps);
+        let at = 4 + 32; // MPEG-1 stereo side information
+        f[at..at + 4].copy_from_slice(tag);
+        f[at + 4..at + 8].copy_from_slice(&3u32.to_be_bytes());
+        f[at + 8..at + 12].copy_from_slice(&frames.to_be_bytes());
+        f[at + 12..at + 16].copy_from_slice(&bytes.to_be_bytes());
+        f
+    }
+
+    #[test]
+    fn head_reads_only_the_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("h.mp3");
+        // A VBR file: an ID3v2 tag, the Xing frame, frames of mixed rates.
+        let mut d = b"ID3\x03\x00\x00\x00\x00\x00\x14".to_vec();
+        d.extend_from_slice(&[0u8; 20]);
+        d.extend(xing_frame(128, b"Xing", 4000, 4000 * 600));
+        for k in [192, 256, 128, 320] {
+            d.extend(frame(k));
+        }
+        std::fs::write(&p, &d).unwrap();
+        let h = head(&p).unwrap().unwrap();
+        assert!(h.vbr);
+        assert_eq!((h.frames, h.bytes, h.sample_rate, h.max_bitrate, h.peak_bitrate()), (Some(4000), Some(2_400_000), 44100, 320, 320));
+        let dur = 4000.0 * 1152.0 / 44100.0;
+        assert!((h.duration().unwrap() - dur).abs() < 1e-6);
+        assert_eq!(h.avg_bitrate(), (2_400_000.0 * 8.0 / dur / 1000.0_f64).round() as u32);
+        // LAME's CBR header, and a file with none: every frame at the first one's rate.
+        std::fs::write(&p, [xing_frame(256, b"Info", 10, 10 * 836), frame(256), frame(256)].concat()).unwrap();
+        let h = head(&p).unwrap().unwrap();
+        assert_eq!((h.vbr, h.peak_bitrate(), h.avg_bitrate(), h.frames), (false, 256, 256, Some(10)));
+        std::fs::write(&p, [frame(192), frame(192), frame(192)].concat()).unwrap();
+        let h = head(&p).unwrap().unwrap();
+        assert_eq!((h.vbr, h.peak_bitrate(), h.avg_bitrate(), h.frames, h.duration()), (false, 192, 192, None, None));
+        // Not an MP3.
+        std::fs::write(&p, vec![0u8; 5000]).unwrap();
+        assert!(head(&p).unwrap().is_none());
     }
 }

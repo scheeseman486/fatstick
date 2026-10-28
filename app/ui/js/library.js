@@ -910,10 +910,16 @@
       renderLibFoot();
       renderEditor();
     }
-    /** After tracks changed (a scan, a tag edit, a rename). */
-    function refresh() {
+    /** After tracks changed (a scan, a tag edit, a rename); with `ifChanged`,
+     * only if they changed since the library was last drawn. */
+    let drawnAt = -1;
+    function refresh(ifChanged) {
+      if (ifChanged && drawnAt === S.tracksVersion) return;
       if (S.searching) refreshSearch();
-      if (S.view === "library" && V.root) renderView();
+      if (S.view === "library" && V.root) {
+        renderView();
+        drawnAt = S.tracksVersion;
+      }
     }
 
     function statusText() {
@@ -1360,6 +1366,12 @@
       else refresh();
       if (S.view === "library") core.renderDisplay();
     }
+    // A watched folder on a network drive only hears of changes made from
+    // this computer: coming back to the app after a while looks again.
+    window.addEventListener("focus", () => {
+      const m = S.music;
+      if (m && m.root && !m.scanning && m.lastScan && Date.now() - m.lastScan > 10 * 60000) api.libraryScan().catch(() => {});
+    });
     function onKey(e) {
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === "f") {

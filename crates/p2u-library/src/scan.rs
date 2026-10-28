@@ -100,37 +100,77 @@ pub struct ScanProgress {
     pub done: usize,
     pub total: usize,
     pub path: String,
+    /// The track just read, if it could be.
+    #[serde(skip)]
+    pub id: Option<String>,
 }
 
-/// Read one file and record it. Unchanged files (same size and modified
-/// time) aren't read again.
+/// How much of a file to read: everything a sync needs (every MP3 frame), or
+/// the tags and stream facts only, for the music folder's scan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Depth {
+    Quick,
+    Full,
+}
+
+/// Read one file in full and record it. Unchanged files (same size and
+/// modified time, read in full before) aren't read again.
 pub fn read_file(lib: &Mutex<Library>, tools: &Tools, path: &Path) -> Result<String> {
-    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let Some((size, mtime)) = stat(&path) else {
-        return lib.lock().unwrap().put_missing(&path, None);
+    read_file_as(lib, tools, path, None, Depth::Full)
+}
+
+/// Read one file and record it. `known` is the file's size and modified time
+/// when the caller has just looked (a folder's walk, whose paths are
+/// canonical already), so the file isn't looked at again.
+pub fn read_file_as(lib: &Mutex<Library>, tools: &Tools, path: &Path, known: Option<(u64, i64)>, depth: Depth) -> Result<String> {
+    let (path, size, mtime) = match known {
+        Some((size, mtime)) => (path.to_path_buf(), size, mtime),
+        None => {
+            let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            let Some((size, mtime)) = stat(&path) else {
+                return lib.lock().unwrap().put_missing(&path, None);
+            };
+            (path, size, mtime)
+        }
     };
     {
         let l = lib.lock().unwrap();
+        l.mark_seen(&path);
         if let Some(t) = l.track_by_path(&path)? {
-            if l.stamp_of(&t.id)? == Some((size, mtime)) && !t.codec.is_empty() {
+            if l.stamp_of(&t.id)? == Some((size, mtime)) && !t.codec.is_empty() && (depth == Depth::Quick || !t.quick) {
                 return Ok(t.id);
             }
         }
     }
     let key = p2u_audio::probe::content_key(&path).unwrap_or_default();
-    match probe(tools, &path) {
+    let probed = match depth {
+        Depth::Full => probe(tools, &path),
+        Depth::Quick => p2u_audio::probe::probe_quick(tools, &path),
+    };
+    match probed {
         Ok(p) => lib.lock().unwrap().put_track(&path, size, mtime, &key, Some(&p), None),
         Err(e) => lib.lock().unwrap().put_track(&path, size, mtime, &key, None, Some(&e.to_string())),
     }
 }
 
-/// Read many files on all cores but one. Returns ids in the order given.
+/// Read many files in full, on all cores but one. Returns ids in the order given.
 pub fn read_files(lib: &Mutex<Library>, tools: &Tools, paths: &[PathBuf], progress: &(dyn Fn(ScanProgress) + Sync)) -> Vec<Result<String>> {
-    let n = paths.len();
+    let items: Vec<(PathBuf, Option<(u64, i64)>)> = paths.iter().map(|p| (p.clone(), None)).collect();
+    read_files_as(lib, tools, &items, Depth::Full, progress)
+}
+
+/// Read many files. A quick read mostly waits on the disk (or the network),
+/// so it runs more at once than there are cores.
+pub fn read_files_as(lib: &Mutex<Library>, tools: &Tools, items: &[(PathBuf, Option<(u64, i64)>)], depth: Depth, progress: &(dyn Fn(ScanProgress) + Sync)) -> Vec<Result<String>> {
+    let n = items.len();
     let next = AtomicUsize::new(0);
     let done = AtomicUsize::new(0);
     let results: Mutex<Vec<Option<Result<String>>>> = Mutex::new((0..n).map(|_| None).collect());
-    let workers = std::thread::available_parallelism().map(|n| n.get().saturating_sub(1).max(1)).unwrap_or(2).min(8);
+    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2);
+    let workers = match depth {
+        Depth::Full => cores.saturating_sub(1).clamp(1, 8),
+        Depth::Quick => (cores * 2).clamp(4, 16),
+    };
     std::thread::scope(|s| {
         for _ in 0..workers.min(n.max(1)) {
             s.spawn(|| loop {
@@ -138,10 +178,12 @@ pub fn read_files(lib: &Mutex<Library>, tools: &Tools, paths: &[PathBuf], progre
                 if i >= n {
                     break;
                 }
-                let r = read_file(lib, tools, &paths[i]);
+                let (path, known) = &items[i];
+                let r = read_file_as(lib, tools, path, *known, depth);
+                let id = r.as_ref().ok().cloned();
                 results.lock().unwrap()[i] = Some(r);
                 let d = done.fetch_add(1, AtOrd::Relaxed) + 1;
-                progress(ScanProgress { done: d, total: n, path: paths[i].display().to_string() });
+                progress(ScanProgress { done: d, total: n, path: path.display().to_string(), id });
             });
         }
     });

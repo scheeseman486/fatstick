@@ -214,10 +214,18 @@ async fn refresh_tracks(app: AppHandle) -> Res<Vec<Track>> {
     let st = app.state::<AppState>();
     let lib = st.lib.clone();
     let tools = st.tools.clone();
+    let root = st.music.root();
     tauri::async_runtime::spawn_blocking(move || {
+        // The music folder's own scan looks after its files.
         let stale: Vec<PathBuf> = {
             let l = lib.lock().unwrap();
-            l.tracks().map_err(err)?.into_iter().filter(|t| t.exists && !scan::is_current(&l, t)).map(|t| PathBuf::from(t.path)).collect()
+            l.tracks()
+                .map_err(err)?
+                .into_iter()
+                .filter(|t| !root.as_deref().is_some_and(|r| p2u_library::folder::inside(r, Path::new(&t.path))))
+                .filter(|t| t.exists && !scan::is_current(&l, t))
+                .map(|t| PathBuf::from(t.path))
+                .collect()
         };
         if let Some(tools) = tools {
             scan::read_files(&lib, &tools, &stale, &|_| {});
@@ -234,6 +242,13 @@ async fn refresh_tracks(app: AppHandle) -> Res<Vec<Track>> {
 #[tauri::command]
 fn analyze(st: State<AppState>, track_ids: Vec<String>) {
     st.work.analyze(track_ids);
+}
+
+/// Read tracks in full (every MP3 frame) that the music folder's scan only
+/// read quickly, once they're in a playlist.
+#[tauri::command]
+fn read_tracks(st: State<AppState>, track_ids: Vec<String>) {
+    st.work.read(track_ids);
 }
 
 #[tauri::command]
@@ -376,9 +391,11 @@ fn library_info(st: State<AppState>) -> folder::FolderInfo {
     st.music.info()
 }
 
+/// Async: looking at a folder on a network drive can take a moment.
 #[tauri::command]
-fn library_set_root(st: State<AppState>, path: String) -> Res<folder::FolderInfo> {
-    st.music.set_root(Path::new(&path))
+async fn library_set_root(st: State<'_, AppState>, path: String) -> Res<folder::FolderInfo> {
+    let music = st.music.clone();
+    tauri::async_runtime::spawn_blocking(move || music.set_root(Path::new(&path))).await.map_err(err)?
 }
 
 #[tauri::command]
@@ -502,6 +519,7 @@ fn main() {
                 let _ = match e {
                     work::Event::Prepared(p) => h.emit("prepared", p),
                     work::Event::Analyzed(a) => h.emit("analyzed", a),
+                    work::Event::Read(r) => h.emit("track-read", r),
                 };
             });
             let h = app.handle().clone();
@@ -534,6 +552,7 @@ fn main() {
             library_scan,
             library_write_tags,
             library_rename,
+            read_tracks,
             save_docs,
             set_setting,
             add_paths,

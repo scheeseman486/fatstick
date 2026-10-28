@@ -15,7 +15,7 @@ use std::time::Duration;
 use p2u_audio::prepare::{prepare, ready, Recipe};
 use p2u_audio::render::{self, RenderSpec, Source};
 use p2u_audio::{loudness, Cache, Tools};
-use p2u_library::{scan, Library};
+use p2u_library::{scan, Library, Track};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -47,11 +47,27 @@ pub struct Analyzed {
     pub error: Option<String>,
 }
 
+/// A track read in full, for the window.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Read {
+    pub track_id: String,
+    pub track: Option<Track>,
+    pub error: Option<String>,
+}
+
 #[derive(Default)]
 struct Queues {
     prepare: VecDeque<PrepJob>,
     analyze: VecDeque<String>,
+    read: VecDeque<String>,
     busy: HashSet<String>,
+}
+
+enum Job {
+    Prepare(PrepJob),
+    Analyze(String),
+    Read(String),
 }
 
 pub struct Work {
@@ -63,6 +79,7 @@ pub struct Work {
 pub enum Event {
     Prepared(Prepared),
     Analyzed(Analyzed),
+    Read(Read),
 }
 
 impl Work {
@@ -78,25 +95,34 @@ impl Work {
                     let mut q = w.q.lock().unwrap();
                     loop {
                         if !w.paused.load(Ordering::Relaxed) {
+                            // Reads first: what they find can change what to prepare.
+                            if let Some(id) = q.read.pop_front() {
+                                break Some(Job::Read(id));
+                            }
                             if let Some(i) = q.prepare.iter().position(|j| !q.busy.contains(&j.key)) {
                                 let j = q.prepare.remove(i).unwrap();
                                 q.busy.insert(j.key.clone());
-                                break Some(Ok(j));
+                                break Some(Job::Prepare(j));
                             }
                             if let Some(id) = q.analyze.pop_front() {
-                                break Some(Err(id));
+                                break Some(Job::Analyze(id));
                             }
                         }
                         q = w.cv.wait_timeout(q, Duration::from_secs(1)).unwrap().0;
                     }
                 };
                 match job {
-                    Some(Ok(j)) => {
+                    Some(Job::Prepare(j)) => {
                         let r = prepare_one(&lib, &tools, &cache, &j);
                         w.q.lock().unwrap().busy.remove(&j.key);
                         emit(Event::Prepared(r));
                     }
-                    Some(Err(id)) => emit(Event::Analyzed(analyze_one(&lib, &tools, &id))),
+                    Some(Job::Analyze(id)) => emit(Event::Analyzed(analyze_one(&lib, &tools, &id))),
+                    Some(Job::Read(id)) => {
+                        let r = current_probe(&lib, &tools, &id);
+                        let track = lib.lock().unwrap().track(&id).ok().flatten();
+                        emit(Event::Read(Read { track_id: id, track, error: r.err() }));
+                    }
                     None => {}
                 }
             });
@@ -127,6 +153,16 @@ impl Work {
         done
     }
 
+    pub fn read(&self, ids: Vec<String>) {
+        let mut q = self.q.lock().unwrap();
+        for id in ids {
+            if !q.read.contains(&id) {
+                q.read.push_back(id);
+            }
+        }
+        self.cv.notify_all();
+    }
+
     pub fn analyze(&self, ids: Vec<String>) {
         let mut q = self.q.lock().unwrap();
         for id in ids {
@@ -138,10 +174,11 @@ impl Work {
     }
 }
 
-/// The track's file as last read, re-read first if it changed on disk.
+/// The track's file as last read, re-read first if it changed on disk, or
+/// if it was only read quickly (the music folder's scan).
 pub fn current_probe(lib: &Mutex<Library>, tools: &Tools, track_id: &str) -> Result<(std::path::PathBuf, String, p2u_audio::Probe), String> {
-    let (path, _, _) = lib.lock().unwrap().probe_of(track_id).map_err(|e| e.to_string())?.ok_or_else(|| format!("{track_id} hasn't been read yet"))?;
-    let stale = {
+    let (path, _, probe) = lib.lock().unwrap().probe_of(track_id).map_err(|e| e.to_string())?.ok_or_else(|| format!("{track_id} hasn't been read yet"))?;
+    let stale = probe.quick || {
         let l = lib.lock().unwrap();
         let t = l.track(track_id).map_err(|e| e.to_string())?;
         t.map(|t| !scan::is_current(&l, &t)).unwrap_or(true)

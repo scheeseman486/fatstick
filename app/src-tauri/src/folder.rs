@@ -3,11 +3,12 @@
 //! does to files in it: writing tags and renaming. Nothing outside the folder
 //! is ever written.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use notify::event::{AccessKind, AccessMode};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -60,6 +61,8 @@ fn now_ms() -> u64 {
 
 impl MusicFolder {
     /// The folder from the settings, scanned and watched, if one was chosen.
+    /// Nothing here waits on the folder: it may be on a slow network drive,
+    /// or on one that isn't there.
     pub fn start(lib: Arc<Mutex<Library>>, tools: Option<Tools>, emit: impl Fn(&str, serde_json::Value) + Send + Sync + 'static) -> Arc<MusicFolder> {
         let root = lib.lock().unwrap().setting(SETTING).ok().flatten().map(PathBuf::from);
         let f = Arc::new(MusicFolder {
@@ -74,7 +77,13 @@ impl MusicFolder {
             error: Mutex::new(None),
         });
         if let Some(r) = root {
-            let _ = f.use_root(&r);
+            // Stored canonical: used as it is until the background check.
+            *f.root.lock().unwrap() = Some(r.clone());
+            f.lib.lock().unwrap().set_music_root(Some(&r));
+            let me = f.clone();
+            std::thread::spawn(move || {
+                let _ = me.use_root(&r);
+            });
         }
         f
     }
@@ -95,15 +104,29 @@ impl MusicFolder {
         }
     }
 
-    /// Choose the music folder: remembered, scanned and watched.
+    /// Choose the music folder: remembered, then scanned and watched in the background.
     pub fn set_root(self: &Arc<Self>, path: &Path) -> Result<FolderInfo, String> {
         let root = root_path(path).map_err(|e| e.to_string())?;
         self.lib.lock().unwrap().set_setting(SETTING, &root.display().to_string()).map_err(|e| e.to_string())?;
         *self.last.lock().unwrap() = None;
-        self.use_root(&root)?;
-        Ok(self.info())
+        *self.watcher.lock().unwrap() = None;
+        *self.root.lock().unwrap() = Some(root.clone());
+        *self.error.lock().unwrap() = None;
+        self.lib.lock().unwrap().set_music_root(Some(&root));
+        // Scanning shows at once; the watch is set up first (it reads every folder).
+        self.scanning.store(true, Ordering::SeqCst);
+        let me = self.clone();
+        std::thread::spawn(move || {
+            me.scanning.store(false, Ordering::SeqCst);
+            let _ = me.use_root(&root);
+        });
+        let mut info = self.info();
+        info.scanning = true;
+        Ok(info)
     }
 
+    /// Check the folder, watch it, and scan it. Takes a while on a network
+    /// drive: only ever called off the window's thread.
     fn use_root(self: &Arc<Self>, path: &Path) -> Result<(), String> {
         *self.watcher.lock().unwrap() = None;
         let root = match root_path(path) {
@@ -112,11 +135,13 @@ impl MusicFolder {
                 // Kept as chosen (it may be a drive that isn't plugged in).
                 *self.root.lock().unwrap() = Some(path.to_path_buf());
                 *self.error.lock().unwrap() = Some(e.to_string());
+                self.gone_missing(path);
                 return Err(e.to_string());
             }
         };
         *self.root.lock().unwrap() = Some(root.clone());
         *self.error.lock().unwrap() = None;
+        self.lib.lock().unwrap().set_music_root(Some(&root));
         // Watch it: changes are scanned two seconds after they stop.
         let (tx, rx) = channel::<()>();
         let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
@@ -155,7 +180,22 @@ impl MusicFolder {
         Ok(())
     }
 
+    /// The folder can't be opened: its tracks are missing, and the window is told.
+    fn gone_missing(&self, root: &Path) {
+        let tracks: Vec<Track> = {
+            let l = self.lib.lock().unwrap();
+            let ids = l.set_seen_under(root, &HashSet::new()).unwrap_or_default();
+            ids.iter().filter_map(|id| l.track(id).ok().flatten()).collect()
+        };
+        if !tracks.is_empty() {
+            (self.emit)("library-tracks", serde_json::json!({ "tracks": tracks }));
+        }
+    }
+
     /// Scan in the background; a scan asked for during one runs after it.
+    /// Progress goes to the window ten times a second, and the tracks read so
+    /// far every second or so, so a first scan of a big folder fills the
+    /// library as it goes.
     pub fn scan(self: &Arc<Self>) {
         let Some(tools) = self.tools.clone() else { return };
         if self.root().is_none() {
@@ -169,17 +209,49 @@ impl MusicFolder {
         std::thread::spawn(move || loop {
             let root = me.root().unwrap_or_default();
             let emit = me.emit.clone();
-            let progress = move |p: FolderProgress| emit("library-progress", serde_json::to_value(&p).unwrap_or_default());
+            let lib = me.lib.clone();
+            // Tracks read but not yet sent, those sent, and when progress and tracks last went.
+            let batch = Mutex::new((Vec::<String>::new(), HashSet::<String>::new(), Instant::now(), Instant::now()));
+            let send = |ids: Vec<String>| {
+                let tracks: Vec<Track> = {
+                    let l = lib.lock().unwrap();
+                    ids.iter().filter_map(|id| l.track(id).ok().flatten()).collect()
+                };
+                if !tracks.is_empty() {
+                    emit("library-tracks", serde_json::json!({ "tracks": tracks }));
+                }
+            };
+            let progress = |p: FolderProgress| {
+                let mut b = batch.lock().unwrap();
+                if let Some(id) = &p.id {
+                    b.0.push(id.clone());
+                }
+                let last = p.total > 0 && p.done == p.total;
+                if last || p.id.is_none() || b.2.elapsed() >= Duration::from_millis(100) {
+                    b.2 = Instant::now();
+                    emit("library-progress", serde_json::to_value(&p).unwrap_or_default());
+                }
+                if !b.0.is_empty() && (b.0.len() >= 500 || b.3.elapsed() >= Duration::from_millis(1200)) {
+                    b.3 = Instant::now();
+                    let ids = std::mem::take(&mut b.0);
+                    b.1.extend(ids.iter().cloned());
+                    drop(b);
+                    send(ids);
+                }
+            };
             (me.emit)("library-progress", serde_json::json!({ "phase": "walk", "done": 0, "total": 0 }));
             let r = scan_folder(&me.lib, &tools, &root, &progress);
+            let sent = batch.lock().unwrap().1.clone();
             let tracks = match &r {
                 Ok(s) => {
                     *me.error.lock().unwrap() = None;
                     let l = me.lib.lock().unwrap();
-                    s.changed.iter().filter_map(|id| l.track(id).ok().flatten()).collect()
+                    let ids: HashSet<&String> = s.changed.iter().chain(&s.presence).filter(|id| !sent.contains(*id)).collect();
+                    ids.into_iter().filter_map(|id| l.track(id).ok().flatten()).collect()
                 }
                 Err(e) => {
                     *me.error.lock().unwrap() = Some(e.to_string());
+                    me.gone_missing(&root);
                     Vec::new()
                 }
             };

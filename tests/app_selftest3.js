@@ -68,6 +68,14 @@
     const chill = $$(".fct").find((b) => /^chill/.test(b.textContent));
     check("the labels are there to browse by", chill && /2$/.test(chill.textContent), chill && chill.textContent);
 
+    // The scan read the MP3 quickly (not every frame); in a playlist, it's read in full.
+    check("the scan read the MP3 quickly", lanterns.quick === true);
+    clickRow(rowOf("Lanterns"));
+    $(".lib-scroll").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    check("Enter adds the selection to the open playlist", A.pl().entries.some((e) => e.trackId === lanterns.id));
+    const full = await until(() => A.track(lanterns.id).quick === false, 30000);
+    check("then it's read in full, in the background", !!full);
+
     // Search, from the sidebar.
     A.lib.openSearch();
     typeIn($("#srch-in"), "harbor");

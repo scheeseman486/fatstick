@@ -26,7 +26,13 @@ GPL version 3 or later.
   folders yourself; the library is for finding and tagging them. Browse by
   your labels, genres, artists, albums and decades, or by what's missing (no
   genre, no labels, file not found); filter by typing; sort by any column;
-  and drag tracks onto a playlist on the left.
+  and drag tracks onto a playlist on the left. Built for big folders on
+  network drives: the scan reads each file's tags and stream facts (a few
+  hundred KB), not every MP3 frame, and fills the library as it goes. A track
+  is read in full in the background once it's in a playlist, as how it goes
+  on a stick depends on every frame. On a network drive the watcher only
+  hears of changes made from this computer, so the app also looks again when
+  you come back to it after ten minutes away, and "Scan now" is always there.
 - **Tags, and labels of your own.** Select tracks in the library to see and
   change their tags (several at once: "Various" fields stay as they are
   unless you type over them). Labels are your own free-form tags ("road

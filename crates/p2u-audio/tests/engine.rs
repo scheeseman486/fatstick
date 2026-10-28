@@ -300,3 +300,33 @@ fn tags_written_into_library_files() {
     assert_eq!(frames(), (None, None, None), "no labels: every Grouping frame goes");
     assert!(probe(&t, &p("e.mp3")).unwrap().tags.labels.is_empty());
 }
+
+/// The music folder's quick read against the full one: the same tags and
+/// stream facts, a VBR file's peak at the most its frames could be, and no
+/// frame list (the full read before a sync makes one).
+#[test]
+fn quick_probe_matches_the_full_one() {
+    let Some(t) = tools() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let p = |n: &str| dir.path().join(n);
+    let d = |n: &str| p(n).display().to_string();
+    ff(&["-f", "lavfi", "-i", NOISE, "-c:a", "libmp3lame", "-q:a", "2", "-id3v2_version", "3", "-metadata", "title=Vee", "-metadata", "grouping=a; b", &d("vbr.mp3")]);
+    ff(&["-f", "lavfi", "-i", NOISE, "-c:a", "libmp3lame", "-b:a", "192k", "-metadata", "title=Cee", &d("cbr.mp3")]);
+    ff(&["-f", "lavfi", "-i", NOISE, "-c:a", "flac", "-metadata", "TITLE=Eff", &d("x.flac")]);
+    for n in ["vbr.mp3", "cbr.mp3", "x.flac"] {
+        let full = probe::probe(&t, &p(n)).unwrap();
+        let quick = probe::probe_quick(&t, &p(n)).unwrap();
+        assert_eq!((&quick.codec, &quick.tags, quick.sample_rate, quick.channels, quick.vbr), (&full.codec, &full.tags, full.sample_rate, full.channels, full.vbr), "{n}");
+        assert!((quick.duration - full.duration).abs() < 0.1, "{n}: {} vs {}", quick.duration, full.duration);
+        assert!(quick.bitrate.abs_diff(full.bitrate) <= 2, "{n}: {} vs {}", quick.bitrate, full.bitrate);
+        assert!(quick.peak_bitrate >= full.peak_bitrate, "{n}: never under the real peak");
+        if n.ends_with(".mp3") {
+            assert!(quick.quick && quick.mp3.is_none() && !full.quick && full.mp3.is_some(), "{n}");
+        } else {
+            assert!(!quick.quick, "{n}: only MP3s have frames to leave for later");
+        }
+    }
+    let quick = probe::probe_quick(&t, &p("cbr.mp3")).unwrap();
+    assert_eq!((quick.vbr, quick.peak_bitrate, quick.bitrate), (false, 192, 192));
+    assert!(probe::probe_quick(&t, &p("vbr.mp3")).unwrap().vbr);
+}

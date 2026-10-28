@@ -60,6 +60,8 @@
     cache: new Set(),
     prepFailed: new Map(),
     analyzing: new Set(),
+    /** Tracks the music folder's scan read quickly, being read in full. */
+    reading: new Set(),
     sync: null,
     renaming: null,
     theme: "system",
@@ -1752,6 +1754,16 @@
     workTimer = setTimeout(() => { requestAnalysis(); queuePrep(); }, 300);
   }
   function requestAnalysis() {
+    // A track the music folder's scan read quickly is read in full once it's
+    // in a playlist: how it goes on a stick depends on every MP3 frame.
+    const reads = [];
+    for (const p of S.playlists) {
+      for (const e of p.entries) {
+        const t = track(e.trackId);
+        if (t.quick && t.exists && !S.reading.has(t.id)) { S.reading.add(t.id); reads.push(t.id); }
+      }
+    }
+    if (reads.length) api.readTracks(reads).catch(() => {});
     const want = new Set();
     const pls = new Set([S.current, ...S.sets.flatMap((s) => s.playlistIds)]);
     for (const id of pls) {
@@ -1796,7 +1808,7 @@
       renderList();
       renderStick();
       renderSide();
-      lib.refresh();
+      lib.refresh(true);
     }, 150);
   }
   function onPrepared(p) {
@@ -2673,6 +2685,10 @@
     api.on("sync-progress", onSyncProgress);
     api.on("scan-progress", (p) => { S.scan = p; renderDisplay(); });
     api.on("library-progress", (p) => lib.onProgress(p));
+    api.on("library-tracks", (x) => putTracks(x.tracks || []));
+    api.on("track-read", (x) => {
+      if (x.track) { S.reading.delete(x.trackId); putTracks([x.track]); }
+    });
     api.on("library-scanned", (x) => lib.onScanned(x));
 
     let d;

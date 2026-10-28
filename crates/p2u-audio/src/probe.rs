@@ -49,6 +49,12 @@ pub struct Probe {
     /// Copy-protected: can't be decoded.
     pub drm: bool,
     pub mp3: Option<Mp3Info>,
+    /// An MP3 read quickly: from ffprobe and its first frame, not every
+    /// frame. `mp3` is unset, the peak bitrate of a VBR file is the most
+    /// its frames could have, and the file is read in full before it goes on
+    /// a stick.
+    #[serde(default)]
+    pub quick: bool,
 }
 
 pub const LOSSLESS: &[&str] = &["flac", "alac", "wav", "aiff", "wavpack", "ape", "wmalossless"];
@@ -137,8 +143,18 @@ fn codec_name(stream: &Value, format: &str) -> String {
     }
 }
 
-/// Probe a file. Errors only when ffprobe can't run or finds no audio.
+/// Probe a file, reading every frame of an MP3. Errors only when ffprobe
+/// can't run or finds no audio.
 pub fn probe(tools: &Tools, path: &Path) -> Result<Probe> {
+    probe_as(tools, path, false)
+}
+
+/// Probe a file, reading only the start of an MP3 (see `Probe::quick`).
+pub fn probe_quick(tools: &Tools, path: &Path) -> Result<Probe> {
+    probe_as(tools, path, true)
+}
+
+fn probe_as(tools: &Tools, path: &Path, quick: bool) -> Result<Probe> {
     let o = run(tools.ffprobe().args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"]).arg(path))?;
     let j: Value = serde_json::from_slice(&o.stdout).map_err(|e| AudioError::Tool(format!("ffprobe output: {e}")))?;
     let streams = j["streams"].as_array().cloned().unwrap_or_default();
@@ -167,7 +183,18 @@ pub fn probe(tools: &Tools, path: &Path) -> Result<Probe> {
     }
     let tag = s(&audio["codec_tag_string"]).to_lowercase();
     p.drm = tag == "drms" || tag == "drmi" || s(&audio["codec_name"]).is_empty();
-    if p.codec == "mp3" {
+    if p.codec == "mp3" && quick {
+        if let Some(h) = mp3::head(path)? {
+            p.bitrate = h.avg_bitrate();
+            p.peak_bitrate = h.peak_bitrate().max(p.bitrate);
+            p.vbr = h.vbr;
+            p.sample_rate = h.sample_rate;
+            if p.duration <= 0.0 {
+                p.duration = h.duration().unwrap_or(0.0);
+            }
+            p.quick = true;
+        }
+    } else if p.codec == "mp3" {
         if let Some(m) = mp3::scan(path)? {
             p.bitrate = m.avg_bitrate;
             p.peak_bitrate = m.peak_bitrate;

@@ -44,6 +44,7 @@
       locate: (trackId, path) => invoke("locate", { trackId, path }),
       refreshTracks: () => invoke("refresh_tracks"),
       analyze: (trackIds) => invoke("analyze", { trackIds }),
+      readTracks: (trackIds) => invoke("read_tracks", { trackIds }),
       prepareQueue: (jobs) => invoke("prepare_queue", { jobs }),
       cacheInfo: () => invoke("cache_info"),
       clearCache: () => invoke("clear_cache"),
@@ -200,6 +201,7 @@
           setTimeout(() => ev.emit("analyzed", { trackId: id, lufs: t ? t.lufs : null, truePeak: t ? t.truePeak : null, error: null }), 300);
         }
       },
+      async readTracks() {},
       async prepareQueue(jobs) {
         const done = [];
         queue = [];
