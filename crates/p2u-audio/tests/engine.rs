@@ -373,3 +373,41 @@ fn render_shifts_the_key() {
     // No shift: the key is what it was before shifting existed.
     assert!(!spec(0.0).recipe(&src).contains("key"));
 }
+
+/// Fades on the stick: after the cut, the S curve in and out, the same length,
+/// with or without a key shift.
+#[test]
+fn render_fades_in_and_out() {
+    let Some(t) = tools() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let p = |n: &str| dir.path().join(n);
+    ff(&["-f", "lavfi", "-i", "sine=frequency=440:duration=8", "-ac", "2", "-c:a", "flac", &p("a.flac").display().to_string()]);
+    let src = [Some(Source { path: p("a.flac"), content_key: probe::content_key(&p("a.flac")).unwrap() })];
+    let cache = Cache::open(dir.path().join("cache")).unwrap();
+    let spec = |pitch: f64| RenderSpec {
+        cap: 320,
+        vbr: false,
+        sample_rate: 44100,
+        parts: vec![RenderPart { track_id: Some("a".into()), cut_start: 1.0, pad_end: 0.5, fade_in: 2.0, fade_out: 3.0, pitch, ..Default::default() }],
+    };
+    let full = rms(&pcm(&p("a.flac")), 3.0, 5.0);
+    for pitch in [0.0, 4.0] {
+        let out = render::prepare(&t, &cache, &spec(pitch), &src).unwrap();
+        let info = mp3::scan(&out.path).unwrap().unwrap();
+        assert!((info.duration - 7.5).abs() < 0.08, "8 - 1 + 0.5 = 7.5 s: {}", info.duration);
+        let s = pcm(&out.path);
+        let at = |x: f64| rms(&s, x - 0.05, x + 0.05) / full;
+        // In: silent, half way at 1 s (the S curve's middle), full from 2 s.
+        assert!(at(0.06) < 0.1, "{pitch}: starts silent: {}", at(0.06));
+        assert!((at(1.0) - 0.5).abs() < 0.12, "{pitch}: half way up at 1 s: {}", at(1.0));
+        assert!((at(3.0) - 1.0).abs() < 0.1, "{pitch}: full between: {}", at(3.0));
+        // Out over the last 3 s of the cut track (4 s to 7 s): half way at 5.5 s, nothing at 7 s.
+        assert!((at(5.5) - 0.5).abs() < 0.12, "{pitch}: half way down at 5.5 s: {}", at(5.5));
+        assert!(at(6.95) < 0.1, "{pitch}: ends silent: {}", at(6.95));
+        assert!(rms(&s, 7.05, 7.45) < 1e-3, "{pitch}: then the silence");
+    }
+    let plain = RenderSpec { parts: vec![RenderPart { fade_in: 0.0, fade_out: 0.0, ..spec(0.0).parts[0].clone() }], ..spec(0.0) };
+    assert_ne!(render::cache_key(&spec(0.0), &src), render::cache_key(&plain, &src));
+    assert!(!plain.recipe(&src).contains("fade"));
+    assert!(render::fade_curve(0.0) == 0.0 && (render::fade_curve(0.5) - 0.5).abs() < 1e-12 && render::fade_curve(1.0) == 1.0);
+}

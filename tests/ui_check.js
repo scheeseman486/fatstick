@@ -476,6 +476,63 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.evaluate(() => { P2U.app.pl().join = false; });
   }
 
+  // 28. Fades: the dialog, its sliders and curves, hearing it, Apply, Cancel and undo.
+  {
+    await p.locator('[data-pl="p-road"]').click();
+    // A track long enough for both fades.
+    const fi = await p.evaluate(() => { const A = P2U.app; return A.pl().entries.findIndex((e, i) => i > 2 && A.track(e.trackId).duration >= 40 && !e.pitch); });
+    await row(fi).click();
+    const fid = await p.evaluate((i) => P2U.app.pl().entries[i].id, fi);
+    await p.keyboard.press('f');
+    check('F opens the fade dialog', /^Fades of /.test(await p.locator('#modal-title').textContent()) && (await p.locator('.fade-panel').count()) === 2);
+    const curve = () => p.locator('.fade-panel.in .fade-line').getAttribute('d');
+    const flat = await curve();
+    await p.locator('#fade-in').fill('4');
+    check('the fade-in slider draws its curve', (await curve()) !== flat && (await p.locator('.fade-panel.in .fade-val input').inputValue()) === '4');
+    await p.locator('.fade-panel.out .fade-val input').fill('6.5');
+    check('a number sets the fade-out too', (await p.locator('#fade-out').inputValue()) === '6.5');
+    check('the player bar stays usable over the dimmed window', await p.evaluate(() => {
+      const b = document.querySelector('#player .pbtn');
+      const r = b.getBoundingClientRect();
+      const m = document.getElementById('modal').getBoundingClientRect();
+      return document.body.classList.contains('modal-player') && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2).closest('#player') && m.bottom <= document.getElementById('player').getBoundingClientRect().top;
+    }));
+    await p.getByRole('button', { name: 'Hear the end' }).click();
+    await p.waitForTimeout(100);
+    const heard = await p.evaluate(() => ({ id: P2U.app.S.player.entryId, pos: P2U.app.S.player.pos, dur: P2U.app.S.player.dur }));
+    check('"Hear the end" plays it just before the fade out', heard.id === fid && Math.abs(heard.pos - (heard.dur - 6.5 - 3)) < 0.6, JSON.stringify(heard));
+    await p.locator('#player .pbtn.play').click();
+    check('the player bar works with the dialog open', !(await p.evaluate(() => P2U.app.S.player.playing)) && !(await p.locator('#modal-back').isHidden()));
+    await p.screenshot({ path: `${out}/fades.png` });
+    await p.locator('#modal .btn.primary').click();
+    const fe = await p.evaluate((id) => P2U.app.pl().entries.find((e) => e.id === id), fid);
+    check('Apply sets the entry\'s fades', fe.fadeIn === 4 && fe.fadeOut === 6.5, JSON.stringify(fe));
+    check('the Fades column shows them', (await p.locator(`#row-${fid} .c-fades`).textContent()) === '4 / 6.5 s');
+    check('the dialog let go of the player bar', !(await p.evaluate(() => document.body.classList.contains('modal-player'))));
+    const fplan = await p.evaluate((id) => {
+      const A = P2U.app;
+      const f = A.planSet(A.stickSet()).folders.find((x) => x.items.some((it) => it.entry && it.entry.id === id));
+      const it = f.items.find((x) => x.entry && x.entry.id === id);
+      return { recipe: it.recipe, reason: it.d.reason };
+    }, fid);
+    check('it goes on the stick rendered, with its fades', fplan.recipe && fplan.recipe.kind === 'render' && fplan.recipe.parts[0].fadeIn === 4 && fplan.recipe.parts[0].fadeOut === 6.5 && !/Cut or padded/.test(fplan.reason), JSON.stringify(fplan));
+    await p.keyboard.press('Control+z');
+    check('undo takes the fades off', !(await p.evaluate((id) => { const e = P2U.app.pl().entries.find((x) => x.id === id); return e.fadeIn || e.fadeOut; }, fid)));
+    await p.keyboard.press('Control+y');
+    // Cancel leaves them; "No fades" then Apply takes them off.
+    await row(fi).click({ button: 'right' });
+    await p.getByRole('menuitem', { name: 'Fade in and out…' }).click();
+    await p.locator('#fade-in').fill('10');
+    await p.getByRole('button', { name: 'Cancel' }).click();
+    check('Cancel changes nothing', (await p.evaluate((id) => P2U.app.pl().entries.find((e) => e.id === id).fadeIn, fid)) === 4);
+    await p.keyboard.press('f');
+    await p.getByRole('button', { name: 'No fades' }).click();
+    await p.locator('#modal .btn.primary').click();
+    check('"No fades" takes them off', !(await p.evaluate((id) => { const e = P2U.app.pl().entries.find((x) => x.id === id); return e.fadeIn || e.fadeOut; }, fid)) && (await p.locator('.c-fades').count()) === 0);
+    await p.keyboard.press('Control+z');
+    await p.evaluate(() => P2U.app.stopPlayback());
+  }
+
   check('no console errors', errs.length === 0, errs.join(' / '));
   await b.close();
   server.close();

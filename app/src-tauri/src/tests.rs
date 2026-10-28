@@ -311,7 +311,7 @@ fn player_plays_seeks_and_ends() {
     let p = crate::player::Player::start(Some(Tools::locate().unwrap()), move |e| {
         let _ = tx.send(e);
     });
-    p.send(crate::player::Cmd::Play { path: f.clone(), from: 0.0, gain_db: 0.0, duration: 2.0, token: "e1".into(), key: None });
+    p.send(crate::player::Cmd::Play { path: f.clone(), from: 0.0, gain_db: 0.0, duration: 2.0, token: "e1".into(), key: None, shape: Default::default() });
     let mut states = Vec::new();
     let mut max_pos = 0.0f64;
     let start = std::time::Instant::now();
@@ -330,7 +330,7 @@ fn player_plays_seeks_and_ends() {
     assert!((1.7..3.5).contains(&took), "real time: {took}");
     assert!(max_pos > 1.5);
     // Seeking near the end ends sooner.
-    p.send(crate::player::Cmd::Play { path: f, from: 0.0, gain_db: -6.0, duration: 2.0, token: "e2".into(), key: Some(p2u_audio::stretch::Key { semitones: 3.0, keep_formants: true }) });
+    p.send(crate::player::Cmd::Play { path: f.clone(), from: 0.0, gain_db: -6.0, duration: 2.0, token: "e2".into(), key: Some(p2u_audio::stretch::Key { semitones: 3.0, keep_formants: true }), shape: crate::player::Shape { start: 0.0, end: 1.5, fade_in: 0.5, fade_out: 0.5 } });
     std::thread::sleep(std::time::Duration::from_millis(200));
     p.send(crate::player::Cmd::Seek(1.6));
     let start = std::time::Instant::now();
@@ -341,6 +341,19 @@ fn player_plays_seeks_and_ends() {
         }
     }
     assert!(start.elapsed().as_secs_f64() < 1.2);
+    // A cut start: playing and seeking start there, not before it.
+    p.send(crate::player::Cmd::Play { path: f, from: 0.0, gain_db: 0.0, duration: 2.0, token: "e3".into(), key: None, shape: crate::player::Shape { start: 1.0, ..Default::default() } });
+    let first = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert!(first.token == "e3" && first.pos >= 1.0, "{} {}", first.token, first.pos);
+    p.send(crate::player::Cmd::Seek(0.2));
+    let seeked = loop {
+        let e = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        if e.pos < 1.2 || e.state == "ended" {
+            break e;
+        }
+    };
+    assert!(seeked.state != "ended" && (1.0..1.2).contains(&seeked.pos), "{} {}", seeked.state, seeked.pos);
+    p.send(crate::player::Cmd::Stop);
 }
 
 #[test]

@@ -112,9 +112,22 @@
   function hasKey(e) {
     return key(e).pitch !== 0;
   }
-  /** An entry whose track is rendered, not copied: cut, padded or in another key. */
+  /** A track's fades on the stick (seconds), after its cuts, from its entry. */
+  function fades(e) {
+    const n = (x) => (Number.isFinite(+x) && +x > 0 ? Math.round(Math.min(600, +x) * 100) / 100 : 0);
+    return { fadeIn: n(e && e.fadeIn), fadeOut: n(e && e.fadeOut) };
+  }
+  function hasFades(e) {
+    const f = fades(e);
+    return !!(f.fadeIn || f.fadeOut);
+  }
+  /** The S curve fades follow (the app's render and player use the same). */
+  function fadeCurve(x) {
+    return 0.5 - 0.5 * Math.cos(Math.PI * Math.max(0, Math.min(1, x)));
+  }
+  /** An entry whose track is rendered, not copied: cut, padded, faded or in another key. */
   function reworks(e) {
-    return hasEdges(e) || hasKey(e);
+    return hasEdges(e) || hasKey(e) || hasFades(e);
   }
   /** How long a track is on the stick: cut at its ends, then padded. */
   function stickSeconds(t, e) {
@@ -124,7 +137,8 @@
   /** One part of a rendered file: a track with its gain, cuts and silences. */
   function part(t, e, g) {
     const k = key(e);
-    return { trackId: t.id, gainDb: g && g.db ? Math.round(g.db * 10) / 10 : 0, ...edges(e), ...(k.pitch ? k : {}) };
+    const f = fades(e);
+    return { trackId: t.id, gainDb: g && g.db ? Math.round(g.db * 10) / 10 : 0, ...edges(e), ...(k.pitch ? k : {}), ...(f.fadeIn || f.fadeOut ? f : {}) };
   }
   /** A file rendered from parts: a cut or padded track, silence, a joined playlist. */
   function render(parts, profile, rate) {
@@ -154,7 +168,7 @@
     if (r.kind === "copy") return "copy";
     if (r.kind === "gain") return `gain${r.steps > 0 ? "+" : ""}${r.steps}`;
     if (r.kind === "render") {
-      const ps = r.parts.map((x) => `${x.trackId || "-"}:${x.gainDb || 0}:${x.cutStart || 0}:${x.cutEnd || 0}:${x.padStart || 0}:${x.padEnd || 0}${x.pitch ? `:k${x.pitch}${x.keepFormants ? "f" : ""}` : ""}`).join(",");
+      const ps = r.parts.map((x) => `${x.trackId || "-"}:${x.gainDb || 0}:${x.cutStart || 0}:${x.cutEnd || 0}:${x.padStart || 0}:${x.padEnd || 0}${x.pitch ? `:k${x.pitch}${x.keepFormants ? "f" : ""}` : ""}${x.fadeIn || x.fadeOut ? `:f${x.fadeIn || 0}/${x.fadeOut || 0}` : ""}`).join(",");
       return `render/${r.vbr ? "vbr" : "cbr"}${r.cap}/${r.sampleRate}/${hash(ps)}`;
     }
     return `${r.vbr ? "vbr" : "cbr"}${r.cap}/${r.sampleRate}/${r.gainDb}`;
@@ -216,6 +230,6 @@
 
   P2U.rules = {
     LOSSLESS, CODEC_NAME, formatLabel, decide, gains, outBytes, geometry, layout, outputRate, recipe, describe, STEP,
-    edges, hasEdges, key, hasKey, reworks, stickSeconds, part, render, hash,
+    edges, hasEdges, key, hasKey, fades, hasFades, fadeCurve, reworks, stickSeconds, part, render, hash,
   };
 })(typeof window !== "undefined" ? (window.P2U = window.P2U || {}) : (globalThis.P2U = globalThis.P2U || {}));

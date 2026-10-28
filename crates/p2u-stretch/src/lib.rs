@@ -317,6 +317,20 @@ mod tests {
     }
 
     #[test]
+    fn a_reset_keeps_the_key() {
+        // After a seek the player resets the shifter: the key it was given stays.
+        let input = tone(440.0, 2.0);
+        let mut s = Shifter::new(2, RATE);
+        s.set_key(Key { semitones: 12.0, keep_formants: false });
+        let mut out = vec![0.0; input.len()];
+        s.process(&input, &mut out);
+        s.reset();
+        s.process(&input, &mut out);
+        let lat = s.latency() * 2;
+        assert!((freq(&out[lat..]) - 880.0).abs() < 15.0, "{}", freq(&out[lat..]));
+    }
+
+    #[test]
     fn too_short_is_left_alone() {
         let mut a = tone(440.0, 0.01);
         let before = a.clone();

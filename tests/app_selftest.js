@@ -85,6 +85,18 @@
     const e1 = S.playlists[0].entries[1];
     check("the second track is 5 semitones up", e1.pitch === 5 && e1.keepFormants === false, JSON.stringify(e1));
 
+    // The fourth track fades in over 2 s and out over 3 s.
+    key({ key: "ArrowDown" });
+    key({ key: "ArrowDown" });
+    key({ key: "f" });
+    const fin = await until(() => document.getElementById("fade-in"));
+    const slide = (el, v) => { el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); };
+    slide(fin, "2");
+    slide(document.getElementById("fade-out"), "3");
+    [...document.querySelectorAll("#modal .btn.primary")].find((b) => b.textContent === "Apply").click();
+    const e3 = S.playlists[0].entries[3];
+    check("the fourth track fades in over 2 s and out over 3 s", e3.fadeIn === 2 && e3.fadeOut === 3, JSON.stringify(e3));
+
     // Three seconds of silence between the two playlists.
     const add2 = [...document.querySelectorAll("#stick select")].find((x) => x.getAttribute("aria-label") === "Add a playlist to this stick");
     add2.value = "__gap";
@@ -164,6 +176,24 @@
     check("the key changes while it plays, and it plays on", !!still && !S.player.error, `position ${S.player.pos}`);
     [...document.querySelectorAll("#modal .btn")].find((b) => b.textContent === "Cancel").click();
     check("Cancel leaves the entry's key", p.entries[1].pitch === 5);
+    // The fade dialog: the sliders change what plays, and the player bar,
+    // usable meanwhile, seeks with the fades being tried.
+    await A.playEntry(p.entries[3].id, p.id);
+    await until(() => S.player.pos > 0.3, 10000);
+    A.fadeDialog([p.entries[3].id]);
+    const fo = await until(() => document.getElementById("fade-out"));
+    check("the player bar stays usable while the dialog is open", document.body.classList.contains("modal-player") && getComputedStyle(document.getElementById("player")).zIndex === "60");
+    for (const v of ["6", "1", "4"]) {
+      fo.value = v;
+      fo.dispatchEvent(new Event("input", { bubbles: true }));
+      await sleep(250);
+    }
+    A.seekTo(1.0);
+    const p1 = S.player.pos;
+    const on = await until(() => S.player.playing && S.player.pos > p1 + 0.5, 10000);
+    check("the fades change while it plays, and a seek keeps it playing", !!on && !S.player.error && S.player.entryId === p.entries[3].id, `position ${S.player.pos}`);
+    [...document.querySelectorAll("#modal .btn")].find((b) => b.textContent === "Cancel").click();
+    check("Cancel leaves the entry's fades", p.entries[3].fadeIn === 2 && p.entries[3].fadeOut === 3 && !document.body.classList.contains("modal-player"));
     A.stopPlayback();
   } catch (e) {
     check("no exception", false, String((e && e.stack) || e));

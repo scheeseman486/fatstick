@@ -51,7 +51,7 @@
     sel: new Set(),
     anchor: null,
     focus: null,
-    cols: { album: true, format: true, stick: true, gain: true, name: false, edges: true, key: true },
+    cols: { album: true, format: true, stick: true, gain: true, name: false, edges: true, key: true, fades: true },
     listWidth: 800,
     undo: [],
     redo: [],
@@ -185,7 +185,8 @@
       const d = R.decide(it.t, profile);
       if (d.action !== "copy" || !(p.join || R.reworks(it.entry))) return d;
       const why = p.join ? `Joined into one track, encoded at ${cap} kbps`
-        : R.hasKey(it.entry) ? `In another key (${keyText(R.key(it.entry).pitch)}), so encoded at ${cap} kbps` : `Cut or padded at its ends, so encoded at ${cap} kbps`;
+        : R.hasKey(it.entry) ? `In another key (${keyText(R.key(it.entry).pitch)}), so encoded at ${cap} kbps`
+          : R.hasFades(it.entry) && !R.hasEdges(it.entry) ? `Faded in or out, so encoded at ${cap} kbps` : `Cut or padded at its ends, so encoded at ${cap} kbps`;
       return { ...d, action: "encode", reason: why };
     });
     const gs = R.gains(items.map((i) => i.t), ds, p.norm);
@@ -288,7 +289,9 @@
     const edge = (e) => {
       const x = R.edges(e);
       const k = R.key(e);
-      return (R.hasEdges(e) ? `[${x.cutStart},${x.cutEnd},${x.padStart},${x.padEnd}]` : "") + (k.pitch ? `k${k.pitch}${k.keepFormants ? "f" : ""}` : "");
+      const f = R.fades(e);
+      return (R.hasEdges(e) ? `[${x.cutStart},${x.cutEnd},${x.padStart},${x.padEnd}]` : "") + (k.pitch ? `k${k.pitch}${k.keepFormants ? "f" : ""}` : "")
+        + (f.fadeIn || f.fadeOut ? `f${f.fadeIn}/${f.fadeOut}` : "");
     };
     const shape = plan.folders.map((f) => (f.p.gap != null ? `S${f.p.gap}` : `${f.p.join ? "J" : ""}${f.present.map((it) => edge(it.entry)).join("")}`));
     return shape.join("") ? `${base}|${shape.join(",")}` : base;
@@ -724,6 +727,7 @@
     gain: { label: "Gain", w: "4.6em" },
     edges: { label: "Start / end", w: "7.4em" },
     key: { label: "Key", w: "5.2em" },
+    fades: { label: "Fades", w: "5.6em" },
     name: { label: "Name on the stick", w: "minmax(9em, 2fr)" },
   };
   function visibleCols(p) {
@@ -736,6 +740,7 @@
     if (w >= 500 && S.cols.stick) k.push("stick");
     if (w >= 660 && S.cols.gain && p.norm.on) k.push("gain");
     if (w >= 560 && S.cols.edges && p.entries.some((e) => R.hasEdges(e))) k.push("edges");
+    if (w >= 560 && S.cols.fades && p.entries.some((e) => R.hasFades(e))) k.push("fades");
     if (w >= 540 && S.cols.key && p.entries.some((e) => R.hasKey(e))) k.push("key");
     if (w >= 700 && S.cols.name) k.push("name");
     return k;
@@ -787,6 +792,7 @@
       { label: "On the stick", checked: S.cols.stick, action: t("stick") },
       { label: "Gain (when evening the volume)", checked: S.cols.gain, action: t("gain") },
       { label: "Start / end (when cut or padded)", checked: S.cols.edges, action: t("edges") },
+      { label: "Fades (when faded)", checked: S.cols.fades, action: t("fades") },
       { label: "Key (when shifted)", checked: S.cols.key, action: t("key") },
       { label: "Name on the stick", checked: S.cols.name, action: t("name") },
     ]);
@@ -954,6 +960,14 @@
    * new key from the source, and moving the slider changes it as it plays.
    * Only the stick's copy changes, rendered at full quality when it syncs.
    */
+  /** Where the player is in an entry's source file: a prepared file starts
+   * with its padding, at the cut start. */
+  function sourcePos(e) {
+    const pp = S.player;
+    if (pp.from !== "cache") return pp.pos;
+    const x = R.edges(e);
+    return Math.max(x.cutStart, pp.pos - x.padStart + x.cutStart);
+  }
   function keyDialog(ids) {
     const p = pl();
     const es = p.entries.filter((e) => ids.includes(e.id));
@@ -991,7 +1005,7 @@
         if (!fromSource) {
           // The prepared file has the old key in it: the source, from here, in the new one.
           fromSource = true;
-          playEntry(pp.entryId, p.id, pp.pos, { source: true, key: { pitch: value(), keepFormants: keep } });
+          playEntry(pp.entryId, p.id, sourcePos(p.entries.find((e) => e.id === pp.entryId)), { source: true, key: { pitch: value(), keepFormants: keep } });
         } else api.playerKey(value(), keep).catch(() => {});
       });
     }
@@ -1007,7 +1021,7 @@
       fill(listen, icon(on ? "pause" : "play"), on ? "Pause" : "Listen");
       const t = playingHere() ? track(p.entries.find((e) => e.id === pp.entryId).trackId) : null;
       status.textContent = DEMO ? "The demo plays no sound; in the app, the key changes as it plays."
-        : t ? `${t.title || t.filename}, ${clock(pp.pos)}. Move the slider and hear the key change.` : "Listen plays the track in this key; moving the slider changes it as it plays.";
+        : t ? `${t.title || t.filename}, ${clock(pp.pos)}. Move the slider and hear the key change; the player below works as usual.` : "Listen plays the track in this key; moving the slider changes it as it plays.";
     }
     const step = (d) => { semis = Math.max(-12, Math.min(12, semis + d)); slider.value = String(semis); show(); live(); };
     slider.addEventListener("input", () => { semis = Number(slider.value); show(); live(); });
@@ -1047,6 +1061,7 @@
     const t0 = track(es[0].trackId);
     modal({
       title: es.length === 1 ? `Key of ${t0.title || t0.filename}` : `Key of ${plural(es.length, "track")}`,
+      player: true,
       body: [
         h("p", { text: "Higher or lower, at the same speed. Only the stick's copy changes, shifted at full quality when the stick syncs; the file itself isn't touched, and the length stays the same." }),
         h("div", { class: "key-dial" },
@@ -1080,6 +1095,177 @@
     show();
     slider.focus();
     slider.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } });
+  }
+
+  // ---- fades: in at the start, out at the end ------------------------------------------------
+  const secsText = (x) => String(Math.round(x * 10) / 10);
+  function fadeTitle(e) {
+    const f = R.fades(e);
+    if (f.fadeIn && f.fadeOut) return `Fades in over ${secsText(f.fadeIn)} s and out over ${secsText(f.fadeOut)} s`;
+    if (f.fadeIn) return `Fades in over ${secsText(f.fadeIn)} s`;
+    return `Fades out over ${secsText(f.fadeOut)} s`;
+  }
+  const SVG = "http://www.w3.org/2000/svg";
+  const sv = (tag, attrs) => {
+    const el = document.createElementNS(SVG, tag);
+    for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+    return el;
+  };
+  /** The live shape of an entry for the player: its cuts, and these fades. */
+  function shapeArgs(e, f) {
+    const x = R.edges(e);
+    return { duration: track(e.trackId).duration || 0, cutStart: x.cutStart, cutEnd: x.cutEnd, fadeIn: f.fadeIn, fadeOut: f.fadeOut };
+  }
+
+  /**
+   * Fades of the selected entries: one panel for each end, with the curve
+   * over its first or last half minute, a slider, and a button to hear it.
+   * Moving a slider changes what plays as it plays; the player bar stays
+   * usable, so seeking keeps the fades being tried.
+   */
+  function fadeDialog(ids) {
+    const p = pl();
+    const es = p.entries.filter((e) => ids.includes(e.id));
+    if (!es.length) return;
+    const f0 = R.fades(es[0]);
+    const mixed = es.some((e) => { const f = R.fades(e); return f.fadeIn !== f0.fadeIn || f.fadeOut !== f0.fadeOut; });
+    let fin = f0.fadeIn;
+    let fout = f0.fadeOut;
+    const e0 = es[0];
+    const t0 = track(e0.trackId);
+    const x0 = R.edges(e0);
+    const start = x0.cutStart;
+    const end = Math.max(start + 1, (t0.duration || 60) - x0.cutEnd);
+    const len = end - start;
+    const MAX = Math.max(1, Math.min(30, Math.floor(len)));
+    const WIN = Math.min(30, len);
+    const pp = S.player;
+    const playingHere = () => !!pp.entryId && pp.playlistId === p.id && es.some((e) => e.id === pp.entryId);
+    const wasPlaying = playingHere();
+    let startedHere = false;
+    let fromSource = playingHere() && pp.from !== "cache";
+    let applied = false;
+    const now = () => ({ fadeIn: fin, fadeOut: fout });
+
+    function panel(which) {
+      const isIn = which === "in";
+      const W = 300;
+      const H = 64;
+      const svg = sv("svg", { viewBox: `0 0 ${W} ${H}`, class: "fade-svg", preserveAspectRatio: "none", "aria-hidden": "true" });
+      const area = sv("path", { class: "fade-area" });
+      const line = sv("path", { class: "fade-line" });
+      const head = sv("line", { class: "fade-head", y1: "0", y2: String(H) });
+      svg.append(area, line, head);
+      const slider = h("input", { type: "range", min: "0", max: String(MAX), step: "0.5", value: String(isIn ? fin : fout), id: `fade-${which}`, "aria-label": isIn ? "Fade in, seconds" : "Fade out, seconds" });
+      const num = h("input", { type: "number", class: "input secs", min: "0", max: String(MAX), step: "0.1", value: secsText(isIn ? fin : fout), "aria-label": isIn ? "Fade in, seconds" : "Fade out, seconds" });
+      const hear = h("button", { type: "button", class: "btn small" }, icon("play"), isIn ? "Hear the start" : "Hear the end");
+      const from = isIn ? start : end - WIN;
+      const axis = h("div", { class: "fade-axis" }, h("span", { text: clock(from) }), h("span", { text: clock(from + WIN) }));
+      const set = (v, src) => {
+        v = Math.max(0, Math.min(MAX, Math.round(v * 10) / 10));
+        if (isIn) fin = v;
+        else fout = v;
+        if (src !== slider) slider.value = String(v);
+        if (src !== num) num.value = secsText(v);
+        draw();
+        live();
+      };
+      slider.addEventListener("input", () => set(Number(slider.value), slider));
+      num.addEventListener("input", () => { if (num.value !== "" && Number.isFinite(Number(num.value))) set(Number(num.value), num); });
+      hear.addEventListener("click", () => {
+        startedHere = startedHere || !wasPlaying;
+        fromSource = true;
+        const at = isIn ? start : Math.max(start, end - fout - 3);
+        const e = playingHere() ? p.entries.find((x) => x.id === pp.entryId) : e0;
+        playEntry(e.id, p.id, at, { source: true, shape: now() });
+      });
+      function draw() {
+        const f = isIn ? fin : fout;
+        const pts = [];
+        for (let i = 0; i <= 60; i++) {
+          const t = (i / 60) * WIN;
+          const g = !f ? 1 : isIn ? R.fadeCurve(t / f) : R.fadeCurve((WIN - t) / f);
+          pts.push(`${((i / 60) * W).toFixed(1)},${(H - 4 - g * (H - 12)).toFixed(1)}`);
+        }
+        line.setAttribute("d", `M${pts.join(" L")}`);
+        area.setAttribute("d", `M0,${H} L${pts.join(" L")} L${W},${H} Z`);
+        const t = playingHere() ? sourcePos(p.entries.find((x) => x.id === pp.entryId)) - from : -1;
+        head.style.display = t >= 0 && t <= WIN ? "" : "none";
+        if (t >= 0 && t <= WIN) { head.setAttribute("x1", String((t / WIN) * W)); head.setAttribute("x2", String((t / WIN) * W)); }
+      }
+      draw();
+      const el = h("section", { class: `fade-panel ${which}` },
+        h("div", { class: "fade-top" }, h("h3", { text: isIn ? "Fade in" : "Fade out" }), h("span", { class: "fade-val" }, num, "s")),
+        svg, axis, slider, hear);
+      return { el, draw };
+    }
+
+    let raf = 0;
+    function live() {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        if (!playingHere()) return;
+        const e = p.entries.find((x) => x.id === pp.entryId);
+        if (!fromSource) {
+          fromSource = true;
+          playEntry(e.id, p.id, sourcePos(e), { source: true, shape: now() });
+        } else api.playerShape(shapeArgs(e, now())).catch(() => {});
+      });
+    }
+    const pin = panel("in");
+    const pout = panel("out");
+    const status = h("p", { class: "st-note key-status" });
+    function tick() {
+      pin.draw();
+      pout.draw();
+      const t = playingHere() ? track(p.entries.find((e) => e.id === pp.entryId).trackId) : null;
+      status.textContent = DEMO ? "The demo plays no sound; in the app, the fades change as it plays."
+        : t ? `${t.title || t.filename}, ${clock(pp.pos)}. Move a slider and hear it change; the player below works as usual.`
+          : "Hear the start or the end; moving a slider changes it as it plays.";
+    }
+    const ticker = setInterval(() => { if (document.contains(status)) tick(); }, 250);
+
+    const apply = () => {
+      applied = true;
+      closeModal();
+      edit(es.length === 1 ? "Change the fades" : `Change the fades of ${plural(es.length, "track")}`, () => {
+        for (const e of es) {
+          const x = p.entries.find((y) => y.id === e.id);
+          if (!x) continue;
+          if (fin) x.fadeIn = fin; else delete x.fadeIn;
+          if (fout) x.fadeOut = fout; else delete x.fadeOut;
+        }
+      });
+    };
+    modal({
+      title: es.length === 1 ? `Fades of ${t0.title || t0.filename}` : `Fades of ${plural(es.length, "track")}`,
+      wide: true,
+      player: true,
+      body: [
+        h("p", { text: "Fade the track in at its start and out at its end, after any cut. Only the stick's copy changes; the file itself isn't touched." }),
+        h("div", { class: "fade-panels" }, pin.el, pout.el),
+        h("div", { class: "key-listen" }, status),
+        mixed || es.length > 1 ? h("p", { class: "st-note", text: `Apply gives all ${es.length} tracks these fades${mixed ? " (they differ now)" : ""}; the curves show the first.` }) : null,
+      ],
+      buttons: [
+        h("button", { type: "button", class: "btn left", text: "No fades", onclick: () => { fin = 0; fout = 0; for (const w of ["in", "out"]) { $(`fade-${w}`).value = "0"; } for (const n of document.querySelectorAll(".fade-val input")) n.value = "0"; pin.draw(); pout.draw(); live(); } }),
+        h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal }),
+        h("button", { type: "button", class: "btn primary", text: "Apply", onclick: apply }),
+      ],
+      onClose: () => {
+        clearInterval(ticker);
+        cancelAnimationFrame(raf);
+        if (applied) return;
+        if (startedHere && !wasPlaying) stopPlayback();
+        else if (playingHere() && fromSource) {
+          const e = p.entries.find((x) => x.id === pp.entryId);
+          api.playerShape(shapeArgs(e, R.fades(e))).catch(() => {});
+        }
+      },
+    });
+    tick();
+    $("fade-in").focus();
   }
 
   function renderList() {
@@ -1164,6 +1350,15 @@
           type: "button", class: "edge-btn", title: `${edgeTitle(it.entry)}. Click to change.`,
           text: `${edgeText(x.cutStart, x.padStart)} / ${edgeText(x.cutEnd, x.padEnd)} s`,
           onclick: (ev) => { ev.stopPropagation(); if (!S.sel.has(it.entry.id)) { selectOnly(it.entry.id); syncSelection(); } edgesDialog([...S.sel]); },
+        }));
+      }
+      case "fades": {
+        if (!R.hasFades(it.entry)) return h("div", { class: "c c-fades" });
+        const f = R.fades(it.entry);
+        return h("div", { class: "c c-fades" }, h("button", {
+          type: "button", class: "edge-btn", title: `${fadeTitle(it.entry)}. Click to change.`,
+          text: `${f.fadeIn ? secsText(f.fadeIn) : "–"} / ${f.fadeOut ? secsText(f.fadeOut) : "–"} s`,
+          onclick: (ev) => { ev.stopPropagation(); if (!S.sel.has(it.entry.id)) { selectOnly(it.entry.id); syncSelection(); } fadeDialog([...S.sel]); },
         }));
       }
       case "key": {
@@ -1625,7 +1820,7 @@
     const st = staleness(plan);
     const pr = plan.profile;
     const how = (it) => (it.d.action !== "copy" ? `MP3 ${pr.bitrateCap}` : it.recipe && it.recipe.kind === "gain" ? `Copy, ${db(it.recipe.steps * R.STEP)}` : "Copy");
-    const ends = (e) => [e && R.hasEdges(e) ? edgeTitle(e) : "", e && R.hasKey(e) ? `key ${keyText(R.key(e).pitch)}` : ""].filter(Boolean).join("; ");
+    const ends = (e) => [e && R.hasEdges(e) ? edgeTitle(e) : "", e && R.hasFades(e) ? fadeTitle(e).toLowerCase() : "", e && R.hasKey(e) ? `key ${keyText(R.key(e).pitch)}` : ""].filter(Boolean).join("; ");
     const gain = (it) => (it.g && it.g.db ? db(it.g.db) : "");
     const kind = (f) => (f.p.gap != null ? "silence" : f.p.join ? "joined" : "playlist");
     return {
@@ -2213,7 +2408,13 @@
     const t = track(e.trackId);
     if (!t.exists) { toast(`${t.title || t.filename} can't play: the file isn't where the playlist says. Use Locate to find it.`); return; }
     const k = opts.key || R.key(e);
-    const args = { trackId: t.id, token: entryId, from, gainDb: 0, recipe: null, pitch: k.pitch, keepFormants: k.keepFormants };
+    const x = R.edges(e);
+    const f = opts.shape || R.fades(e);
+    // From its cut start to its cut end, faded and in its key, as on the stick.
+    const args = {
+      trackId: t.id, token: entryId, from, gainDb: 0, recipe: null, pitch: k.pitch, keepFormants: k.keepFormants,
+      cutStart: x.cutStart, cutEnd: x.cutEnd, fadeIn: f.fadeIn, fadeOut: f.fadeOut,
+    };
     if (S.player.asOnStick && !opts.source) {
       const it = stickItem(plId, entryId);
       if (it && it.recipe && it.recipe.kind !== "copy") {
@@ -2771,6 +2972,7 @@
     if (k === "e" && !mod && !e.altKey && S.sel.size) { e.preventDefault(); edgesDialog([...S.sel]); return; }
     if (k === "t" && !mod && !e.altKey && S.focus) { e.preventDefault(); toggleTags(S.focus); return; }
     if (k === "k" && !mod && !e.altKey && S.sel.size) { e.preventDefault(); keyDialog([...S.sel]); return; }
+    if (k === "f" && !mod && !e.altKey && S.sel.size) { e.preventDefault(); fadeDialog([...S.sel]); return; }
     if (e.key === "Escape") { selectOnly(null); syncSelection(); }
   }
 
@@ -2792,6 +2994,7 @@
       ...(others.length ? [{ heading: n === 1 ? "Add to playlist" : `Add ${n} tracks to` }, ...others.map((p) => ({ label: p.name, action: () => { addTracks(tids(), p.id); toast(`Added ${plural(n, "track")} to ${p.name}.`, { label: "Undo", run: undo }); } }))] : []),
       "-",
       { label: n === 1 ? "Start and end…" : `Start and end of ${n} tracks…`, key: "E", action: () => edgesDialog([...S.sel]) },
+      { label: n === 1 ? "Fade in and out…" : `Fades of ${n} tracks…`, key: "F", action: () => fadeDialog([...S.sel]) },
       { label: n === 1 ? "Key…" : `Key of ${n} tracks…`, key: "K", action: () => keyDialog([...S.sel]) },
       "-",
       n === 1 ? { label: S.expanded === id ? "Hide the tags" : "Show the tags", key: "T", action: () => toggleTags(id) } : null,
@@ -2945,7 +3148,7 @@
     persist();
     scheduleWork();
     // For the app's self-test (tests/app_e2e.py) and for poking around in the inspector.
-    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, refreshSticks, holder, selectSet, openLayout, layoutData, setView, lib, toggleTags, ready: true };
+    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, seekTo, refreshSticks, holder, selectSet, openLayout, layoutData, setView, lib, toggleTags, ready: true };
     if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Playlist2USB to get it back.");
     if (!DEMO) {
       stickPoll = setInterval(() => { if (!(S.sync && S.sync.running)) refreshSticks(true); }, 3000);

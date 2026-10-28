@@ -3,9 +3,11 @@
 //! reads), a decoder thread keeps about two seconds buffered, and the device's
 //! callback drains the buffer. Seeking restarts the decoder at the new place.
 //!
-//! A track in another key goes through the key shifter as the device takes
-//! it, after the buffer, so moving the key slider is heard at once (well,
-//! after the shifter's tenth of a second). Other tracks skip it.
+//! A playlist entry plays as it will be on the stick, apart from the encode:
+//! from its cut start to its cut end, faded in and out, in its key. The fades
+//! and the key are applied as the device takes the audio, after the buffer,
+//! so moving a slider (or seeking) is heard at once (the key after the
+//! shifter's tenth of a second). A plain track skips all of it.
 //!
 //! The device lives on its own thread (cpal streams aren't Send everywhere);
 //! the UI talks to it with commands and hears back through `player` events
@@ -21,12 +23,51 @@ use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use p2u_audio::decode::PcmStream;
+use p2u_audio::render::fade_curve;
 use p2u_audio::stretch::{Key, Shifter};
 use p2u_audio::Tools;
 use serde::Serialize;
 
+/// Where a playlist entry starts and ends in its file (seconds, after the
+/// cuts), and its fades.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shape {
+    pub start: f64,
+    pub end: f64,
+    pub fade_in: f64,
+    pub fade_out: f64,
+}
+
+impl Default for Shape {
+    fn default() -> Shape {
+        Shape { start: 0.0, end: f64::INFINITY, fade_in: 0.0, fade_out: 0.0 }
+    }
+}
+
+impl Shape {
+    fn plain(&self) -> bool {
+        self.fade_in <= 0.0 && self.fade_out <= 0.0 && !self.end.is_finite()
+    }
+    /// The gain at `t` seconds into the file: 0 past the end.
+    fn gain(&self, t: f64) -> f32 {
+        if t >= self.end {
+            return 0.0;
+        }
+        let mut g = 1.0;
+        if self.fade_in > 0.0 {
+            g *= fade_curve((t - self.start) / self.fade_in);
+        }
+        if self.fade_out > 0.0 && self.end.is_finite() {
+            g *= fade_curve((self.end - t) / self.fade_out);
+        }
+        g as f32
+    }
+}
+
 pub enum Cmd {
-    Play { path: PathBuf, from: f64, gain_db: f64, duration: f64, token: String, key: Option<Key> },
+    Play { path: PathBuf, from: f64, gain_db: f64, duration: f64, token: String, key: Option<Key>, shape: Shape },
+    /// Another start, end and fades for what's playing (live, from the fade sliders).
+    Shape(Shape),
     /// Another key for what's playing (live, from the key slider), or none.
     Key(Option<Key>),
     Pause,
@@ -60,6 +101,12 @@ struct Shift {
 struct Shared {
     buf: Mutex<VecDeque<f32>>,
     shift: Mutex<Shift>,
+    shape: Mutex<Shape>,
+    /// Where in the file the decoder started (seconds, as f64 bits), and the rate.
+    base: AtomicU64,
+    rate: AtomicU32,
+    /// The device reached the entry's end.
+    past_end: AtomicBool,
     playing: AtomicBool,
     /// Stereo frames handed to the device since the last (re)start.
     frames: AtomicU64,
@@ -76,6 +123,10 @@ impl Shared {
         let playing = self.playing.load(Ordering::Relaxed);
         let n = out.len() / channels;
         let mut frames = 0u64;
+        let shape = *self.shape.lock().unwrap();
+        let shaped = !shape.plain();
+        let (base, rate) = (f64::from_bits(self.base.load(Ordering::Relaxed)), self.rate.load(Ordering::Relaxed).max(1) as f64);
+        let f0 = self.frames.load(Ordering::Relaxed);
         let mut sh = self.shift.lock().unwrap();
         let Shift { shifter, input, output } = &mut *sh;
         input.clear();
@@ -83,9 +134,14 @@ impl Shared {
             let mut buf = self.buf.lock().unwrap();
             for _ in 0..n {
                 if playing && buf.len() >= 2 {
+                    let (l, r) = (buf.pop_front().unwrap(), buf.pop_front().unwrap());
+                    let g = if shaped { shape.gain(base + (f0 + frames) as f64 / rate) } else { 1.0 };
+                    if g == 0.0 && base + (f0 + frames) as f64 / rate >= shape.end {
+                        self.past_end.store(true, Ordering::Relaxed);
+                    }
                     frames += 1;
-                    input.push(buf.pop_front().unwrap());
-                    input.push(buf.pop_front().unwrap());
+                    input.push(l * g);
+                    input.push(r * g);
                 } else {
                     input.push(0.0);
                     input.push(0.0);
@@ -269,6 +325,10 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
     let shared = Arc::new(Shared {
         buf: Mutex::new(VecDeque::new()),
         shift: Mutex::new(Shift::default()),
+        shape: Mutex::new(Shape::default()),
+        base: AtomicU64::new(0f64.to_bits()),
+        rate: AtomicU32::new(44100),
+        past_end: AtomicBool::new(false),
         playing: AtomicBool::new(false),
         frames: AtomicU64::new(0),
         volume: AtomicU32::new(0.8f32.to_bits()),
@@ -286,6 +346,7 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
         s.buf.lock().unwrap().clear();
         s.frames.store(0, Ordering::SeqCst);
         s.eof.store(false, Ordering::SeqCst);
+        s.past_end.store(false, Ordering::SeqCst);
         if let Some(sh) = s.shift.lock().unwrap().shifter.as_mut() {
             sh.reset();
         }
@@ -322,7 +383,7 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
         let token = current.as_ref().map(|c| c.2.clone()).unwrap_or_default();
         let ev = |state: &str, pos: f64, error: Option<String>, token: &str| PlayerEvent { state: state.into(), token: token.into(), pos, dur: dur.get(), error };
         match cmd {
-            Some(Cmd::Play { path, from, gain_db, duration, token, key }) => {
+            Some(Cmd::Play { path, from, gain_db, duration, token, key, shape }) => {
                 let Some(t) = tools.clone() else {
                     emit(ev("error", 0.0, Some("ffmpeg isn't available, so nothing can play.".into()), &token));
                     continue;
@@ -340,6 +401,11 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
                 while err_rx.try_recv().is_ok() {}
                 let rate = output.as_ref().unwrap().1;
                 set_key(&shared, key, rate, true);
+                // Not before the cut start: what's before it isn't on the stick.
+                let from = from.max(shape.start);
+                *shared.shape.lock().unwrap() = shape;
+                shared.rate.store(rate, Ordering::SeqCst);
+                shared.base.store(from.to_bits(), Ordering::SeqCst);
                 base = from;
                 dur.set(duration);
                 current = Some((path.clone(), gain_db, token.clone()));
@@ -365,7 +431,9 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
             Some(Cmd::Seek(to)) => {
                 if let (Some((path, gain, tok)), Some(t), Some((_, rate))) = (current.clone(), tools.clone(), output.as_ref()) {
                     reset(&shared);
-                    base = to.clamp(0.0, dur.get().max(to));
+                    let start = shared.shape.lock().unwrap().start;
+                    base = to.max(start).clamp(0.0, dur.get().max(to));
+                    shared.base.store(base.to_bits(), Ordering::SeqCst);
                     spawn_decoder(t, shared.clone(), path, base, gain, *rate, err_tx.clone());
                     emit(ev(&state, base, None, &tok));
                 }
@@ -379,6 +447,10 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
             }
             Some(Cmd::Volume(v)) => shared.volume.store(v.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed),
             Some(Cmd::Key(key)) => set_key(&shared, key, rate, false),
+            Some(Cmd::Shape(sh)) => {
+                *shared.shape.lock().unwrap() = sh;
+                shared.past_end.store(false, Ordering::SeqCst);
+            }
             None => {
                 if let Ok(e) = err_rx.try_recv() {
                     shared.playing.store(false, Ordering::SeqCst);
@@ -388,7 +460,8 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
                     continue;
                 }
                 if state == "playing" && current.is_some() {
-                    if shared.eof.load(Ordering::SeqCst) && shared.buf.lock().unwrap().len() < 2 {
+                    let done = shared.past_end.load(Ordering::SeqCst) || (shared.eof.load(Ordering::SeqCst) && shared.buf.lock().unwrap().len() < 2);
+                    if done {
                         shared.playing.store(false, Ordering::SeqCst);
                         current = None;
                         state = "stopped".into();
@@ -410,6 +483,10 @@ mod key_tests {
         Shared {
             buf: Mutex::new(samples.into()),
             shift: Mutex::new(Shift::default()),
+            shape: Mutex::new(Shape::default()),
+            base: AtomicU64::new(0f64.to_bits()),
+            rate: AtomicU32::new(44100),
+            past_end: AtomicBool::new(false),
             playing: AtomicBool::new(true),
             frames: AtomicU64::new(0),
             volume: AtomicU32::new(1.0f32.to_bits()),
@@ -459,5 +536,25 @@ mod key_tests {
         let s = shared(t.clone());
         let a = drain(&s, 40);
         assert_eq!(&a[..], &t[..a.len()]);
+    }
+
+    #[test]
+    fn fades_follow_the_position_and_the_end_stops_it() {
+        // 4 s of a steady signal, fading in over 1 s and out over 1 s before a cut end at 3 s.
+        let s = shared(vec![0.5f32; 44100 * 2 * 4]);
+        *s.shape.lock().unwrap() = Shape { start: 0.0, end: 3.0, fade_in: 1.0, fade_out: 1.0 };
+        let a = drain(&s, 300); // 3.5 s
+        let at = |t: f64| a[(t * 44100.0) as usize * 2];
+        assert!(at(0.001) < 0.01, "starts silent");
+        assert!((at(0.5) - 0.25).abs() < 0.01, "half way in (0.5 x 0.5): {}", at(0.5));
+        assert!((at(1.5) - 0.5).abs() < 1e-6, "full between");
+        assert!((at(2.5) - 0.25).abs() < 0.01, "half way out: {}", at(2.5));
+        assert!(at(3.2) == 0.0 && s.past_end.load(Ordering::Relaxed), "past the cut end: silence, and the end is noticed");
+        // A seek (the decoder restarts at 2.5 s): the fade follows the new position.
+        let s = shared(vec![0.5f32; 44100 * 2]);
+        *s.shape.lock().unwrap() = Shape { start: 0.0, end: 3.0, fade_in: 1.0, fade_out: 1.0 };
+        s.base.store(2.5f64.to_bits(), Ordering::Relaxed);
+        let b = drain(&s, 1);
+        assert!((b[0] - 0.25).abs() < 0.01, "2.5 s in: half way out: {}", b[0]);
     }
 }

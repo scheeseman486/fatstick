@@ -84,6 +84,21 @@ GPL version 3 or later.
   player plays an entry in its key from then on. On the stick the track is
   rendered in its key at full quality (Signalsmith Stretch), like a cut
   track; the file itself is never changed.
+- **Fades.** Fade a track in at its start and out at its end, after any
+  cut: select it and press F, or "Fade in and out…" in its right-click menu.
+  Each end has its own slider (up to 30 s), drawn as the curve it makes (an
+  S curve, gentle at both ends of the fade), and a button to hear it: "Hear
+  the end" plays from a few seconds before the fade out. Moving a slider
+  changes what's playing as it plays. On the stick the fades are rendered
+  into the track, after any key shift; the file itself is never changed.
+- **Previews play in the main player.** The key and fade dialogs don't have
+  a player of their own: they change what the player at the bottom of the
+  window plays, and that player stays usable while they're open. Pause it,
+  or drag its position anywhere in the track: what you hear keeps the key
+  and fades you're trying. Cancel puts back what was there; Apply keeps it.
+  Outside the dialogs the player plays an entry as the stick will have it:
+  from its cut start to its cut end, in its key and with its fades (the
+  added silence is left out).
 - **Silence between playlists.** A stick's list can hold stretches of
   silence (30 s unless you change it) between its playlists. Each gets a
   folder of its own holding one silent MP3.
@@ -283,7 +298,8 @@ python3 tests/kernel_stick.py --kroot <kernel dir> --p2u target/x86_64-unknown-l
 from an empty library: it adds two folders of real audio (FLAC, Opus, WAV,
 MP3s at 320 kbps and at 22.05 kHz mono), turns on even volume, cuts and pads
 a track, shifts another 5 semitones up (changing its key live while it
-plays), joins the second playlist into one track and puts silence between
+plays), fades a third in and out (changing the fades live, and seeking, while
+it plays), joins the second playlist into one track and puts silence between
 the two, picks a disk image standing in for a stick, syncs through the button
 and its confirmation, opens the stick's layout window and plays a track. The second run checks that all of it
 was kept, that an edit makes the stick out of date, that the stick is
@@ -296,7 +312,8 @@ read with tools that aren't ours: fsck.fat, mtools (the order a player sees),
 ffprobe (codec, sample rate, tags, cover, lengths), and ffmpeg's EBU R128
 meter and volumedetect (−18 LUFS where the volume was evened out; silence
 where it was added), and the shifted track is measured: 550 Hz became 734 Hz,
-at the same length. ffprobe also reads back the tags the library wrote,
+at the same length. The faded track is silent at both ends and half as loud
+(−6 dB) at the middle of each fade, still 8 s long. ffprobe also reads back the tags the library wrote,
 including labels in an MP3 that another app had kept in TXXX:GROUPING.
 
 ## Status

@@ -337,10 +337,28 @@ struct PlayArgs {
     pitch: f64,
     #[serde(default = "yes")]
     keep_formants: bool,
+    /// The entry's cuts and fades (seconds): it plays from its cut start to
+    /// its cut end, faded (unless the prepared file plays, which has them).
+    #[serde(default)]
+    cut_start: f64,
+    #[serde(default)]
+    cut_end: f64,
+    #[serde(default)]
+    fade_in: f64,
+    #[serde(default)]
+    fade_out: f64,
 }
 
 fn yes() -> bool {
     true
+}
+
+fn shape_of(duration: f64, cut_start: f64, cut_end: f64, fade_in: f64, fade_out: f64) -> player::Shape {
+    let ok = |x: f64| if x.is_finite() && x > 0.0 { x } else { 0.0 };
+    let end = if ok(cut_end) > 0.0 && duration > 0.0 { (duration - ok(cut_end)).max(ok(cut_start)) } else { f64::INFINITY };
+    // A fade out needs to know where the end is: the file's length.
+    let end = if !end.is_finite() && ok(fade_out) > 0.0 && duration > 0.0 { duration } else { end };
+    player::Shape { start: ok(cut_start), end, fade_in: ok(fade_in), fade_out: ok(fade_out) }
 }
 
 fn key_of(pitch: f64, keep_formants: bool) -> Option<p2u_audio::stretch::Key> {
@@ -365,16 +383,23 @@ fn player_play(st: State<AppState>, args: PlayArgs) -> Res<Playing> {
         (PathBuf::from(&t.path), t.duration)
     };
     let cached = args.recipe.as_ref().and_then(|r| work::cached_for(&st.lib, &st.cache, &args.track_id, r));
-    let (path, gain, from, dur, key) = match cached {
+    let (path, gain, from, dur, key, shape) = match cached {
         // A prepared file can be longer or shorter than its source (cut, padded).
         Some(p) => {
             let d = p2u_audio::mp3::scan(&p).ok().flatten().map(|i| i.duration).unwrap_or(dur);
-            (p, 0.0, "cache", d, None)
+            (p, 0.0, "cache", d, None, player::Shape::default())
         }
-        None => (path, args.gain_db, "source", dur, key_of(args.pitch, args.keep_formants)),
+        None => (path, args.gain_db, "source", dur, key_of(args.pitch, args.keep_formants), shape_of(dur, args.cut_start, args.cut_end, args.fade_in, args.fade_out)),
     };
-    st.player.send(player::Cmd::Play { path, from: args.from, gain_db: gain, duration: dur, token: args.token, key });
+    st.player.send(player::Cmd::Play { path, from: args.from, gain_db: gain, duration: dur, token: args.token, key, shape });
     Ok(Playing { from: from.into() })
+}
+
+/// The fade sliders, live: other cuts and fades for what's playing. The
+/// window passes the track's length (the player has the source's).
+#[tauri::command]
+fn player_shape(st: State<AppState>, duration: f64, cut_start: f64, cut_end: f64, fade_in: f64, fade_out: f64) {
+    st.player.send(player::Cmd::Shape(shape_of(duration, cut_start, cut_end, fade_in, fade_out)));
 }
 
 /// The key slider, live: another key for what's playing (0 for its own).
@@ -589,6 +614,7 @@ fn main() {
             player_play,
             player_pause,
             player_key,
+            player_shape,
             player_resume,
             player_seek,
             player_stop,

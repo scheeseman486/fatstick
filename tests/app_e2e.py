@@ -197,6 +197,10 @@ def main():
         louds.append(float(m[-1]) if m else 0.0)
     # The first playlist evens out the volume (the padding's silence doesn't
     # count: the meter gates it out).
+    # The fourth track fades in and out, so it's measured between its fades.
+    r = subprocess.run(["ffmpeg", "-nostats", "-hide_banner", "-ss", "2.2", "-t", "2.6", "-i", probes[3][2], "-af", "ebur128", "-f", "null", "-"], capture_output=True, text=True)
+    m = re.findall(r"I:\s+(-?[\d.]+) LUFS", r.stderr)
+    louds[3] = float(m[-1]) if m else 0.0
     record("the first playlist's tracks measure -18 LUFS within 0.8 LU", all(abs(l + 18) <= 0.8 for l in louds[:4]), ", ".join(f"{l:.1f}" for l in louds[:4]))
 
     # Lengths and silences, measured with ffprobe and ffmpeg's volumedetect.
@@ -225,6 +229,13 @@ def main():
     second = probes[1][2]
     f2, l2 = freq(second, 2, 4), length(second)
     record("the second track: 5 semitones up (550 Hz became 734 Hz), still 8 s", abs(f2 - 550 * 2 ** (5 / 12)) < 6 and abs(l2 - 8.0) < 0.12, f"{f2:.1f} Hz, {l2:.2f} s")
+    fourth = probes[3][2]
+    full, l4 = peak(fourth, 3.0, 1.0), length(fourth)
+    # The S curve is half way (-6 dB) at the middle of each fade: 1 s in, and 1.5 s before the end.
+    pin, pmid_in, pmid_out, pout = peak(fourth, 0, 0.15), peak(fourth, 0.95, 0.1), peak(fourth, 6.45, 0.1), peak(fourth, 7.85)
+    record("the fourth track fades in over 2 s and out over 3 s, still 8 s",
+           abs(l4 - 8.0) < 0.12 and pin < full - 18 and abs(pmid_in - (full - 6)) < 1.5 and abs(pmid_out - (full - 6)) < 1.5 and pout < full - 18,
+           f"{l4:.2f} s; {pin:.0f}, {pmid_in:.1f}, {full:.1f}, {pmid_out:.1f}, {pout:.0f} dB")
     record("the joined track takes the playlist's name and the shared artist", probes[5][4].get("album") == "Live" and probes[5][4].get("artist") == "Live Band", str(probes[5][4]))
 
     run_app("phase 2", "app_selftest2.js", cfg, env)

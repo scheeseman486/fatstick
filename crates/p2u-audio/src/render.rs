@@ -2,8 +2,8 @@
 //!
 //! Each part is a track's audio, cut at either end, shifted to another key
 //! (pitch without tempo, by Signalsmith Stretch, the whole track at once and
-//! the same length out) and with a gain, with silence before and after it;
-//! or silence alone. The parts are decoded to
+//! the same length out), faded in and out and with a gain, with silence
+//! before and after it; or silence alone. The parts are decoded to
 //! 32-bit float stereo PCM one after another and streamed, as one WAV stream,
 //! into a single LAME encode. That covers a track cut or padded at its ends,
 //! a stretch of silence between playlists, and a whole playlist joined into
@@ -49,6 +49,18 @@ pub struct RenderPart {
     /// When shifting: voices keep their natural character (formants).
     #[serde(default = "yes")]
     pub keep_formants: bool,
+    /// Seconds of fade in at the start and fade out at the end (after the cuts).
+    #[serde(default)]
+    pub fade_in: f64,
+    #[serde(default)]
+    pub fade_out: f64,
+}
+
+/// The fade curve: gain from 0 to 1 as `x` goes from 0 to 1, an S (half a
+/// cosine), so a fade starts and ends without a corner. The player's live
+/// fades use it too.
+pub fn fade_curve(x: f64) -> f64 {
+    0.5 - 0.5 * (std::f64::consts::PI * x.clamp(0.0, 1.0)).cos()
 }
 
 fn yes() -> bool {
@@ -89,6 +101,9 @@ impl RenderSpec {
             if p.pitch != 0.0 {
                 s.push_str(&format!(":key{:+.2}{}:ss1.3.1", p.pitch, if p.keep_formants { "f" } else { "" }));
             }
+            if p.fade_in > 0.0 || p.fade_out > 0.0 {
+                s.push_str(&format!(":fade{:.3}/{:.3}", p.fade_in, p.fade_out));
+            }
         }
         s
     }
@@ -107,6 +122,9 @@ impl RenderSpec {
             }
             if p.track_id.is_some() && s.is_none() {
                 return Err(AudioError::Invalid("a part's track has no source".into()));
+            }
+            if [p.fade_in, p.fade_out].iter().any(|x| !x.is_finite() || *x < 0.0 || *x > 600.0) {
+                return Err(AudioError::Invalid("fades are seconds from 0 to 600".into()));
             }
             if !p.pitch.is_finite() || p.pitch.abs() > 24.0 {
                 return Err(AudioError::Invalid("a key shift is up to 24 semitones either way".into()));
@@ -154,14 +172,83 @@ fn silence(out: &mut impl Write, n_frames: usize) -> std::io::Result<()> {
 /// back and dropped at the end, so the cut is exact whatever the file's
 /// stated length.
 fn track_audio(tools: &Tools, out: &mut impl Write, path: &Path, p: &RenderPart, rate: u32) -> Result<()> {
+    let mut faded = Faded::new(out, p.fade_in, p.fade_out, rate);
     if p.pitch != 0.0 {
         // The cut track through the shifter, a block at a time (the same as
         // shifting it whole, in constant memory), the same length out.
-        let mut sink = Shifted { out, st: Some(crate::stretch::ExactStream::new(2, rate, crate::stretch::Key { semitones: p.pitch as f32, keep_formants: p.keep_formants })), carry: Vec::new(), buf: Vec::new() };
+        let mut sink = Shifted { out: &mut faded, st: Some(crate::stretch::ExactStream::new(2, rate, crate::stretch::Key { semitones: p.pitch as f32, keep_formants: p.keep_formants })), carry: Vec::new(), buf: Vec::new() };
         cut_audio(tools, &mut sink, path, p, rate)?;
-        return sink.finish();
+        sink.finish()?;
+    } else {
+        cut_audio(tools, &mut faded, path, p, rate)?;
     }
-    cut_audio(tools, out, path, p, rate)
+    faded.finish()
+}
+
+/// A writer that fades the float stereo PCM going through it in at the start
+/// and out at the end, holding back the end until it knows where it is.
+struct Faded<'a, W: Write> {
+    out: &'a mut W,
+    fade_in: usize,
+    fade_out: usize,
+    /// Frames passed on so far.
+    at: usize,
+    carry: Vec<u8>,
+    /// The last frames, held back for the fade out.
+    held: std::collections::VecDeque<[f32; 2]>,
+}
+
+impl<'a, W: Write> Faded<'a, W> {
+    fn new(out: &'a mut W, fade_in: f64, fade_out: f64, rate: u32) -> Self {
+        Faded { out, fade_in: frames(fade_in, rate), fade_out: frames(fade_out, rate), at: 0, carry: Vec::new(), held: Default::default() }
+    }
+    fn send(&mut self, f: [f32; 2]) -> std::io::Result<()> {
+        let mut b = [0u8; 8];
+        b[..4].copy_from_slice(&f[0].to_le_bytes());
+        b[4..].copy_from_slice(&f[1].to_le_bytes());
+        self.out.write_all(&b)
+    }
+    fn finish(mut self) -> Result<()> {
+        let n = self.held.len();
+        for (j, f) in std::mem::take(&mut self.held).into_iter().enumerate() {
+            // Frames left to the end, this one included.
+            let g = fade_curve((n - j) as f64 / self.fade_out.max(1) as f64) as f32;
+            self.send([f[0] * g, f[1] * g])?;
+        }
+        Ok(())
+    }
+}
+
+impl<W: Write> Write for Faded<'_, W> {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        if self.fade_in == 0 && self.fade_out == 0 {
+            self.out.write_all(data)?;
+            return Ok(data.len());
+        }
+        self.carry.extend_from_slice(data);
+        let whole = self.carry.len() / FRAME * FRAME;
+        let mut bytes = Vec::with_capacity(whole);
+        for c in self.carry[..whole].chunks_exact(FRAME) {
+            let mut f = [f32::from_le_bytes(c[..4].try_into().unwrap()), f32::from_le_bytes(c[4..].try_into().unwrap())];
+            if self.at < self.fade_in {
+                let g = fade_curve(self.at as f64 / self.fade_in as f64) as f32;
+                f = [f[0] * g, f[1] * g];
+            }
+            self.at += 1;
+            self.held.push_back(f);
+            if self.held.len() > self.fade_out {
+                let o = self.held.pop_front().unwrap();
+                bytes.extend_from_slice(&o[0].to_le_bytes());
+                bytes.extend_from_slice(&o[1].to_le_bytes());
+            }
+        }
+        self.carry.drain(..whole);
+        self.out.write_all(&bytes)?;
+        Ok(data.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.out.flush()
+    }
 }
 
 /// The track's audio, cut and with its gain.
