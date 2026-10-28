@@ -34,7 +34,7 @@ fn read_back(img: &Path) -> Vec<(String, String, Vec<u8>)> {
     }
     let cb = vol.geometry().cluster_bytes();
     for (dir, listing) in dirs {
-        for g in listing.groups.iter().filter(|g| g.kind == EntryKind::File) {
+        for g in listing.groups.iter().filter(|g| g.kind == EntryKind::File && !g.is_hidden()) {
             let mut data = Vec::new();
             if g.first_cluster >= 2 {
                 for c in vol.cluster_chain(g.first_cluster).unwrap() {
@@ -117,6 +117,10 @@ fn sync_to_a_disk_image() {
         ],
         verify: true,
         record: serde_json::json!({ "content": [["a"], ["b"]] }),
+        note: serde_json::json!({
+            "profile": { "id": "prof-generic", "name": "Generic" },
+            "playlists": [{ "id": "pl-road", "name": "Road Trip", "tracks": 4 }, { "id": "pl-kids", "name": "Kids' car", "tracks": 1 }],
+        }),
     };
     let stages = Mutex::new(Vec::<String>::new());
     let progress = |p: SyncProgress| {
@@ -131,6 +135,18 @@ fn sync_to_a_disk_image() {
     assert_eq!(*stages.lock().unwrap(), ["prepare", "tags", "check", "erase", "write", "verify"]);
     assert_eq!(r.record.as_ref().unwrap()["files"], 5);
     assert_eq!(lib.lock().unwrap().last_syncs().unwrap().len(), 1);
+
+    // The note on the stick: which stick (set) of which library it holds, read
+    // back by the stick list along with the volume serial the record kept.
+    let view = crate::sticks::list().0.into_iter().find(|v| v.image).unwrap();
+    let note = view.note.as_ref().expect("a note on the stick");
+    assert_eq!(note["setId"], "set-car");
+    assert_eq!(note["setName"], "Car stick");
+    assert_eq!(note["libraryId"], lib.lock().unwrap().library_id().unwrap().as_str());
+    assert_eq!(note["playlists"][1]["name"], "Kids' car");
+    assert_eq!(note["profile"]["name"], "Generic");
+    assert_eq!(view.serials, [r.record.as_ref().unwrap()["volumeSerial"].as_str().unwrap()]);
+    assert!(view.volumes[0].ends_with("2 folders"), "the note isn't counted: {:?}", view.volumes);
 
     // Read it back: folders and files in stick order, as planned.
     let files = read_back(&img);

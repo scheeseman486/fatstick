@@ -174,10 +174,11 @@
   // ---- dialog -------------------------------------------------------------------------
   let modalReturn = null;
   let modalOnClose = null;
-  function modal({ title, body, buttons, wide, onClose }) {
+  /** `tall` keeps the dialog one size whatever it shows (tabs). */
+  function modal({ title, body, buttons, wide, tall, onClose }) {
     const back = document.getElementById("modal-back");
     const m = document.getElementById("modal");
-    m.className = wide ? "modal wide" : "modal";
+    m.className = `modal${wide ? " wide" : ""}${tall ? " tall" : ""}`;
     m.replaceChildren(
       h("h2", { id: "modal-title", text: title }),
       h("div", { class: "mbody" }, body),

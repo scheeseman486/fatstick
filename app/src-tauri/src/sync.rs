@@ -91,6 +91,10 @@ pub struct SyncPlan {
     /// The window's record of what this sync holds, stored as is.
     #[serde(default)]
     pub record: serde_json::Value,
+    /// What the window says about the stick for its note on the stick:
+    /// `{ profile: {id, name}, playlists: [{id, name, tracks}] }`.
+    #[serde(default)]
+    pub note: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -273,7 +277,7 @@ pub fn run(
         }
     };
     let mut offset = 0u64;
-    let mut content = StickContent { folders: Vec::new(), label: plan.label.clone() };
+    let mut content = StickContent { folders: Vec::new(), label: plan.label.clone(), hidden: Vec::new() };
     let mut k = 0;
     let p = &plan.profile;
     for folder in &plan.folders {
@@ -333,6 +337,28 @@ pub fn run(
         cleanup();
         return SyncResult { cancelled: true, error: Some("Cancelled. Nothing was written; the stick is as it was.".into()), ..Default::default() };
     }
+
+    // The note on the stick: which stick (set) of which library it holds, so
+    // it is recognized when it's plugged in again.
+    let library_id = lib.lock().unwrap().library_id().unwrap_or_default();
+    let note = serde_json::json!({
+        "app": "Playlist2USB",
+        "format": 1,
+        "version": env!("CARGO_PKG_VERSION"),
+        "libraryId": library_id,
+        "setId": plan.set_id,
+        "setName": plan.set_name,
+        "profile": plan.note.get("profile").cloned().unwrap_or_default(),
+        "playlists": plan.note.get("playlists").cloned().unwrap_or_default(),
+        "files": n,
+        "syncedAt": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0),
+    });
+    let note_path = scratch.join("note.json");
+    if std::fs::write(&note_path, serde_json::to_vec_pretty(&note).unwrap_or_default()).is_err() {
+        cleanup();
+        return SyncResult::fail("Couldn't write the stick's note. Nothing was written.");
+    }
+    content.hidden.push(WriteItem::file(&note_path, sticks::NOTE_NAME));
 
     // 3. The exact layout, before the stick is touched.
     let size = match &target {
@@ -434,6 +460,9 @@ pub fn run(
         record["files"] = res.files.into();
         record["bytes"] = res.bytes.into();
         record["label"] = exact.format.label.trim_end().into();
+        if let Some(r) = res.outcome.as_ref().and_then(|o| o.result.as_ref()) {
+            record["volumeSerial"] = sticks::serial_text(r.plan.format.serial).into();
+        }
         let _ = lib.lock().unwrap().add_sync(&plan.set_id, &record);
         res.record = Some(record);
     }

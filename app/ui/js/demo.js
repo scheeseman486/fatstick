@@ -1,6 +1,7 @@
-// Demo data for the prototype: a small library, four playlists, three
-// profiles, two sticks to sync and three USB sticks. Tags and lengths are
-// real; paths, sizes and loudness figures are made up but plausible.
+// Demo data for the window in a browser: a small library, four playlists,
+// three profiles, two sticks to sync and four USB sticks, two of them written
+// by Playlist2USB. Tags and lengths are real; paths, sizes and loudness
+// figures are made up but plausible.
 "use strict";
 (function (P2U) {
   const KBPS = { flac16: 880, flac24: 2900, alac: 860, wav: 1411 };
@@ -149,6 +150,13 @@
     {
       id: "dev-sandisk", device: "/dev/sdb", name: "SanDisk Cruzer Blade", size_bytes: 15_631_122_432, bus: "usb",
       volumes: [{ label: "CAR", fs_type: "vfat", size_bytes: 15_630_073_856, summary: "2 folders, 31 files, 1.4 GB" }],
+      // The note the Car stick's last sync left on it.
+      note: {
+        app: "Playlist2USB", format: 1, libraryId: "lib-demo", setId: "set-car", setName: "Car stick",
+        profile: { id: "prof-generic", name: "Generic" },
+        playlists: [{ id: "p-road", name: "Road Trip", tracks: 19 }, { id: "p-kids", name: "Kids' car", tracks: 12 }],
+        files: 31, syncedAt: Date.now() - 3 * DAY,
+      },
     },
     {
       id: "dev-generic", device: "/dev/sdc", name: "Generic Flash Disk", size_bytes: 7_864_320_000, bus: "usb",
@@ -158,7 +166,18 @@
       id: "dev-kingston", device: "/dev/sdd", name: "Kingston DataTraveler Exodia", size_bytes: 30_943_995_904, bus: "usb",
       volumes: [{ label: "BACKUP", fs_type: "exfat", size_bytes: 30_942_947_328, summary: "Backups, 12.4 GB" }],
     },
+    {
+      id: "dev-verbatim", device: "/dev/sde", name: "Verbatim Store n Go", size_bytes: 7_747_397_632, bus: "usb",
+      volumes: [{ label: "DADS CAR", fs_type: "vfat", size_bytes: 7_746_349_056, summary: "1 folder, 40 files, 310 MB" }],
+      // Set up by Playlist2USB on someone else's computer.
+      note: {
+        app: "Playlist2USB", format: 1, libraryId: "lib-elsewhere", setId: "set-dad", setName: "Dad's car",
+        profile: { id: "prof-x", name: "Car stereo, 256 kbps" },
+        playlists: [{ id: "p-x", name: "Road songs", tracks: 40 }],
+        files: 40, syncedAt: Date.now() - 41 * DAY,
+      },
+    },
   ];
 
-  P2U.demo = { tracks, playlists, profiles, stickSets, sticks, nextEntry: () => `e${++n}` };
+  P2U.demo = { tracks, playlists, profiles, stickSets, sticks, libraryId: "lib-demo", nextEntry: () => `e${++n}` };
 })(window.P2U = window.P2U || {});

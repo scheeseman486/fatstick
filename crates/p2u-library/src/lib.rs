@@ -372,6 +372,25 @@ impl Library {
         Ok(self.conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional()?)
     }
 
+    /// This library's own id, made the first time it's asked for. Sticks
+    /// carry it, so a stick set up by another library isn't taken for one of
+    /// this library's.
+    pub fn library_id(&self) -> Result<String> {
+        if let Some(id) = self.setting("libraryId")? {
+            return Ok(id);
+        }
+        use std::hash::{BuildHasher, Hasher};
+        let word = |salt: u64| {
+            let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+            h.write_u64(salt);
+            h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+            h.finish()
+        };
+        let id = format!("lib-{:016x}{:016x}", word(1), word(std::process::id() as u64));
+        self.set_setting("libraryId", &id)?;
+        Ok(id)
+    }
+
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)", params![key, value])?;
         Ok(())

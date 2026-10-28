@@ -88,6 +88,8 @@
     check("the sync finished", !!done && /^Synced\./.test(done.textContent), done ? done.textContent : `timed out: ${($(".sync-msg") || {}).textContent}`);
     check("progress went through the write stage", sawWrite, [...stages].join(","));
     check("the stick is up to date afterwards", A.staleness(A.planSet(A.stickSet())).current);
+    const known = await until(() => { const hd = A.holder(S.sticks.find((d) => d.image)); return hd && hd.set && hd.set.id === set.id; }, 10000);
+    check("the stick now carries a note naming this stick (set)", !!known);
     lines.push(`INFO names=${JSON.stringify(A.planSet(A.stickSet()).folders.map((f) => [f.folder, f.present.map((it) => it.name)]))}`);
 
     // The player (a silent output in the test): the position moves, then stop.

@@ -60,6 +60,10 @@ pub struct StickVolume {
     pub fs_type: String,
     pub mount_point: Option<PathBuf>,
     pub size_bytes: u64,
+    /// The volume serial number as the OS shows it ("1A2B-3C4D" for FAT),
+    /// where the OS reports it without mounting; empty otherwise.
+    #[serde(default)]
+    pub serial: String,
 }
 
 /// A removable USB or SD disk.

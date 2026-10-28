@@ -24,6 +24,11 @@ GPL version 3 or later.
   file names. A Generic profile is built in; make your own for a particular
   player. The window shows what is on the stick now, what the next sync would
   write, and whether it fits.
+- **Sticks that remember.** Every sync leaves a small hidden note on the stick
+  saying which of your sticks it is, with its profile and playlists. Plug it in
+  again and the app recognizes it, selects it and marks it "plugged in". Syncing
+  a different stick's playlists onto it asks you to confirm first; so does a
+  stick set up on another computer.
 - **Copy or convert.** An MP3 the player can take is copied as it is.
   Everything else (FLAC, ALAC, WAV, AIFF, AAC, Ogg Vorbis, Opus, WMA, WavPack,
   APE, and MP3s over the cap or at odd sample rates) is encoded with LAME to
@@ -48,11 +53,12 @@ FAT32 file system itself:
 - one MBR partition (type 0x0C, FAT32 LBA) from 1 MiB to the end of the stick,
   cluster size from the table in Microsoft's FAT specification, first cluster
   aligned to 4 MiB (1 MiB on sticks under 2 GiB);
-- at the top level only the volume label and the playlist folders, in stick
-  order (or one playlist's tracks themselves);
+- at the top level the volume label, then the playlist folders in stick order
+  (or one playlist's tracks themselves), then the hidden note
+  `.playlist2usb.json`;
 - in each folder, `.` and `..`, then one entry per track in playlist order;
 - every track's data in one unbroken run of clusters, back to back in stick
-  order, straight after the folder tables;
+  order, straight after the folder tables, with the note's data last;
 - names numbered and modification times spaced 2 s apart, so players that
   sort by name or date agree.
 
@@ -88,11 +94,19 @@ before you unplug it.
 | Windows | `p2u-helper.exe` (UAC) locks + dismounts every volume, opens `\\.\PhysicalDriveN` | UAC; Windows Hello when configured |
 
 Only USB and SD disks are listed, and the disk the system runs from is refused
-on all three. A stick is remembered by its device, model and size: another
-stick plugged in at the same place is not taken for it, and the confirmation
-names the stick and what is on it now. The app never runs as root/admin. No in-app biometric check is
+on all three. The app never runs as root/admin. No in-app biometric check is
 used: those APIs only return yes/no and cannot grant privileges; the OS prompt
 is what accepts the fingerprint.
+
+Recognizing a stick needs no password: the note is a normal file, read from
+wherever the OS mounted the stick. It names the library that wrote it (a random
+id kept in the library), the stick's id and name, its profile and playlists,
+and when it was synced. Players skip it, as it isn't audio. A stick the OS
+hasn't mounted is recognized on Linux by its volume serial number, which the
+library records at each sync. A stick without a note is remembered by its
+device, model and size, so another stick plugged in at the same place isn't
+taken for it, and the confirmation always names the stick and what is on it
+now.
 
 ## Where things are kept
 
@@ -198,7 +212,9 @@ from an empty library: it adds two folders of real audio (FLAC, Opus, WAV,
 MP3s at 320 kbps and at 22.05 kHz mono), turns on even volume, puts both
 playlists on a disk image standing in for a stick, syncs through the button
 and its confirmation, and plays a track. The second run checks that all of it
-was kept, and that an edit makes the stick out of date. Then the image is
+was kept, that an edit makes the stick out of date, that the stick is
+recognized from its note, and that syncing another stick's playlists onto it
+asks first. Then the image is
 read with tools that aren't ours: fsck.fat, mtools (the order a player sees),
 ffprobe (codec, sample rate, tags, cover) and ffmpeg's EBU R128 meter (−18 LUFS
 where the volume was evened out).

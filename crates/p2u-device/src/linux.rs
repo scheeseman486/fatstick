@@ -130,6 +130,7 @@ fn find_sticks(objs: &Objects) -> Vec<Found> {
                     fs_type,
                     mount_point: mps.into_iter().next(),
                     size_bytes: prop(b2, "Size").unwrap_or(0),
+                    serial: prop::<String>(b2, "IdUUID").unwrap_or_default().to_uppercase(),
                 });
             }
         }
@@ -334,7 +335,7 @@ fn list_from_sysfs() -> Result<Vec<StickInfo>> {
         let volumes = ms
             .iter()
             .filter(|(d, _, _)| nodes.contains(d))
-            .map(|(_, mp, t)| StickVolume { label: String::new(), fs_type: t.clone(), mount_point: Some(mp.clone()), size_bytes: 0 })
+            .map(|(_, mp, t)| StickVolume { label: String::new(), fs_type: t.clone(), mount_point: Some(mp.clone()), size_bytes: 0, serial: String::new() })
             .collect();
         out.push(StickInfo {
             id: device.clone(),

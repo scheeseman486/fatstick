@@ -95,6 +95,7 @@ pub fn list_sticks() -> Result<Vec<StickInfo>> {
                 fs_type: content,
                 mount_point: if mp.is_empty() { None } else { Some(PathBuf::from(mp)) },
                 size_bytes: u(&p, "Size"),
+                serial: String::new(),
             });
         }
         out.push(StickInfo {

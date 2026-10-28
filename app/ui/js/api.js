@@ -76,7 +76,7 @@
     const ev = bus();
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const tracks = new Map(D.tracks.map((t) => [t.id, t]));
-    const sticks = D.sticks.map((s) => ({ id: s.id, device: s.device, name: s.name, sizeBytes: s.size_bytes, bus: s.bus, volumes: s.volumes.map((v) => v.summary), image: false }));
+    const sticks = D.sticks.map((s) => ({ id: s.id, device: s.device, name: s.name, sizeBytes: s.size_bytes, bus: s.bus, volumes: s.volumes.map((v) => v.summary), image: false, note: s.note || null, serials: [] }));
     // Tracks the demo's car stick got at its last sync count as prepared already.
     const synced = new Set(D.stickSets.flatMap((s) => (s.lastSync ? s.lastSync.content.flat() : [])));
     const ready = new Set();
@@ -123,6 +123,7 @@
           cache: { files: 0, bytes: 0, dir: "" },
           dataDir: "",
           version: "demo",
+          libraryId: D.libraryId,
           openPaths: [],
         };
       },
@@ -206,6 +207,7 @@
         const dev = sticks.find((s) => s.id === plan.stickId);
         const label = P2U.names.volumeLabel(plan.label || plan.setName);
         if (dev) dev.volumes = [`${label || "no label"} (FAT32), ${plan.folders.length > 1 || plan.folders[0].name ? `${plan.folders.length} folder${plan.folders.length === 1 ? "" : "s"}, ` : ""}${files.length} files`];
+        if (dev) dev.note = { app: "Playlist2USB", format: 1, libraryId: D.libraryId, setId: plan.setId, setName: plan.setName, ...plan.note, files: files.length, syncedAt: Date.now() };
         const record = { ...plan.record, setId: plan.setId, at: Date.now(), stickId: plan.stickId, stickName: dev ? dev.name : "", files: files.length, bytes: total };
         return { ok: true, cancelled: false, erased: true, error: null, notes: ["Demo: nothing was written."], files: files.length, bytes: total, ejected: true, record };
       },

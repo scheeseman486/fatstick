@@ -9,6 +9,7 @@ use unicode_normalization::UnicodeNormalization;
 use super::dir::{sfn_checksum, ENTRY};
 use super::{FatError, Result};
 
+pub const ATTR_HIDDEN: u8 = 0x02;
 pub const ATTR_VOLUME_ID: u8 = 0x08;
 pub const ATTR_DIR: u8 = 0x10;
 pub const ATTR_ARCHIVE: u8 = 0x20;

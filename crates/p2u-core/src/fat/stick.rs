@@ -10,7 +10,10 @@
 //!   (FAT order);
 //! * the top-level table, then every folder's table, then every file's data
 //!   in one unbroken run of clusters, back to back in stick order, from
-//!   cluster 2.
+//!   cluster 2;
+//! * optionally, hidden files at the end of the top level, their data after
+//!   everything else: Playlist2USB's note of what the stick holds, so it can
+//!   recognize the stick later. Players skip them: they aren't audio.
 //!
 //! A file's bytes are assembled from parts, each a range of a file on disk:
 //! typically an ID3 tag, the prepared audio, and an optional ID3v1 tag. The
@@ -43,7 +46,7 @@ use serde::{Deserialize, Serialize};
 use super::dir::{parse_directory, ENTRY};
 use super::entries::{
     entry_group, normalize_name, sfn_entry, validate_name, volume_label, written_name, FatTimestamp, ATTR_ARCHIVE,
-    ATTR_DIR, ATTR_VOLUME_ID,
+    ATTR_DIR, ATTR_HIDDEN, ATTR_VOLUME_ID,
 };
 use super::{Device, DirRef, EntryKind, FatError, Result, Volume};
 
@@ -111,6 +114,11 @@ pub struct StickContent {
     /// Volume label; empty derives it from the first folder's name (or "PLAYLIST").
     #[serde(default)]
     pub label: String,
+    /// Hidden files at the end of the top level, written after everything
+    /// else (entries and data): the tracks keep their order and stay one
+    /// unbroken run.
+    #[serde(default)]
+    pub hidden: Vec<WriteItem>,
 }
 
 /// Options for the one-playlist case (the CLI's `write`).
@@ -128,7 +136,7 @@ pub struct StickOptions {
 impl StickContent {
     /// One playlist, in a folder or at the top level.
     pub fn single(items: Vec<WriteItem>, opts: &StickOptions) -> Self {
-        StickContent { folders: vec![StickFolder { name: opts.folder.clone(), items }], label: opts.label.clone() }
+        StickContent { folders: vec![StickFolder { name: opts.folder.clone(), items }], label: opts.label.clone(), hidden: Vec::new() }
     }
 }
 
@@ -274,6 +282,9 @@ pub struct StickPlan {
     pub format: Format,
     pub root_clusters: u32,
     pub folders: Vec<FolderPlace>,
+    /// The hidden files at the end of the top level.
+    #[serde(default)]
+    pub hidden: Vec<FilePlace>,
     /// Clusters used in total, all of them from cluster 2 up, without gaps.
     pub used_clusters: u32,
     pub total_bytes: u64,
@@ -305,11 +316,11 @@ impl StickPlan {
     pub fn free_clusters(&self) -> u32 {
         self.format.cluster_count - self.used_clusters
     }
-    /// Cluster runs in allocation order: root, folder tables, files.
+    /// Cluster runs in allocation order: root, folder tables, files, hidden files.
     fn runs(&self) -> Vec<(u32, u32)> {
         let mut r = vec![(2, self.root_clusters)];
         r.extend(self.folders.iter().filter(|f| f.clusters > 0).map(|f| (f.first_cluster, f.clusters)));
-        r.extend(self.files().filter(|f| f.clusters > 0).map(|f| (f.first_cluster, f.clusters)));
+        r.extend(self.files().chain(&self.hidden).filter(|f| f.clusters > 0).map(|f| (f.first_cluster, f.clusters)));
         r
     }
 
@@ -434,6 +445,23 @@ pub(crate) fn plan_content_at(disk_bytes: u64, sector_size: u32, content: &Stick
         }
         folders.push(FolderPlace { name: fname.clone(), first_cluster: 0, clusters: 0, files, table: Vec::new() });
     }
+    let mut hidden = Vec::with_capacity(content.hidden.len());
+    {
+        let mut seen: HashSet<String> = if top {
+            folders[0].files.iter().map(|f| normalize_name(&f.name)).collect()
+        } else {
+            folders.iter().map(|f| normalize_name(&f.name)).collect()
+        };
+        for it in &content.hidden {
+            let name = written_name(&it.name);
+            validate_name(&name)?;
+            if !seen.insert(normalize_name(&name)) {
+                return Err(FatError::Invalid(format!("{name:?} appears twice at the top level")));
+            }
+            let (parts, size) = place_parts(it)?;
+            hidden.push(FilePlace { name, short_name: String::new(), size, first_cluster: 0, clusters: size.div_ceil(cb) as u32, parts });
+        }
+    }
 
     // Table sizes: build the entries once with placeholder clusters to count slots.
     let ts0 = FatTimestamp::from_unix(now);
@@ -442,13 +470,15 @@ pub(crate) fn plan_content_at(disk_bytes: u64, sector_size: u32, content: &Stick
         names.iter().map(|n| entry_group(n, &mut taken, attr, 0, 0, ts0).0.len()).sum()
     };
     let clusters_for = |slots: usize| ((slots * ENTRY) as u64).div_ceil(cb).max(1) as u32;
-    let root_slots = if top {
-        let names: Vec<&str> = folders[0].files.iter().map(|f| f.name.as_str()).collect();
-        1 + count_slots(&names, ATTR_ARCHIVE)
-    } else {
-        let names: Vec<&str> = folders.iter().map(|f| f.name.as_str()).collect();
-        1 + count_slots(&names, ATTR_DIR)
-    };
+    let hidden_names: Vec<&str> = hidden.iter().map(|f| f.name.as_str()).collect();
+    let root_slots = count_slots(&hidden_names, ATTR_ARCHIVE | ATTR_HIDDEN)
+        + if top {
+            let names: Vec<&str> = folders[0].files.iter().map(|f| f.name.as_str()).collect();
+            1 + count_slots(&names, ATTR_ARCHIVE)
+        } else {
+            let names: Vec<&str> = folders.iter().map(|f| f.name.as_str()).collect();
+            1 + count_slots(&names, ATTR_DIR)
+        };
     if root_slots > MAX_DIR_SLOTS {
         return Err(FatError::Invalid("too many entries for the top level of the stick".into()));
     }
@@ -467,8 +497,8 @@ pub(crate) fn plan_content_at(disk_bytes: u64, sector_size: u32, content: &Stick
         }
     }
 
-    // Files back to back after the tables, in stick order.
-    for f in folders.iter_mut().flat_map(|f| f.files.iter_mut()) {
+    // Files back to back after the tables, in stick order; the hidden ones last.
+    for f in folders.iter_mut().flat_map(|f| f.files.iter_mut()).chain(hidden.iter_mut()) {
         if f.clusters > 0 {
             f.first_cluster = next;
             next += f.clusters;
@@ -495,6 +525,7 @@ pub(crate) fn plan_content_at(disk_bytes: u64, sector_size: u32, content: &Stick
     };
     let mut k = 0i64;
     let mut file_groups = Vec::with_capacity(folders.len());
+    let mut top_taken = HashSet::new();
     for f in &mut folders {
         let mut taken = HashSet::new();
         let mut entries = Vec::new();
@@ -505,19 +536,26 @@ pub(crate) fn plan_content_at(disk_bytes: u64, sector_size: u32, content: &Stick
             entries.extend(g);
         }
         file_groups.push(entries);
+        top_taken = taken;
     }
     let mut root: Vec<[u8; ENTRY]> = vec![sfn_entry(&format.label_bytes(), ATTR_VOLUME_ID, 0, 0, ts0)];
     if top {
         root.extend(file_groups.pop().unwrap_or_default());
     } else {
-        let mut taken = HashSet::new();
+        top_taken = HashSet::new();
+        let taken = &mut top_taken;
         for (i, (f, files)) in folders.iter_mut().zip(file_groups).enumerate() {
             let ts = FatTimestamp::from_unix(now + 2 * i as i64);
-            root.extend(entry_group(&f.name, &mut taken, ATTR_DIR, f.first_cluster, 0, ts).0);
+            root.extend(entry_group(&f.name, taken, ATTR_DIR, f.first_cluster, 0, ts).0);
             let mut entries = vec![sfn_entry(b".          ", ATTR_DIR, f.first_cluster, 0, ts), sfn_entry(b"..         ", ATTR_DIR, 0, 0, ts)];
             entries.extend(files);
             f.table = table(&entries, f.clusters);
         }
+    }
+    for file in &mut hidden {
+        let (g, sfn) = entry_group(&file.name, &mut top_taken, ATTR_ARCHIVE | ATTR_HIDDEN, file.first_cluster, file.size as u32, ts0);
+        file.short_name = String::from_utf8_lossy(&sfn).into_owned();
+        root.extend(g);
     }
     let total_bytes = folders.iter().flat_map(|f| f.files.iter()).map(|f| f.size).sum();
     Ok(StickPlan {
@@ -525,6 +563,7 @@ pub(crate) fn plan_content_at(disk_bytes: u64, sector_size: u32, content: &Stick
         format,
         root_clusters,
         folders,
+        hidden,
         used_clusters: used,
         total_bytes,
         created_unix: now,
@@ -818,6 +857,20 @@ pub fn write_stick<D: Device>(
             i += 1;
         }
     }
+    for fp in &plan.hidden {
+        let mut src = PartReader::new(&fp.parts);
+        let span = fp.clusters as u64 * cb;
+        let mut done = 0u64;
+        while done < span {
+            cancelled(cancel)?;
+            let n = (span - done).min(MIB) as usize;
+            let data_n = fp.size.saturating_sub(done).min(n as u64) as usize;
+            src.fill(&mut buf[..data_n])?;
+            buf[data_n..n].fill(0);
+            put(dev, f.cluster_offset(fp.first_cluster) + done, &buf[..n], &mut w)?;
+            done += n as u64;
+        }
+    }
     dev.sync_device()?;
     cancelled(cancel)?;
 
@@ -956,7 +1009,7 @@ pub fn verify_stick<D: Device>(
     if plan.top_level() {
         listings.push(root.clone());
     } else {
-        let top: Vec<&str> = root.groups.iter().filter(|g| g.kind != EntryKind::VolumeLabel).map(|g| g.name()).collect();
+        let top: Vec<&str> = root.groups.iter().filter(|g| g.kind != EntryKind::VolumeLabel && !g.is_hidden()).map(|g| g.name()).collect();
         let want: Vec<&str> = plan.folders.iter().map(|f| f.name.as_str()).collect();
         if top != want || root.orphan_lfn_slots != 0 || root.deleted_slots != 0 {
             order_ok = false;
@@ -968,7 +1021,7 @@ pub fn verify_stick<D: Device>(
         }
     }
     for (listing, folder) in listings.iter().zip(&plan.folders) {
-        let tracks: Vec<_> = listing.groups.iter().filter(|g| g.kind == EntryKind::File).collect();
+        let tracks: Vec<_> = listing.groups.iter().filter(|g| g.kind == EntryKind::File && !g.is_hidden()).collect();
         let names: Vec<&str> = tracks.iter().map(|g| g.name()).collect();
         let want: Vec<&str> = folder.files.iter().map(|f| f.name.as_str()).collect();
         if names != want || listing.orphan_lfn_slots != 0 || listing.deleted_slots != 0 {
@@ -985,6 +1038,24 @@ pub fn verify_stick<D: Device>(
                 layout_ok = false;
                 v.problems.push(format!("{}: not where it was planned", fp.name));
             }
+        }
+    }
+    // The hidden files: last at the top level, where they were planned.
+    let hid: Vec<_> = root.groups.iter().filter(|g| g.kind == EntryKind::File && g.is_hidden()).collect();
+    let hid_names: Vec<&str> = hid.iter().map(|g| g.name()).collect();
+    let want_hid: Vec<&str> = plan.hidden.iter().map(|f| f.name.as_str()).collect();
+    let last_hid = root.groups.iter().rposition(|g| !g.is_hidden() && g.kind != EntryKind::VolumeLabel);
+    let first_hid = root.groups.iter().position(|g| g.kind == EntryKind::File && g.is_hidden());
+    if hid_names != want_hid || matches!((last_hid, first_hid), (Some(a), Some(b)) if b < a) {
+        order_ok = false;
+        v.problems.push(format!("the hidden files at the top level are {hid_names:?}, expected {want_hid:?} after everything else"));
+    }
+    for (g, fp) in hid.iter().zip(&plan.hidden) {
+        let chain = if g.first_cluster >= 2 { vol.cluster_chain(g.first_cluster)? } else { vec![] };
+        let planned: Vec<u32> = (fp.first_cluster..fp.first_cluster + fp.clusters).collect();
+        if g.size as u64 != fp.size || chain != planned {
+            layout_ok = false;
+            v.problems.push(format!("{}: not where it was planned", fp.name));
         }
     }
     v.order_ok = order_ok;
@@ -1039,14 +1110,57 @@ pub fn verify_stick<D: Device>(
                 i += 1;
             }
         }
+        for fp in &plan.hidden {
+            let mut src = PartReader::new(&fp.parts);
+            let span = fp.clusters as u64 * cb;
+            let mut done = 0u64;
+            let mut same = true;
+            while done < span {
+                let n = (span - done).min(MIB) as usize;
+                let data_n = fp.size.saturating_sub(done).min(n as u64) as usize;
+                read_at(dev, f.cluster_offset(fp.first_cluster) + done, &mut buf[..n])?;
+                if src.fill(&mut src_buf[..data_n]).is_err() || buf[..data_n] != src_buf[..data_n] || buf[data_n..n].iter().any(|&b| b != 0) {
+                    same = false;
+                    break;
+                }
+                done += n as u64;
+            }
+            if !same {
+                v.data_mismatches.push(fp.name.clone());
+            }
+        }
     }
     Ok(v)
+}
+
+/// A file at the top level of a FAT32 stick or image, by name (case
+/// insensitive), if it's there and no larger than `max` bytes.
+pub fn read_top_level_file<D: Device>(dev: D, name: &str, max: u64) -> Result<Option<Vec<u8>>> {
+    let mut vol = Volume::open(dev)?;
+    let root = vol.list_dir(DirRef::Root)?;
+    let want = normalize_name(name);
+    let Some(g) = root.groups.iter().find(|g| g.kind == EntryKind::File && normalize_name(g.name()) == want) else {
+        return Ok(None);
+    };
+    if g.size as u64 > max {
+        return Ok(None);
+    }
+    if g.size == 0 {
+        return Ok(Some(Vec::new()));
+    }
+    let geo = vol.geometry().clone();
+    let cb = geo.cluster_bytes();
+    let extents: Vec<super::Extent> =
+        vol.cluster_chain(g.first_cluster)?.into_iter().map(|c| super::Extent { offset: geo.cluster_offset(c), len: cb }).collect();
+    let mut bytes = vol.read_extents(&extents)?;
+    bytes.truncate(g.size as usize);
+    Ok(Some(bytes))
 }
 
 /// The file names of each planned folder table, parsed back (tests and the dry run).
 pub fn planned_listing(plan: &StickPlan) -> Vec<Vec<String>> {
     let parse = |t: &[u8]| -> Vec<String> {
-        parse_directory(t, DirRef::Root).groups.iter().filter(|g| g.kind == EntryKind::File).map(|g| g.name().to_string()).collect()
+        parse_directory(t, DirRef::Root).groups.iter().filter(|g| g.kind == EntryKind::File && !g.is_hidden()).map(|g| g.name().to_string()).collect()
     };
     if plan.top_level() {
         vec![parse(&plan.root_table)]
@@ -1113,7 +1227,7 @@ mod tests {
 
     fn check_back_to_back(plan: &StickPlan) {
         let mut next = plan.first_data_cluster();
-        for fp in plan.files().filter(|f| f.clusters > 0) {
+        for fp in plan.files().chain(&plan.hidden).filter(|f| f.clusters > 0) {
             assert_eq!(fp.first_cluster, next);
             next += fp.clusters;
         }
@@ -1147,6 +1261,7 @@ mod tests {
                 StickFolder { name: "03 Sleep".into(), items: sources(dir.path(), "c", &[1]) },
             ],
             label: "Car".into(),
+            hidden: Vec::new(),
         };
         let size = 64 * MIB;
         let mut dev = Cursor::new(vec![0x5Au8; size as usize]);
@@ -1166,6 +1281,46 @@ mod tests {
         let root = vol.list_dir(DirRef::Root).unwrap();
         let names: Vec<_> = root.groups.iter().filter(|g| g.kind == EntryKind::Dir).map(|g| g.name().to_string()).collect();
         assert_eq!(names, ["01 Road Trip", "02 Kids' car", "03 Sleep"]);
+    }
+
+    #[test]
+    fn hidden_files_go_last_and_change_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let note = dir.path().join("note.json");
+        std::fs::write(&note, br#"{"stick":"Car"}"#).unwrap();
+        for layout in ["folders", "top"] {
+            let folders = if layout == "top" {
+                vec![StickFolder { name: String::new(), items: sources(dir.path(), "t", &[40_000, 3, 9000]) }]
+            } else {
+                vec![
+                    StickFolder { name: "01 Road Trip".into(), items: sources(dir.path(), "a", &[40_000, 3, 9000]) },
+                    StickFolder { name: "02 Kids' car".into(), items: sources(dir.path(), "b", &[700]) },
+                ]
+            };
+            let plain = StickContent { folders: folders.clone(), label: "Car".into(), hidden: Vec::new() };
+            let marked = StickContent { hidden: vec![WriteItem::file(&note, ".playlist2usb.json")], ..plain.clone() };
+            let size = 64 * MIB;
+            let a = plan_content_at(size, 512, &plain, 1_700_000_000, 0).unwrap();
+            let b = plan_content_at(size, 512, &marked, 1_700_000_000, 0).unwrap();
+            // The tracks keep their order, back to back; the note comes after them.
+            assert_eq!(planned_listing(&a), planned_listing(&b), "{layout}");
+            check_back_to_back(&b);
+            let last = b.files().map(|f| f.first_cluster + f.clusters).max().unwrap();
+            assert_eq!(b.hidden[0].first_cluster, last);
+            assert_eq!(b.hidden[0].short_name.trim(), "PLAYLI~1JSO");
+            let mut dev = Cursor::new(vec![0x5Au8; size as usize]);
+            write_stick(&mut dev, &b, &mut |_| {}, None).unwrap();
+            let v = verify_stick(&mut dev, &b, true, &mut |_| {}).unwrap();
+            assert!(v.ok(), "{layout}: {v:?}");
+            let back = read_top_level_file(&mut dev, ".PlayList2usb.json", 1 << 20).unwrap();
+            assert_eq!(back.as_deref(), Some(&br#"{"stick":"Car"}"#[..]));
+            assert_eq!(read_top_level_file(&mut dev, "nothing.json", 1 << 20).unwrap(), None);
+            // Hidden, and last at the top level.
+            let mut vol = Volume::open(&mut dev).unwrap();
+            let root = vol.list_dir(DirRef::Root).unwrap();
+            let last = root.groups.last().unwrap();
+            assert!(last.is_hidden() && last.name() == ".playlist2usb.json");
+        }
     }
 
     #[test]
@@ -1245,13 +1400,22 @@ mod tests {
         let mixed = StickContent {
             folders: vec![StickFolder { name: String::new(), items: a.clone() }, StickFolder { name: "B".into(), items: a.clone() }],
             label: String::new(),
+            hidden: Vec::new(),
         };
         assert!(plan_content(size, 512, &mixed).is_err());
         let twice = StickContent {
             folders: vec![StickFolder { name: "Same".into(), items: a.clone() }, StickFolder { name: "same".into(), items: a.clone() }],
             label: String::new(),
+            hidden: Vec::new(),
         };
         assert!(plan_content(size, 512, &twice).unwrap_err().to_string().contains("two folders"));
+        // A hidden file can't take a folder's name.
+        let clash = StickContent {
+            folders: vec![StickFolder { name: "Notes".into(), items: a.clone() }],
+            label: String::new(),
+            hidden: vec![WriteItem::file(&a[0].parts[0].path, "notes")],
+        };
+        assert!(plan_content(size, 512, &clash).unwrap_err().to_string().contains("twice at the top level"));
     }
 
     #[test]

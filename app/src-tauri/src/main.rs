@@ -3,6 +3,8 @@
 // measures, converts and caches audio, plays previews, and writes sticks.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(target_os = "linux")]
+mod graphics;
 mod player;
 mod sticks;
 mod sync;
@@ -60,6 +62,8 @@ struct InitView {
     cache: p2u_audio::cache::CacheStats,
     data_dir: String,
     version: String,
+    /// This library's id, which every stick it writes carries.
+    library_id: String,
     /// Files passed on the command line ("Open with").
     open_paths: Vec<String>,
 }
@@ -85,6 +89,7 @@ fn init(st: State<AppState>) -> Res<InitView> {
         cache: st.cache.stats(),
         data_dir: st.data_dir.display().to_string(),
         version: env!("CARGO_PKG_VERSION").into(),
+        library_id: lib.library_id().map_err(err)?,
         open_paths: std::env::args().skip(1).filter(|a| !a.starts_with('-') && Path::new(a).exists()).collect(),
     })
 }
@@ -402,6 +407,8 @@ fn selftest_script() -> Option<String> {
 }
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    graphics::apply();
     let data_dir = std::env::var_os("P2U_DATA_DIR").map(PathBuf::from).unwrap_or_else(p2u_library::default_dir);
     let cache_dir = std::env::var_os("P2U_CACHE_DIR").map(PathBuf::from).unwrap_or_else(Cache::default_dir);
     let lib = Library::open(&data_dir.join("library.db")).expect("opening the library database");

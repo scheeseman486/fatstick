@@ -109,7 +109,10 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   const gymAfter = await p.locator('[data-pl="p-gym"] .mt').textContent();
   check('Gym gains 2 tracks', gymBefore.startsWith('12') && gymAfter.startsWith('14'), `${gymBefore} -> ${gymAfter}`);
 
-  // 7. Name template: typing updates the preview and keeps focus.
+  // 7. File names, in the player profile: typing updates the list of names
+  // and keeps focus; the stick panel shows an example.
+  check('the stick panel shows an example name', /Files named like 01 /.test(await p.locator('.prof-names').textContent()));
+  await p.getByRole('button', { name: 'Edit…' }).click();
   await p.locator('#tpl').fill('{n} {title|filename}');
   await p.locator('#tpl').type(' x');
   const focused = await p.evaluate(() => document.activeElement.id);
@@ -121,6 +124,9 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   check('sync is blocked by a bad template', await p.locator('#sync-btn').isDisabled());
   await p.locator('.tpl-row select').selectOption({ label: '01 - Artist - Title' });
   check('preset restores a good template', !(await p.locator('#sync-btn').isDisabled()));
+  await p.screenshot({ path: `${out}/profile-names.png` });
+  await p.keyboard.press('Escape');
+  check('the stick panel follows', /Files named like 01 - /.test(await p.locator('.prof-names').textContent()));
 
   // 8. Volume popover: switching off hides the Gain column.
   check('gain column shown', (await p.locator('#list-cols .h-gain').count()) === 1);
@@ -144,12 +150,27 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   await p.screenshot({ path: `${out}/context.png` });
   await p.keyboard.press('Escape');
 
-  // 11. Profile editor and all-names dialogs.
+  // 11. Profile editor (in tabs) and all-names dialogs.
   await p.getByRole('button', { name: 'Edit…' }).click();
   await p.waitForTimeout(100);
+  const tabNames = await p.getByRole('tab').allTextContents();
+  check('the profile editor has three tabs', tabNames.join('|') === 'Files and folders|Audio|Tags and cover art', tabNames.join('|'));
+  check('it opens on the tab last used', (await p.getByRole('tab', { selected: true }).textContent()) === 'Files and folders' && await p.locator('#tpl').isVisible());
   await p.screenshot({ path: `${out}/profile.png` });
+  await p.getByRole('tab', { selected: true }).focus();
+  await p.keyboard.press('ArrowRight');
+  check('arrow keys move between tabs', (await p.getByRole('tab', { selected: true }).textContent()) === 'Audio'
+    && await p.getByText('256 kbps, for players that stumble on 320').isVisible() && !(await p.locator('#tpl').isVisible()));
+  await p.screenshot({ path: `${out}/profile-audio.png` });
+  await p.getByRole('tab', { name: 'Tags and cover art' }).click();
+  check('clicking a tab shows it', await p.getByText('ID3v2.3 (older players read it best)').isVisible());
+  await p.screenshot({ path: `${out}/profile-tags.png` });
   await p.keyboard.press('Escape');
-  await p.getByRole('button', { name: 'Show all' }).click();
+  await p.getByRole('button', { name: 'Edit…' }).click();
+  check('it opens on the tab last used', (await p.getByRole('tab', { selected: true }).textContent()) === 'Tags and cover art');
+  await p.getByRole('tab', { name: 'Files and folders' }).click();
+  await p.keyboard.press('Escape');
+  await p.getByRole('button', { name: 'List all' }).click();
   await p.screenshot({ path: `${out}/allnames.png` });
   await p.keyboard.press('Escape');
 
@@ -179,7 +200,26 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   await p.screenshot({ path: `${out}/playing.png` });
   await p.keyboard.press('Space');
 
-  // 13. Sync flow.
+  // 13. Sticks that remember what they hold: the Car stick's own stick is
+  // marked in the sidebar and in the stick list; another computer's stick is
+  // named; syncing the Gym clip onto the Car stick's stick needs a tick first.
+  check('the plugged-in stick is marked in the sidebar', /plugged in/.test(await p.locator('[data-set="set-car"] .flag').textContent()));
+  const holds = await p.locator('#stick .dev .dholds').allTextContents();
+  check('the stick list says what each stick holds',
+    holds.some(t => /^Holds this stick's playlists, synced 3 days ago/.test(t)) && holds.some(t => /^Holds Dad's car \(Road songs\), synced .* ago, set up on another computer\./.test(t)), holds.join(' / '));
+  await p.locator('[data-set="set-gym"]').click();
+  await p.locator('#stick .dev input[value="dev-sandisk"]').check();
+  check('picking another stick (set)\'s stick warns', /This stick holds Car stick \(Road Trip, Kids' car\).*Syncing Gym clip to it replaces that/.test(await p.locator('#holds-other').textContent()));
+  await p.locator('#sync-btn').click();
+  check('the confirmation asks before replacing it', /Car stick will need a stick of its own/.test(await p.locator('#replace-warning').textContent()) && await p.locator('#modal .btn.primary').isDisabled());
+  await p.locator('#replace-ok').check();
+  check('ticking the box allows it', !(await p.locator('#modal .btn.primary').isDisabled()));
+  await p.screenshot({ path: `${out}/replace.png` });
+  await p.keyboard.press('Escape');
+  await p.keyboard.press('Control+z');
+  await p.locator('[data-set="set-car"]').click();
+
+  // 14. Sync flow.
   await p.locator('#sync-btn').click();
   check('confirmation dialog', /Erase .* and sync/.test(await p.locator('#modal-title').textContent()));
   await p.screenshot({ path: `${out}/confirm.png` });

@@ -77,6 +77,33 @@
   const unknownTrack = (id) => ({ id, path: "", filename: "(a track the library lost)", title: "", artist: "", album: "", codec: "", exists: false, duration: 0, size: 0 });
   const track = (id) => S.tracks.get(id) || unknownTrack(id);
   const device = (id) => S.sticks.find((s) => s.id === id);
+  /** What a USB stick holds, going by the note its last sync left on it (or,
+   * for a stick the OS hasn't mounted, the volume serial that sync recorded):
+   * `{ set, note, ours }`, where `set` is this library's stick (set) on it,
+   * if it still has it. Null for a stick Playlist2USB didn't write. */
+  function holder(d) {
+    if (!d) return null;
+    if (d.note) {
+      const ours = d.note.libraryId === S.libraryId;
+      return { set: ours ? stickSet(d.note.setId) || null : null, note: d.note, ours };
+    }
+    for (const [setId, rec] of Object.entries(S.syncs)) {
+      if (rec.volumeSerial && (d.serials || []).includes(rec.volumeSerial)) return { set: stickSet(setId) || null, note: null, ours: true };
+    }
+    return null;
+  }
+  /** "Car stick (Road Trip, Kids' car), synced 3 days ago", from a note. */
+  function heldText(hd) {
+    const name = hd.set ? hd.set.name : hd.note ? hd.note.setName : "another stick";
+    const pls = hd.note && Array.isArray(hd.note.playlists) ? hd.note.playlists.map((x) => x.name).filter(Boolean) : [];
+    const at = hd.note && hd.note.syncedAt ? `, synced ${ago(hd.note.syncedAt)}` : "";
+    return `${name}${pls.length ? ` (${pls.join(", ")})` : ""}${at}`;
+  }
+  /** Where the holder came from, when it isn't one of this library's sticks. */
+  function heldElsewhere(hd) {
+    if (!hd || hd.set) return "";
+    return hd.ours ? ", which isn't in your list any more" : ", set up on another computer";
+  }
   /** The stick a set syncs to, if it's plugged in. Device names (sdb,
    * PhysicalDrive2, disk4) go to whatever is plugged in next, so a set also
    * remembers the stick's model and size: another stick in the same place
@@ -448,19 +475,17 @@
         oncontextmenu: (e) => { e.preventDefault(); playlistMenu(p, { x: e.clientX, y: e.clientY }); },
       }, h("span", { class: "nm", text: p.name }), h("span", { class: "mt", text: `${plural(p.entries.length, "track")}, ${length(dur)}` })));
     });
+    const plugged = new Set(S.sticks.map(holder).filter((x) => x && x.set).map((x) => x.set.id));
     const setItems = S.sets.map((s) => {
       const plan = planSet(s);
       const st = staleness(plan);
-      const flag = st.never ? h("span", { class: "flag ok", text: "not synced" }) : st.current ? null : h("span", { class: "flag", text: "out of date" });
+      const inNow = plugged.has(s.id);
+      const flag = inNow
+        ? h("span", { class: `flag plug${st.current ? "" : " out"}`, text: st.current ? "plugged in" : "plugged in, out of date" })
+        : st.never ? h("span", { class: "flag ok", text: "not synced" }) : st.current ? null : h("span", { class: "flag", text: "out of date" });
       return h("li", null, h("button", {
-        type: "button", class: `side-item${s.id === S.setId ? " current" : ""}`, dataset: { set: s.id },
-        onclick: () => {
-          if (S.setId === s.id) return;
-          S.setId = s.id;
-          saveSetting("currentSet", s.id);
-          if (!s.playlistIds.includes(S.current) && s.playlistIds[0]) openPlaylist(s.playlistIds[0]);
-          renderAll();
-        },
+        type: "button", class: `side-item${s.id === S.setId ? " current" : ""}${inNow ? " plugged" : ""}`, dataset: { set: s.id },
+        onclick: () => selectSet(s.id),
         ondblclick: () => startRename("set", s.id),
         oncontextmenu: (e) => { e.preventDefault(); setMenu(s, { x: e.clientX, y: e.clientY }); },
       }, h("span", { class: "nm", text: s.name }), flag,
@@ -477,6 +502,15 @@
           h("button", { type: "button", class: "btn quiet small icon", title: "New stick", "aria-label": "New stick", onclick: newSet }, icon("plus"))),
         h("ul", null, setItems)),
     );
+  }
+
+  function selectSet(id) {
+    const s = stickSet(id);
+    if (!s || S.setId === id) return;
+    S.setId = id;
+    saveSetting("currentSet", id);
+    if (!s.playlistIds.includes(S.current) && s.playlistIds[0]) openPlaylist(s.playlistIds[0]);
+    renderAll();
   }
 
   function startRename(kind, id) {
@@ -755,79 +789,31 @@
     ST.head = h("section", { class: "st-sec" });
     ST.folders = h("section", { class: "st-sec", "aria-label": "Playlists on this stick" });
     ST.profile = h("section", { class: "st-sec" });
-    ST.names = h("section", { class: "st-sec" });
     ST.device = h("section", { class: "st-sec" });
     ST.space = h("section", { class: "st-sec" });
     ST.sync = h("div", { class: "sync" });
-    // File names: built once, so the template field keeps focus while typing.
-    ST.tpl = h("input", { class: "input mono", id: "tpl", spellcheck: "false", autocomplete: "off", "aria-label": "File name template", "aria-describedby": "tpl-help" });
-    ST.tpl.addEventListener("input", () => {
-      const pr = currentProfile();
-      if (!pr) return;
-      pr.fileTemplate = ST.tpl.value;
-      renderAfterProfile(true);
-    });
-    ST.presets = h("select", { class: "input", "aria-label": "Name presets" },
-      h("option", { value: "", text: "Presets" }), PRESETS.map((p) => h("option", { value: p.tpl, text: p.label })));
-    ST.presets.addEventListener("change", () => {
-      if (!ST.presets.value) return;
-      ST.tpl.value = ST.presets.value;
-      ST.presets.value = "";
-      ST.tpl.dispatchEvent(new Event("input"));
-    });
-    const tokens = h("div", { class: "tokens", "aria-label": "Insert a field" },
-      ["{n}", "{artist}", "{title}", "{album}", "{track}", "{year}", "{filename}", "[{artist} - ]", "{title|filename}"].map((tok) =>
-        h("button", { type: "button", text: tok, title: `Insert ${tok}`, onclick: () => insertToken(tok) })));
-    ST.ascii = h("input", { type: "checkbox", id: "opt-ascii" });
-    ST.ascii.addEventListener("change", () => { currentProfile().ascii = ST.ascii.checked; renderAfterProfile(); });
-    ST.maxLen = h("select", { class: "input", id: "opt-maxlen", "aria-label": "Longest name" },
-      [["0", "No length limit"], ["64", "At most 64 characters"], ["48", "At most 48 characters"], ["32", "At most 32 characters"]].map(([v, l]) => h("option", { value: v, text: l })));
-    ST.maxLen.addEventListener("change", () => { currentProfile().maxLen = Number(ST.maxLen.value); renderAfterProfile(); });
-    ST.tplMsg = h("p", { class: "st-note", id: "tpl-help" });
-    ST.preview = h("div", { class: "preview" });
-    ST.names.append(
-      h("h3", null, "File names", h("span", { class: "aside", id: "names-profile" })),
-      h("div", { class: "tpl-row" }, ST.tpl, ST.presets),
-      tokens,
-      h("div", { class: "name-opts" }, h("label", { class: "check" }, ST.ascii, h("span", { text: "Plain ASCII" })), ST.maxLen),
-      ST.tplMsg,
-      ST.preview,
-    );
-    root.replaceChildren(h("div", { class: "st-scroll" }, ST.head, ST.folders, ST.profile, ST.names, ST.device, ST.space), ST.sync);
+    root.replaceChildren(h("div", { class: "st-scroll" }, ST.head, ST.device, ST.folders, ST.profile, ST.space), ST.sync);
   }
-  const currentProfile = () => (stickSet() ? prof(stickSet().profileId) : null);
-  function insertToken(tok) {
-    const el = ST.tpl;
-    const a = el.selectionStart ?? el.value.length;
-    const b = el.selectionEnd ?? el.value.length;
-    el.value = el.value.slice(0, a) + tok + el.value.slice(b);
-    el.focus();
-    el.setSelectionRange(a + tok.length, a + tok.length);
-    el.dispatchEvent(new Event("input"));
-  }
-  function renderAfterProfile(fromTemplate) {
+  function renderAfterProfile() {
     renderList();
-    renderStick(fromTemplate);
+    renderStick();
     renderSide();
     renderDisplay();
     changed();
   }
 
-  function renderStick(fromTemplate) {
+  function renderStick() {
     const s = stickSet();
     if (!s) {
       for (const k of ["head", "folders", "profile", "device", "space"]) ST[k].replaceChildren();
       ST.head.append(h("p", { class: "st-note", text: "Make a stick to choose what goes on it." }), h("button", { type: "button", class: "btn", text: "New stick", onclick: newSet }));
-      ST.names.hidden = true;
       fill(ST.sync, );
       return;
     }
-    ST.names.hidden = false;
     const plan = planSet(s);
     renderStickHead(plan);
     renderFolders(plan);
     renderProfileSec(plan);
-    renderNames(plan, fromTemplate);
     renderDevices(plan);
     renderSpace(plan);
     renderSyncBar(plan);
@@ -913,51 +899,23 @@
     const sel = h("select", { class: "input", id: "profile-select", "aria-label": "Player profile" },
       S.profiles.map((p) => h("option", { value: p.id, text: p.name, selected: p.id === s.profileId })));
     sel.addEventListener("change", () => edit(`Use ${prof(sel.value).name} for ${s.name}`, () => { s.profileId = sel.value; }));
-    fill(ST.profile, 
-      h("h3", { text: "Player profile" }),
-      h("div", { class: "prof-row" }, sel, h("button", { type: "button", class: "btn", text: "Edit…", onclick: () => profileEditor(s.profileId) })),
-      h("p", { class: "prof-sum", text: profileSummary(plan.profile) }),
-    );
-  }
-
-  function renderNames(plan, fromTemplate) {
-    const pr = plan.profile;
-    if (!fromTemplate && document.activeElement !== ST.tpl) ST.tpl.value = pr.fileTemplate;
-    ST.ascii.checked = pr.ascii;
-    ST.maxLen.value = String(pr.maxLen || 0);
-    $("names-profile").textContent = `in ${pr.name}`;
-    const errs = plan.errors;
-    ST.tpl.classList.toggle("bad", errs.length > 0);
-    ST.tpl.setAttribute("aria-invalid", String(errs.length > 0));
-    if (errs.length) {
-      ST.tplMsg.className = "st-note err";
-      ST.tplMsg.textContent = errs.join(" ");
-    } else if (!plan.numbered) {
-      ST.tplMsg.className = "st-note warn";
-      ST.tplMsg.textContent = "No {n}: a player that sorts by name would play these in alphabetical order.";
-    } else {
-      ST.tplMsg.className = "st-note";
-      ST.tplMsg.textContent = `Every stick with the ${pr.name} profile uses these names. The .mp3 is added for you.`;
-    }
+    const first = plan.all[0];
     const noted = plan.all.filter((it) => it.notes.length).length;
-    const lis = [];
-    for (const f of plan.folders) {
-      if (f.folder) lis.push(h("li", { class: "fold", text: `${f.folder}/` }));
-      const shown = f.present.filter((it, i) => i < 4 || it.notes.length);
-      let last = -1;
-      for (const it of shown) {
-        const idx = f.present.indexOf(it);
-        if (idx > last + 1) lis.push(h("li", { class: "file gap", text: `… ${idx - last - 1} more` }));
-        lis.push(h("li", { class: f.folder ? "file" : null }, it.name, it.notes.length ? h("span", { class: "nt", text: it.notes.join("; ") }) : null));
-        last = idx;
-      }
-      if (last < f.present.length - 1) lis.push(h("li", { class: `${f.folder ? "file " : ""}gap`, text: `… ${f.present.length - last - 1} more` }));
+    let names = null;
+    if (plan.errors.length) {
+      names = h("p", { class: "st-note err", text: `The file names don't work: ${plan.errors[0]} Fix them with Edit….` });
+    } else if (first) {
+      names = h("div", { class: "prof-names" },
+        h("p", null, "Files named like ", h("span", { class: "mono", text: first.name })),
+        h("button", { type: "button", class: "btn quiet small", text: "List all", onclick: () => allNames(s.id) }));
     }
-    ST.preview.replaceChildren(
-      h("div", { class: "pv-head", style: { padding: "0 10px 4px" } },
-        h("span", { class: noted ? "st-note warn" : "st-note", text: noted ? `${plural(noted, "name")} with notes` : "No names needed changes" }),
-        h("button", { type: "button", class: "btn quiet small", text: "Show all", onclick: () => allNames(plan.s.id) })),
-      h("ol", null, lis),
+    fill(ST.profile,
+      h("h3", { text: "Player profile" }),
+      h("div", { class: "prof-row" }, sel, h("button", { type: "button", class: "btn", text: "Edit…", onclick: () => profileEditor(s.profileId, plan.errors.length ? "files" : undefined) })),
+      h("p", { class: "prof-sum", text: profileSummary(plan.profile) }),
+      names,
+      !plan.errors.length && first && !plan.numbered ? h("p", { class: "st-note warn", text: "No {n} in the file names: a player that sorts by name plays them in alphabetical order." }) : null,
+      !plan.errors.length && noted ? h("p", { class: "st-note", text: `${plural(noted, "name")} adjusted; List all shows how.` }) : null,
     );
   }
 
@@ -971,10 +929,14 @@
         s.stickModel = d.name;
         s.stickSize = d.sizeBytes;
       }));
+      const hd = holder(d);
       return h("label", { class: `dev${on ? " sel" : ""}` }, input,
         h("span", { class: "dn", text: d.name }), h("span", { class: "ds", text: bytes(d.sizeBytes) }),
+        hd ? h("span", { class: `dholds${hd.set === s ? " own" : ""}`, text: hd.set === s ? `Holds this stick's playlists${hd.note && hd.note.syncedAt ? `, synced ${ago(hd.note.syncedAt)}` : ""}.` : `Holds ${heldText(hd)}${heldElsewhere(hd)}.` }) : null,
         h("span", { class: "don", text: `${d.device ? `${d.device}. ` : ""}Now: ${d.volumes.length ? d.volumes.join("; ") : "blank"}` }));
     });
+    const taken = chosen(s) && holder(chosen(s));
+    const takenOther = taken && taken.set !== s ? taken : null;
     const gone = s.stickId && !chosen(s);
     const other = gone && device(s.stickId);
     fill(ST.device,
@@ -982,6 +944,7 @@
       gone ? h("p", { class: "st-note warn", text: other
         ? `${other.name} isn't the stick this one syncs to (${s.stickModel}, ${bytes(s.stickSize)}). Pick it to sync to it instead.`
         : "The stick this one syncs to isn't plugged in. Plug it in, or pick another." }) : null,
+      takenOther ? h("p", { class: "st-note warn", id: "holds-other", text: `This stick holds ${heldText(takenOther)}${heldElsewhere(takenOther)}. Syncing ${s.name} to it replaces that.` }) : null,
       items.length ? h("div", { class: "devices", role: "radiogroup", "aria-label": "USB stick" }, items) : h("p", { class: "st-note", text: "No USB stick found. Plug one in; it shows up here." }),
       S.stickError ? h("p", { class: "st-note err", text: `Looking for sticks failed: ${S.stickError}` }) : null,
     );
@@ -1055,7 +1018,7 @@
     if (!plan.dev) reasons.push(S.sticks.length ? "Pick a USB stick." : "Plug in a USB stick.");
     else if (!lay.fits) reasons.push("It doesn't fit on this stick.");
     if (!plan.all.length) reasons.push("There's nothing to write yet.");
-    if (plan.errors.length) reasons.push("Fix the file name template first.");
+    if (plan.errors.length) reasons.push("Fix the file names in the player profile first.");
     if (S.sync && S.sync.running) reasons.push(`${stickSet(S.sync.setId)?.name || "Another stick"} is syncing.`);
     const btn = h("button", { type: "button", class: "btn primary", id: "sync-btn", text: "Erase and sync…", disabled: reasons.length > 0, onclick: confirmSync });
     fill(ST.sync,
@@ -1268,10 +1231,11 @@
     }
   }
 
-  function profileEditor(id) {
+  let profileTab = "files";
+  function profileEditor(id, tab) {
     const pr = prof(id);
     const usedBy = S.sets.filter((s) => s.profileId === id).map((s) => s.name);
-    const changed = () => renderAfterProfile();
+    const changed = () => { renderAfterProfile(); showNames(); };
     const radio = (name, value, label, key, conv = (v) => v) => {
       const r = h("input", { type: "radio", name, value, checked: String(pr[key]) === String(value) });
       r.addEventListener("change", () => { pr[key] = conv(value); changed(); });
@@ -1294,11 +1258,92 @@
     const name = h("input", { class: "input", value: pr.name, "aria-label": "Profile name", "data-autofocus": "" });
     name.addEventListener("input", () => { pr.name = name.value || "Untitled profile"; changed(); });
     const folderTpl = h("input", { class: "input mono", value: pr.folderTemplate, "aria-label": "Folder names" });
+
+    // File names: the pattern, with presets and fields to insert, the limits,
+    // and the names it makes for a stick that uses this profile.
+    const tpl = h("input", { class: "input mono", id: "tpl", value: pr.fileTemplate, spellcheck: "false", autocomplete: "off", "aria-label": "File names", "aria-describedby": "tpl-help" });
+    tpl.addEventListener("input", () => { pr.fileTemplate = tpl.value; changed(); });
+    const presets = h("select", { class: "input", "aria-label": "Name presets" },
+      h("option", { value: "", text: "Presets" }), PRESETS.map((p) => h("option", { value: p.tpl, text: p.label })));
+    presets.addEventListener("change", () => {
+      if (!presets.value) return;
+      tpl.value = presets.value;
+      presets.value = "";
+      tpl.dispatchEvent(new Event("input"));
+    });
+    const insertToken = (tok) => {
+      const a = tpl.selectionStart ?? tpl.value.length;
+      const b = tpl.selectionEnd ?? tpl.value.length;
+      tpl.value = tpl.value.slice(0, a) + tok + tpl.value.slice(b);
+      tpl.focus();
+      tpl.setSelectionRange(a + tok.length, a + tok.length);
+      tpl.dispatchEvent(new Event("input"));
+    };
+    const tokens = h("div", { class: "tokens", "aria-label": "Insert a field" },
+      ["{n}", "{artist}", "{title}", "{album}", "{track}", "{year}", "{filename}", "[{artist} - ]", "{title|filename}"].map((tok) =>
+        h("button", { type: "button", text: tok, title: `Insert ${tok}`, onclick: () => insertToken(tok) })));
+    const ascii = h("input", { type: "checkbox", id: "opt-ascii", checked: !!pr.ascii });
+    ascii.addEventListener("change", () => { pr.ascii = ascii.checked; changed(); });
+    const maxLen = h("select", { class: "input", id: "opt-maxlen", "aria-label": "Longest name" },
+      [["0", "No length limit"], ["64", "At most 64 characters"], ["48", "At most 48 characters"], ["32", "At most 32 characters"]].map(([v, l]) => h("option", { value: v, text: l, selected: String(pr.maxLen || 0) === v })));
+    maxLen.addEventListener("change", () => { pr.maxLen = Number(maxLen.value); changed(); });
+    const tplMsg = h("p", { class: "st-note", id: "tpl-help" });
+    const preview = h("div", { class: "preview" });
+    // The stick being shown if it uses this profile, else another that does,
+    // else the stick's playlists (or the open one) as if it did.
+    const previewSet = () => {
+      const cur = stickSet();
+      if (cur && cur.profileId === id) return cur;
+      const other = S.sets.find((x) => x.profileId === id);
+      if (other) return other;
+      return { id: "__preview", name: "", label: "", stickId: null, profileId: id, playlistIds: cur ? cur.playlistIds : [S.current].filter(Boolean) };
+    };
+    function showNames() {
+      const plan = planSet(previewSet());
+      const errs = plan.errors;
+      tpl.classList.toggle("bad", errs.length > 0);
+      tpl.setAttribute("aria-invalid", String(errs.length > 0));
+      if (errs.length) {
+        tplMsg.className = "st-note err";
+        tplMsg.textContent = errs.join(" ");
+      } else if (!plan.numbered) {
+        tplMsg.className = "st-note warn";
+        tplMsg.textContent = "No {n}: a player that sorts by name would play these in alphabetical order.";
+      } else {
+        tplMsg.className = "st-note";
+        tplMsg.textContent = "The .mp3 is added for you.";
+      }
+      const lis = [];
+      for (const f of plan.folders) {
+        if (f.folder) lis.push(h("li", { class: "fold", text: `${f.folder}/` }));
+        for (const it of f.present) lis.push(h("li", { class: f.folder ? "file" : null }, it.name, it.notes.length ? h("span", { class: "nt", text: it.notes.join("; ") }) : null));
+      }
+      const noted = plan.all.filter((it) => it.notes.length).length;
+      const whose = plan.s.id === "__preview" ? "As they would be" : `On ${plan.s.name}`;
+      preview.replaceChildren(
+        h("div", { class: "pv-head", style: { padding: "0 10px 4px" } },
+          h("span", { class: "st-note", text: whose }),
+          h("span", { class: noted ? "st-note warn" : "st-note", text: noted ? `${plural(noted, "name")} adjusted` : "No names needed changes" })),
+        lis.length ? h("ol", null, lis) : h("p", { class: "st-note", style: { padding: "0 10px" }, text: "Add tracks to a playlist to see their names here." }),
+      );
+    }
     folderTpl.addEventListener("input", () => { pr.folderTemplate = folderTpl.value || "{n} {playlist}"; changed(); });
-    const body = [
-      h("p", { text: `Cheap players can't be identified reliably, so a profile describes what yours can play. Used by ${usedBy.length ? usedBy.join(" and ") : "no stick yet"}. Changes apply as you make them.` }),
-      h("div", { class: "form" },
-        h("span", { class: "lbl", text: "Name" }), name,
+    // Three tabs under the name: what the files and folders are called, how
+    // the audio is made, and what goes into the tags.
+    const panels = [
+      ["files", "Files and folders", [
+        h("span", { class: "lbl", text: "File names" }), h("div", { class: "opts names-ed" },
+          h("div", { class: "tpl-row" }, tpl, presets),
+          tokens,
+          h("div", { class: "name-opts" }, h("label", { class: "check" }, ascii, h("span", { text: "Plain ASCII" })), maxLen),
+          tplMsg,
+          preview),
+        h("span", { class: "lbl", text: "Layout" }), h("div", { class: "opts" },
+          radio("layout", "folders", "A folder per playlist, in stick order", "layout"),
+          radio("layout", "single", "One playlist per stick, tracks at the top level", "layout")),
+        h("span", { class: "lbl", text: "Folder names" }), h("div", { class: "opts" }, folderTpl, h("span", { class: "hint", text: "Used when a stick holds several playlists. {n} is the folder's position, {playlist} its name." })),
+      ]],
+      ["audio", "Audio", [
         h("span", { class: "lbl", text: "Bitrate cap" }), h("div", { class: "opts" },
           radio("cap", 320, "320 kbps", "bitrateCap", Number),
           radio("cap", 256, "256 kbps, for players that stumble on 320", "bitrateCap", Number),
@@ -1307,6 +1352,8 @@
           radio("mode", "cbr", "Constant bitrate (sizes known in advance)", "mode"),
           radio("mode", "vbr", "Variable bitrate (smaller; frames over the cap are encoded again as CBR)", "mode")),
         h("span", { class: "lbl", text: "Sample rates" }), h("div", { class: "opts row-opts" }, rate(32000), rate(44100), rate(48000)),
+      ]],
+      ["tags", "Tags and cover art", [
         h("span", { class: "lbl", text: "Tags" }), h("div", { class: "opts" },
           radio("tags", "id3v23", "ID3v2.3 (older players read it best)", "tags"),
           radio("tags", "id3v24", "ID3v2.4", "tags"),
@@ -1316,29 +1363,59 @@
         h("span", { class: "lbl", text: "Cover art" }), h("div", { class: "opts" },
           radio("cover", "small", "One small JPEG, up to 500 × 500 px and 100 KB", "cover"),
           radio("cover", "none", "None", "cover")),
-        h("span", { class: "lbl", text: "Layout" }), h("div", { class: "opts" },
-          radio("layout", "folders", "A folder per playlist, in stick order", "layout"),
-          radio("layout", "single", "One playlist per stick, tracks at the top level", "layout")),
-        h("span", { class: "lbl", text: "Folder names" }), h("div", { class: "opts" }, folderTpl, h("span", { class: "hint", text: "Used when a stick holds several playlists. {n} is the folder's position, {playlist} its name." })),
-      ),
+      ]],
     ];
+    if (!panels.some(([k]) => k === tab)) tab = profileTab;
+    const tabs = panels.map(([k, label]) => h("button", {
+      type: "button", role: "tab", id: `ptab-${k}`, class: "tab", text: label,
+      "aria-controls": `ppanel-${k}`, "aria-selected": String(k === tab), tabindex: k === tab ? "0" : "-1",
+    }));
+    const boxes = panels.map(([k, , kids]) => h("div", { role: "tabpanel", id: `ppanel-${k}`, class: "form tabpanel", "aria-labelledby": `ptab-${k}`, hidden: k !== tab }, kids));
+    const show = (k, focus) => {
+      profileTab = k;
+      tabs.forEach((t, i) => {
+        const on = panels[i][0] === k;
+        t.setAttribute("aria-selected", String(on));
+        t.tabIndex = on ? 0 : -1;
+        boxes[i].hidden = !on;
+        if (on && focus) t.focus();
+      });
+    };
+    tabs.forEach((t, i) => {
+      t.addEventListener("click", () => show(panels[i][0]));
+      t.addEventListener("keydown", (e) => {
+        const n = panels.length;
+        const to = { ArrowRight: (i + 1) % n, ArrowLeft: (i + n - 1) % n, Home: 0, End: n - 1 }[e.key];
+        if (to === undefined) return;
+        e.preventDefault();
+        show(panels[to][0], true);
+      });
+    });
+    const body = [
+      h("p", { text: `Cheap players can't be identified reliably, so a profile describes what yours can play. Used by ${usedBy.length ? usedBy.join(" and ") : "no stick yet"}. Changes apply as you make them.` }),
+      h("div", { class: "form" }, h("span", { class: "lbl", text: "Name" }), name),
+      h("div", { class: "tabs", role: "tablist", "aria-label": "Profile settings" }, tabs),
+      boxes,
+    ];
+    showNames();
     const dup = () => {
       const copy = { ...clone(pr), id: newId("prof-"), name: `${pr.name} copy`, builtIn: false };
       S.profiles.push(copy);
       const s = stickSet();
       if (s && s.profileId === pr.id) edit(`Use ${copy.name} for ${s.name}`, () => { s.profileId = copy.id; });
       closeModal();
-      profileEditor(copy.id);
+      profileEditor(copy.id, profileTab);
     };
     const reset = () => {
       Object.assign(pr, clone(GENERIC));
       closeModal();
       changed();
-      profileEditor(pr.id);
+      profileEditor(pr.id, profileTab);
     };
     modal({
       title: `Player profile: ${pr.name}`,
       wide: true,
+      tall: true,
       body,
       buttons: [
         pr.builtIn ? h("button", { type: "button", class: "btn left", text: "Reset to defaults", onclick: reset }) : null,
@@ -1439,16 +1516,31 @@
       : dev.image
         ? "This is a disk image, so no password is needed."
         : "Your system asks for your password or fingerprint before the stick is erased.";
+    const hd = holder(dev);
+    const other = hd && hd.set !== plan.s ? hd : null;
+    const go = h("button", { type: "button", class: "btn primary", text: "Erase and sync", disabled: !!other, onclick: () => { closeModal(); runSync(); } });
+    let replace = null;
+    if (other) {
+      const tick = h("input", { type: "checkbox", id: "replace-ok" });
+      tick.addEventListener("change", () => { go.disabled = !tick.checked; });
+      const name = other.set ? other.set.name : other.note ? other.note.setName : "what's on it";
+      replace = [
+        h("div", { class: "danger-box", id: "replace-warning" }, h("strong", { text: `This stick holds ${heldText(other)}${heldElsewhere(other)}. ` }),
+          other.set ? `Syncing ${plan.s.name} replaces it, and ${other.set.name} will need a stick of its own.` : `Syncing ${plan.s.name} replaces it.`),
+        h("label", { class: "check" }, tick, h("span", { text: `Replace ${name} with ${plan.s.name}` })),
+      ];
+    }
     modal({
       title: `Erase ${dev.name} and sync ${plan.s.name}?`,
       body: [
+        replace,
         h("div", { class: "danger-box" }, h("strong", { text: "Everything on the stick is erased. " }), "Copy off anything you want to keep first. The stick then holds only these playlists, written in FAT order."),
         h("dl", { class: "kv" }, kv.flatMap(([k, v]) => [h("dt", { text: k }), h("dd", { text: v })])),
         h("p", { class: "st-note", text: prompt }),
       ],
       buttons: [
         h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal, "data-autofocus": "" }),
-        h("button", { type: "button", class: "btn primary", text: "Erase and sync", onclick: () => { closeModal(); runSync(); } }),
+        go,
       ],
     });
   }
@@ -1490,6 +1582,10 @@
       setName: plan.s.name,
       stickId: plan.dev.id,
       stickSize: plan.dev.sizeBytes,
+      note: {
+        profile: { id: pr.id, name: pr.name },
+        playlists: plan.folders.map((f) => ({ id: f.p.id, name: f.p.name, tracks: f.present.length })),
+      },
       label: plan.s.label || plan.s.name,
       profile: {
         bitrateCap: pr.bitrateCap, mode: pr.mode, sampleRates: pr.sampleRates, tags: pr.tags, id3v1: !!pr.id3v1,
@@ -1546,6 +1642,12 @@
   function finishSync(res) {
     const s = stickSet(S.sync.setId);
     if (res.ok && res.record) S.syncs[s.id] = res.record;
+    if (res.ok) {
+      // Another stick (set) that used this stick has lost it.
+      let lost = false;
+      for (const o of S.sets) if (o !== s && o.stickId === s.stickId) { o.stickId = null; lost = true; }
+      if (lost) changed();
+    }
     let msg;
     if (res.ok) {
       msg = `${plural(res.files, "file")} written and checked byte for byte`;
@@ -1750,13 +1852,40 @@
     }
   }
   let stickPoll = null;
+  /** A stick as plugged in now: its slot, what it holds and its size. A
+   * different stick in the same slot gets a different key. */
+  const stickKey = (d) => JSON.stringify([d.id, d.note ? [d.note.libraryId, d.note.setId, d.note.syncedAt] : null, d.serials || [], d.sizeBytes]);
+  /** Sticks just plugged in (or found at startup) that hold one of this
+   * library's sticks (sets): that set follows its stick to wherever it's
+   * plugged in now, and is selected. */
+  function recognize(before) {
+    let picked = null;
+    for (const d of S.sticks) {
+      if (before.has(stickKey(d))) continue;
+      const hd = holder(d);
+      if (!hd || !hd.set) continue;
+      const s = hd.set;
+      // Nothing to tell when it's the stick already shown (just synced, say).
+      if (s.stickId === d.id && s.stickModel === d.name && s.stickSize === d.sizeBytes && S.setId === s.id) continue;
+      Object.assign(s, { stickId: d.id, stickModel: d.name, stickSize: d.sizeBytes });
+      for (const o of S.sets) if (o !== s && o.stickId === d.id) o.stickId = null;
+      picked = s;
+    }
+    if (!picked) return false;
+    if (!(S.sync && S.sync.running)) selectSet(picked.id);
+    toast(`${picked.name} is plugged in.`);
+    changed();
+    return true;
+  }
   async function refreshSticks(quiet) {
     try {
       const r = await api.listSticks();
       const changedSticks = JSON.stringify(r.sticks) !== JSON.stringify(S.sticks);
+      const before = new Set(S.sticks.map(stickKey));
       S.sticks = r.sticks;
       S.stickError = r.error;
-      if (changedSticks || !quiet) { renderStick(); renderSide(); }
+      if (changedSticks && recognize(before)) renderAll();
+      else if (changedSticks || !quiet) { renderStick(); renderSide(); }
       if (!quiet) toast(r.sticks.length ? `${plural(r.sticks.length, "stick")} found.` : "No USB stick found.");
     } catch (e) {
       if (!quiet) toast(`Couldn't look for sticks: ${e}`);
@@ -2103,6 +2232,7 @@
       return;
     }
     S.version = d.version;
+    S.libraryId = d.libraryId;
     S.ffmpegError = d.ffmpegError;
     const st = d.settings || {};
     if (["system", "light", "dark"].includes(st.theme)) S.theme = st.theme;
@@ -2139,7 +2269,7 @@
     persist();
     scheduleWork();
     // For the app's self-test (tests/app_e2e.py) and for poking around in the inspector.
-    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, stopPlayback, refreshSticks, ready: true };
+    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, stopPlayback, refreshSticks, holder, selectSet, ready: true };
     if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Playlist2USB to get it back.");
     if (!DEMO) {
       stickPoll = setInterval(() => { if (!(S.sync && S.sync.running)) refreshSticks(true); }, 3000);

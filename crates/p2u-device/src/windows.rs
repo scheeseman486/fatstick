@@ -195,6 +195,7 @@ fn volume_info(v: &str) -> StickVolume {
         fs_type: from_wide(&fsname),
         mount_point: if mp.is_empty() { None } else { Some(PathBuf::from(mp)) },
         size_bytes: 0,
+        serial: if serial == 0 { String::new() } else { format!("{:04X}-{:04X}", serial >> 16, serial & 0xFFFF) },
     }
 }
 
