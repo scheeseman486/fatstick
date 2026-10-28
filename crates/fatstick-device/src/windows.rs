@@ -76,6 +76,7 @@ fn open_rw(path: &str) -> std::io::Result<File> {
 struct Descriptor {
     bus: i32,
     name: String,
+    serial: String,
 }
 
 fn descriptor(f: &File) -> Option<Descriptor> {
@@ -103,7 +104,7 @@ fn descriptor(f: &File) -> Option<Descriptor> {
         String::from_utf8_lossy(&s[..end]).trim().to_string()
     };
     let name = format!("{} {}", text(d.VendorIdOffset), text(d.ProductIdOffset)).trim().to_string();
-    Some(Descriptor { bus: d.BusType, name })
+    Some(Descriptor { bus: d.BusType, name, serial: text(d.SerialNumberOffset) })
 }
 
 /// (size in bytes, logical sector size)
@@ -224,6 +225,7 @@ pub fn list_sticks() -> Result<Vec<StickInfo>> {
             size_bytes: size,
             bus: if d.bus == BusTypeUsb { "usb".into() } else { "sd".into() },
             volumes: volumes_on(n).iter().map(|v| volume_info(v)).collect(),
+            serial: d.serial,
         });
     }
     Ok(out)

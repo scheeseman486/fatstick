@@ -15,7 +15,7 @@
 // side checks that again before it touches one.
 "use strict";
 (function (Fatstick) {
-  const { h, fill, icon, clock, length, plural, ago, menu, modal, closeModal, toast } = Fatstick.ui;
+  const { h, fill, icon, clock, length, plural, ago, menu, modal, closeModal, toast, showTip, hideTip } = Fatstick.ui;
   const SR = Fatstick.search;
   const N = Fatstick.names;
 
@@ -142,7 +142,7 @@
 
     let LC = { v: -1, root: null, list: [], index: null };
     function libList() {
-      if (LC.v !== S.tracksVersion || LC.root !== root()) LC = { v: S.tracksVersion, root: root(), list: [...S.tracks.values()].filter(inMusic), index: null };
+      if (LC.v !== S.tracksVersion || LC.root !== root()) LC = { v: S.tracksVersion, root: root(), list: [...S.tracks.values()].filter((t) => inMusic(t) && !t.forgotten), index: null };
       return LC;
     }
     function libIndex() {
@@ -219,6 +219,38 @@
       u.run();
       return true;
     }
+
+    // ---- files that have gone ------------------------------------------------------------------
+    /**
+     * Take tracks whose files have gone out of the library. One a playlist
+     * still has stays for that playlist (where Locate can find it again),
+     * just not listed here; the rest are dropped. If a file comes back, the
+     * next scan puts it back. Tracks whose files are there are left alone.
+     */
+    async function forgetGone(ids) {
+      const gone = ids.filter((id) => { const t = track(id); return t && !t.exists; });
+      if (!gone.length) return;
+      const used = new Set(S.playlists.flatMap((p) => p.entries.map((e) => e.trackId)));
+      let r;
+      try {
+        r = await api.libraryForget(gone.filter((id) => !used.has(id)), gone.filter((id) => used.has(id)));
+      } catch (e) {
+        toast(`Couldn't take them out: ${e}`);
+        return;
+      }
+      const kept = new Map(r.kept.map((t) => [t.id, t]));
+      for (const id of r.removed) {
+        if (kept.has(id)) S.tracks.set(id, kept.get(id));
+        else S.tracks.delete(id);
+      }
+      S.tracksVersion++;
+      L.sel = new Set([...L.sel].filter((x) => !r.removed.includes(x)));
+      if (L.focus && r.removed.includes(L.focus)) L.focus = null;
+      refresh();
+      const n = r.removed.length;
+      toast(`Took ${n === 1 ? "a track whose file has gone" : `${n} tracks whose files have gone`} out of the library.${kept.size ? ` ${kept.size === 1 ? "One is" : `${kept.size} are`} still in a playlist.` : ""}`);
+    }
+    const goneOf = (ids) => ids.filter((id) => !track(id).exists);
 
     // ---- the tag editor ------------------------------------------------------------------
     // One component for the library's side panel and the playlist's "Edit
@@ -684,6 +716,7 @@
       else if (e.key === "Enter" && e.shiftKey) addToCurrent(X.ordered());
       else if (e.key === "Enter") { const id = X.focus && X.sel.has(X.focus) ? X.focus : X.ordered()[0]; if (id) core.playTrack(id); }
       else if (e.key === "Escape") { if (X.sel.size) X.set(new Set(), null); else if (X.escape) X.escape(); else return false; }
+      else if ((e.key === "Delete" || e.key === "Backspace") && X.remove && goneOf(X.ordered()).length) X.remove(X.ordered());
       else return false;
       e.preventDefault();
       return true;
@@ -710,6 +743,10 @@
         X.inLibrary ? null : { label: "Show in the library", action: () => revealInLibrary(id), disabled: !inMusic(track(id)) },
         X.inLibrary ? null : { label: n === 1 ? "Edit tags…" : `Edit the tags of ${n} tracks…`, action: () => editTagsDialog(ids), disabled: !canTag },
         X.inLibrary ? { label: n === 1 ? "Clean up the file name…" : `Clean up ${n} file names…`, action: () => renameDialog(ids), disabled: !ids.some((x) => !whyNot(track(x), true)) } : null,
+        ...(X.inLibrary && goneOf(ids).length ? ["-", {
+          label: goneOf(ids).length === 1 ? "Remove from the library" : `Remove ${goneOf(ids).length} from the library`, key: "Delete",
+          action: () => forgetGone(ids),
+        }] : []),
       ].filter(Boolean));
     }
 
@@ -822,10 +859,14 @@
       const inPl = new Set(p ? p.entries.map((e) => e.trackId) : []);
       const toks = SR.norm(q).split(" ").filter(Boolean);
       const hit = (s) => SR.norm(s).split(" ").some((w) => toks.some((tk) => SR.closeness(tk, w) > 0));
+      // The width a result's labels can take (the panel, less its padding and the time).
+      const resW = Math.max(120, (document.querySelector(".srch-res") || { clientWidth: 320 }).clientWidth - 80);
       const row = (x, close) => {
         const t = x.t;
         const hints = [];
-        if (x.fields.includes("labels")) for (const l of t.labels || []) if (hit(l)) hints.push(labelChip(l, true));
+        // The track's labels (those that matched first), as many as fit, then "+2".
+        const ls = [...(t.labels || [])].sort((a, b) => Number(hit(b)) - Number(hit(a)));
+        if (ls.length) hints.push(...labelsThatFit(ls, t.id, resW));
         for (const f of ["genre", "year", "composer", "albumartist"]) if (x.fields.includes(f) && t[f] && hit(String(t[f]))) hints.push(fieldChip(f, String(t[f])));
         const sub = [t.artist, t.album].filter(Boolean).join(", ");
         const on = SE.sel.has(t.id);
@@ -887,6 +928,7 @@
       set: (next, focus) => setSel(next, focus),
       reveal: (id) => revealRow(id),
       escape: null,
+      remove: (ids) => forgetGone(ids),
     };
 
     function buildView() {
@@ -1242,20 +1284,22 @@
         case "track": return h("div", { class: "c r num", text: t.track ? String(t.track) : "" });
         case "year": return h("div", { class: "c r num", text: t.year ? String(t.year) : "" });
         case "time": return h("div", { class: "c r num", text: t.duration ? clock(t.duration) : "" });
-        case "labels": return h("div", { class: "c c-labels", title: (t.labels || []).join(", ") || null }, labelsThatFit(t.labels || []));
+        case "labels": return h("div", { class: "c c-labels" }, labelsThatFit(t.labels || [], t.id));
         default: return h("div", { class: `c c-${c}`, text: t[c] || "" });
       }
     }
-    /** As many labels as fit the column whole, then "+2" for the rest. */
+    /** As many labels as fit the width whole, then "+2" for the rest: hover
+     * it (or focus it) for all of the track's labels. */
     let labW = 0;
-    function labelsThatFit(ls) {
+    function labelsThatFit(ls, tid, width = labW) {
       const out = [];
       let used = 0;
       const est = (l) => 15 + l.length * 6.3;
       for (let i = 0; i < ls.length; i++) {
         const more = i < ls.length - 1 ? 28 : 0;
-        if (labW && i > 0 && used + est(ls[i]) + more > labW) {
-          out.push(h("span", { class: "tag lbl sm more", text: `+${ls.length - i}` }));
+        if (width && i > 0 && used + est(ls[i]) + more > width) {
+          const rest = ls.slice(i);
+          out.push(h("span", { class: "tag lbl sm more", text: `+${rest.length}`, tabindex: "-1", dataset: { tid }, "aria-label": `And ${rest.join(", ")}` }));
           break;
         }
         out.push(labelChip(ls[i], true));
@@ -1263,6 +1307,20 @@
       }
       return out;
     }
+    // The "+2" of a list's labels, hovered: all the track's labels, in a tip.
+    let tipFor = null;
+    document.addEventListener("pointerover", (e) => {
+      const m = e.target.closest && e.target.closest(".tag.more[data-tid]");
+      if (m === tipFor) return;
+      tipFor = m;
+      if (!m) { hideTip(); return; }
+      const t = track(m.dataset.tid);
+      if (!t || !(t.labels || []).length) { hideTip(); return; }
+      showTip(m, h("div", { class: "tags tip-tags" }, t.labels.map((l) => labelChip(l, true))));
+    });
+    const dropTip = () => { if (tipFor) { tipFor = null; hideTip(); } };
+    document.addEventListener("pointerdown", dropTip, true);
+    document.addEventListener("wheel", dropTip, { capture: true, passive: true });
     function renderRows() {
       if (!V.inner) return;
       const total = L.rows.length;
@@ -1341,7 +1399,10 @@
           sel.length ? `. ${sel.length} selected, ${clock(dur(sel))}: drag ${sel.length === 1 ? "it" : "them"} onto a playlist on the left.` : ". Double-click a track to hear it; drag tracks onto a playlist on the left to add them."),
         sel.length ? h("div", { class: "tools" },
           p ? h("button", { type: "button", class: "btn small", text: `Add to ${p.name}`, onclick: () => addToCurrent(sel) }) : null,
-          h("button", { type: "button", class: "btn small", text: "New playlist", onclick: () => { core.newPlaylist("From the library", sel); core.setView("playlist"); } })) : null);
+          h("button", { type: "button", class: "btn small", text: "New playlist", onclick: () => { core.newPlaylist("From the library", sel); core.setView("playlist"); } })) : null,
+        // Showing only files that have gone: out with them, in one go.
+        L.filters.some((f) => f.field === "missing" && f.value === "file") && goneOf(L.ids).length
+          ? h("div", { class: "tools" }, h("button", { type: "button", class: "btn small", id: "lib-forget-all", text: `Remove all ${goneOf(L.ids).length} from the library`, onclick: () => forgetGone(L.ids) })) : null);
     }
     function renderEditor(force) {
       const ids = LX.ordered();

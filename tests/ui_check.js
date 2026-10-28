@@ -455,7 +455,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.keyboard.press('Enter');
     await settled(/label “car” added/);
     check('a label is written as soon as it is added', (await tagsOf(selIds)).every((x) => /^Kids\|.*car/.test(x)), (await tagsOf(selIds)).join(' / '));
-    check('the table shows the new label', (await p.locator('.lr.sel .c-labels').evaluateAll((cs) => cs.filter((c) => c.title.split(', ').includes('car')).length)) === 2);
+    check('the table shows the new label', (await p.locator('.lr.sel .c-labels').evaluateAll((cs) => cs.filter((c) => [...c.querySelectorAll('.tag')].some((t) => t.textContent === 'car' || /\bcar\b/.test(t.getAttribute('aria-label') || ''))).length)) === 2);
     await p.screenshot({ path: `${out}/tags-saved.png` });
     await p.locator('.lib-edit .ted-status .btn', { hasText: 'Undo' }).click();
     await p.waitForFunction(() => Fatstick.app.lib.state.L.ids.filter((x) => Fatstick.app.lib.state.L.sel.has(x)).every((id) => !Fatstick.app.S.tracks.get(id).labels.includes('car')), null, { timeout: 5000 }).catch(() => {});
@@ -719,6 +719,82 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.getByRole('button', { name: 'Print a setlist…' }).click();
     check('the stick\'s view prints its setlist', (await p.locator('#modal-title').textContent()) === 'Print a setlist' && await p.locator('.sl-thumb').first().isVisible());
     await p.getByRole('button', { name: 'Close' }).click();
+    await p.locator('[data-pl="p-road"]').click();
+  }
+
+  // 32. Devices left out: Menu, "Exclude devices…"; ticked ones aren't shown or offered.
+  {
+    await p.locator('[data-pl="p-road"]').click();
+    const devs = () => p.locator('#stick .dev').count();
+    const n0 = await devs();
+    await p.locator('#app-menu').click();
+    await p.getByRole('menuitem', { name: 'Exclude devices…' }).click();
+    check('"Exclude devices…" lists what is plugged in', /^Exclude devices$/.test(await p.locator('#modal-title').textContent()) && (await p.locator('.ex-dev').count()) === n0, `${await p.locator('.ex-dev').count()} of ${n0}`);
+    await p.locator('.ex-dev', { hasText: 'Generic Flash Disk' }).locator('input').check();
+    check('ticking one takes it out of the stick list at once', (await devs()) === n0 - 1 && !(await p.locator('#stick .dev', { hasText: 'Generic Flash Disk' }).count()));
+    await p.getByRole('button', { name: 'Done' }).click();
+    check('the stick panel says one is left out', /1 excluded device not shown/.test(await p.locator('#stick').textContent()));
+    await p.locator('#stick button', { hasText: 'Exclude devices…' }).click();
+    check('and it stays ticked', await p.locator('.ex-dev', { hasText: 'Generic Flash Disk' }).locator('input').isChecked());
+    await p.locator('.ex-dev', { hasText: 'Generic Flash Disk' }).locator('input').uncheck();
+    await p.getByRole('button', { name: 'Done' }).click();
+    check('unticking brings it back', (await devs()) === n0);
+  }
+
+  // 33. "Show in the library" from a playlist's track: the library, with it selected.
+  {
+    await p.locator('[data-pl="p-road"]').click();
+    const i = await p.evaluate(() => { const A = Fatstick.app; return A.pl().entries.findIndex((e) => A.lib.inMusic(A.track(e.trackId)) && A.track(e.trackId).exists); });
+    const want = await p.evaluate((i) => { const A = Fatstick.app; return A.track(A.pl().entries[i].trackId).id; }, i);
+    await row(i).click({ button: 'right' });
+    await p.getByRole('menuitem', { name: 'Show in the library' }).click();
+    await p.waitForTimeout(150);
+    const sel = await p.evaluate(() => [...Fatstick.app.lib.state.L.sel]);
+    check('"Show in the library" opens the library with that track selected', JSON.stringify(sel) === JSON.stringify([want]) && (await p.locator('.lr.sel').count()) === 1 && /1 track|Edit|Title/.test(await p.locator('.lib-edit').textContent()), JSON.stringify(sel));
+  }
+
+  // 34. Tracks whose files have gone can be taken out of the library.
+  {
+    const gone = await p.evaluate(() => { const A = Fatstick.app; return [...A.S.tracks.values()].filter((t) => A.lib.inMusic(t) && !t.exists && !t.forgotten).map((t) => t.id); });
+    const before = await p.evaluate(() => Fatstick.app.lib.state.L.ids.length);
+    await p.locator('.fct', { hasText: 'File not found' }).click();
+    await p.waitForTimeout(100);
+    check('the gone files are listed by "File not found"', (await p.locator('.lr').count()) === gone.length && gone.length > 0, `${await p.locator('.lr').count()} of ${gone.length}`);
+    await p.locator('.lr').first().click({ button: 'right' });
+    check('the menu offers to take a gone file out', (await p.getByRole('menuitem', { name: 'Remove from the library' }).count()) === 1);
+    await p.keyboard.press('Escape');
+    check('so does a button for all of them', /Remove all \d+ from the library/.test(await p.locator('#lib-forget-all').textContent()));
+    await p.locator('#lib-forget-all').click();
+    await p.waitForTimeout(200);
+    const left = await p.evaluate(() => { const A = Fatstick.app; return [...A.S.tracks.values()].filter((t) => A.lib.inMusic(t) && !t.exists && !t.forgotten).length; });
+    check('then they\'re gone from the library', left === 0 && (await p.locator('.lr').count()) === 0 && /out of the library/.test(await p.locator('#toast').textContent()), await p.locator('#toast').textContent());
+    await p.locator('.lib-chips .tag', { hasText: 'File not found' }).locator('.x').click().catch(() => {});
+  }
+
+  // 35. A track's labels: "+2" in the library list, hovered, shows them all; search shows them too.
+  {
+    await p.evaluate(() => Fatstick.app.setView('library'));
+    await p.waitForTimeout(100);
+    const more = p.locator('.lr .tag.more').first();
+    check('a track with more labels than fit shows "+N"', (await p.locator('.lr .tag.more').count()) > 0);
+    const tid = await more.getAttribute('data-tid');
+    await more.hover();
+    await p.waitForTimeout(100);
+    const tipN = await p.locator('#tip .tag').count();
+    const has = await p.evaluate((id) => Fatstick.app.track(id).labels.length, tid);
+    check('hovering it shows all of the track\'s labels', await p.locator('#tip').isVisible() && tipN === has, `${tipN} of ${has}`);
+    await p.mouse.move(5, 5);
+    await p.waitForTimeout(50);
+    check('and the tip goes when the pointer does', await p.locator('#tip').isHidden());
+    await p.evaluate(() => Fatstick.app.lib.openSearch());
+    const name = await p.evaluate((id) => Fatstick.app.track(id).title, tid);
+    await p.locator('#srch-in').fill(name);
+    await p.waitForTimeout(200);
+    const first = p.locator('.sr').first();
+    const shown = await first.locator('.tag.lbl:not(.more)').count();
+    const plus = await first.locator('.tag.more').count();
+    check('search results show the track\'s labels, "+N" for the rest', shown >= 1 && shown + (plus ? Number((await first.locator('.tag.more').textContent()).slice(1)) : 0) === has, `${shown} shown, ${plus} more of ${has}`);
+    await p.evaluate(() => Fatstick.app.lib.closeSearch());
     await p.locator('[data-pl="p-road"]').click();
   }
 

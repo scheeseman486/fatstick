@@ -79,6 +79,10 @@ pub struct StickInfo {
     /// "usb", "sdio", ... when the OS tells us.
     pub bus: String,
     pub volumes: Vec<StickVolume>,
+    /// The device's own serial number, when the OS tells us (it stays the
+    /// same whatever is written to the stick): to recognize the device.
+    #[serde(default)]
+    pub serial: String,
 }
 
 /// An open raw handle to a whole stick. Reads and writes must be sector aligned.

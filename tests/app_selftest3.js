@@ -134,6 +134,14 @@
     check("a new file in the folder shows up without a scan", !!arrived);
     check("and is in the library view", !!(await until(() => rowOf("New Arrival"), 5000)));
     check("the renamed tracks weren't taken for new ones", inLib().length === cfg.libraryCount + 1, `${inLib().length}`);
+    // Taking gone files out of the library: the app's side answers (a file
+    // that's there is left alone).
+    const lan = inLib().find((t) => t.title === "Lanterns");
+    const fr = await T.core.invoke("library_forget", { delete: [lan.id], hide: [] });
+    check("the library won't take out a track whose file is there", fr.removed.length === 0 && A.track(lan.id).exists, JSON.stringify(fr));
+    // Devices: each one listed has its serial number field (empty for a disk image).
+    const ls = await T.core.invoke("list_sticks");
+    check("the stick list says each device's serial number", ls.sticks.length > 0 && ls.sticks.every((d) => typeof d.hwSerial === "string"), JSON.stringify(ls.sticks.map((d) => d.hwSerial)));
   } catch (e) {
     check("no exception", false, String((e && e.stack) || e));
   }

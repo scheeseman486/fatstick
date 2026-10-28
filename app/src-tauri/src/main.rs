@@ -471,6 +471,23 @@ async fn library_set_root(st: State<'_, AppState>, path: String) -> Res<folder::
     tauri::async_runtime::spawn_blocking(move || music.set_root(Path::new(&path))).await.map_err(err)?
 }
 
+#[derive(Serialize)]
+struct Forgot {
+    /// Taken out of the library: dropped, or kept for a playlist (in `kept`).
+    removed: Vec<String>,
+    kept: Vec<Track>,
+}
+
+/// Tracks whose files have gone, out of the library (the window says which
+/// a playlist still refers to: those stay, unlisted).
+#[tauri::command]
+fn library_forget(st: State<AppState>, delete: Vec<String>, hide: Vec<String>) -> Res<Forgot> {
+    let lib = st.lib.lock().unwrap();
+    let removed = lib.forget(&delete, &hide).map_err(err)?;
+    let kept = hide.iter().filter(|id| removed.contains(id)).filter_map(|id| lib.track(id).ok().flatten()).collect();
+    Ok(Forgot { removed, kept })
+}
+
 #[tauri::command]
 fn library_scan(st: State<AppState>) {
     st.music.scan();
@@ -605,6 +622,7 @@ fn main() {
             library_info,
             library_set_root,
             library_scan,
+            library_forget,
             library_write_tags,
             library_rename,
             read_tracks,

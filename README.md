@@ -35,6 +35,12 @@ GPL version 3 or later.
   on a stick depends on every frame. On a network drive the watcher only
   hears of changes made from this computer, so the app also looks again when
   you come back to it after ten minutes away, and "Scan now" is always there.
+  A file that's gone shows as "File not found" (browse by it under Missing
+  tags); "Remove from the library" in its right-click menu (or Delete), or
+  "Remove all from the library" when browsing by it, takes such tracks out.
+  One a playlist still has stays there, where Locate can find its file
+  again; if a file comes back, the next scan lists it again. A track's
+  labels that don't fit its row show as "+2": hover it for all of them.
 - **Tags, and labels of your own.** Select tracks in the library to see and
   change their tags (several at once: "Various" fields stay as they are
   unless you type over them). Labels are your own free-form tags ("road
@@ -51,10 +57,13 @@ GPL version 3 or later.
   sidebar into a search panel. Type a title, an artist, an album, a genre,
   a label, a year or part of a file name: whole-word matches come first,
   then a divider and close ones (a word's start, part of a word, a letter or
-  two off). Double-click a song to hear it, as in the library; drag songs
+  two off). Each result shows its labels (those that matched first), with
+  "+2" for any that don't fit, as in the library. Double-click a song to hear it, as in the library; drag songs
   into the playlist to add them.
 - **Tags in the playlist.** Click a track (or press T) to see its tags under
-  it; click again to hide them. "Edit tags…" opens the tag editor there.
+  it; click again to hide them. "Edit tags…" opens the tag editor there, and
+  "Show in the library" in a track's right-click menu opens the library with
+  it selected (or says why it can't: a file outside the music folder).
 
 - **Sticks.** A stick holds one or more playlists, one folder each and in the
   order you choose, or a single playlist at the top level. It also has a player
@@ -62,6 +71,12 @@ GPL version 3 or later.
   file names. A Generic profile is built in; make your own for a particular
   player. The window shows what is on the stick now, what the next sync would
   write, and whether it fits.
+- **Devices left out.** "Exclude devices…" in the menu lists what's plugged
+  in; a ticked device (a card reader that's always there, a backup drive)
+  isn't shown and can't be picked to copy to. It's known by its serial
+  number where the system gives one (Linux, Windows), else by its name and
+  size, so it stays left out whatever is written to it; untick it, or "Show
+  it again" once it's unplugged, to bring it back.
 - **Sticks that remember.** Every sync leaves a small hidden note on the stick
   saying which of your sticks it is, with its profile and playlists. Plug it in
   again and the app recognizes it, selects it and marks it "plugged in". Syncing

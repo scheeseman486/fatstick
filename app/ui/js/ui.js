@@ -227,6 +227,29 @@
     if (e.target.id === "modal-back") closeModal();
   });
 
+  // ---- hover tips -------------------------------------------------------------------------
+  // A small box beside what the pointer is over (all of a track's labels,
+  // say), below it unless there's no room. One at a time.
+  let tipEl = null;
+  function showTip(anchor, ...kids) {
+    if (!tipEl) {
+      tipEl = h("div", { class: "tip", id: "tip", role: "tooltip" });
+      document.body.append(tipEl);
+    }
+    fill(tipEl, kids);
+    tipEl.hidden = false;
+    const r = anchor.getBoundingClientRect();
+    const w = tipEl.offsetWidth;
+    const ht = tipEl.offsetHeight;
+    const x = Math.min(window.innerWidth - w - 8, Math.max(8, r.left + r.width / 2 - w / 2));
+    const y = r.bottom + 6 + ht > window.innerHeight - 8 ? r.top - ht - 6 : r.bottom + 6;
+    tipEl.style.left = `${Math.round(x)}px`;
+    tipEl.style.top = `${Math.round(y)}px`;
+  }
+  function hideTip() {
+    if (tipEl) tipEl.hidden = true;
+  }
+
   // ---- toast ---------------------------------------------------------------------------
   let toastTimer = null;
   function toast(msg, action) {
@@ -240,5 +263,5 @@
     document.getElementById("toast").hidden = true;
   }
 
-  Fatstick.ui = { h, fill, icon, clock, length, bytes, ago, plural, db, menu, popover, closeMenu, modal, closeModal, modalOpen, toast };
+  Fatstick.ui = { h, fill, icon, clock, length, bytes, ago, plural, db, menu, popover, closeMenu, modal, closeModal, modalOpen, toast, showTip, hideTip };
 })(window.Fatstick = window.Fatstick || {});

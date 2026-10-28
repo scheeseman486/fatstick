@@ -105,6 +105,7 @@ pub fn list_sticks() -> Result<Vec<StickInfo>> {
             size_bytes: u(&info, "TotalSize").max(u(&info, "Size")).max(u(d, "Size")),
             bus: s(&info, "BusProtocol").to_lowercase(),
             volumes,
+            serial: String::new(),
         });
     }
     Ok(out)

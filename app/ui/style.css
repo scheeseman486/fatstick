@@ -156,7 +156,7 @@ input[type="range"] { accent-color: var(--accent); }
 body.pl-dragging, body.pl-dragging * { cursor: grabbing !important; }
 .side-item .nm { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-item .mt { grid-column: 1 / -1; font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.side-item .flag { font-size: 11.5px; color: var(--warn); align-self: center; max-width: 9em; text-align: right; }
+.side-item .flag { font-size: 11.5px; color: var(--warn); align-self: center; max-width: 12em; text-align: right; }
 .side-item .flag.ok { color: var(--ink-3); }
 .side-item .flag.plug { color: var(--accent); font-weight: 500; }
 .side-item .flag.plug.out { color: var(--warn); }
@@ -1037,3 +1037,23 @@ body.pl-dragging .sv-ins-btn { visibility: hidden; }
 .sl-pl { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; }
 .sl-pl-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sl-seg.small span { padding: 2px 4px; font-size: 12px; }
+
+/* A hover tip: all of a track's labels, beside its "+2". */
+.tip {
+  position: fixed; z-index: 80; max-width: min(320px, calc(100vw - 16px)); padding: 8px;
+  border: 1px solid var(--rule); border-radius: var(--r-s); background: var(--sheet); box-shadow: var(--shadow);
+  pointer-events: none;
+}
+.tip[hidden] { display: none; }
+.tip-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag.more { cursor: default; }
+
+/* Excluding devices: each one plugged in, with a box to tick; those left out and not plugged in. */
+.ex-list { display: grid; gap: 10px; }
+.ex-devs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ex-dev { align-items: flex-start; }
+.ex-dev > span, .ex-away > span:first-child { display: grid; gap: 1px; min-width: 0; }
+.ex-meta { font-size: 12.5px; color: var(--ink-2); }
+.ex-h { margin: 6px 0 0; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.ex-away { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.btn.inline { height: auto; padding: 0 2px; vertical-align: baseline; }

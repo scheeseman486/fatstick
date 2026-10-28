@@ -147,6 +147,7 @@ fn find_sticks(objs: &Objects) -> Vec<Found> {
                 size_bytes: size,
                 bus,
                 volumes,
+                serial: prop::<String>(drive, "Serial").unwrap_or_default().trim().to_string(),
             },
             drive: drive_path.to_string(),
             fs_objects,
@@ -344,6 +345,7 @@ fn list_from_sysfs() -> Result<Vec<StickInfo>> {
             size_bytes: sectors * 512,
             bus: String::new(),
             volumes,
+            serial: read("serial"),
         });
     }
     Ok(out)

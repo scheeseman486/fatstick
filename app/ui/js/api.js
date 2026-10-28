@@ -65,6 +65,7 @@
       libraryInfo: () => invoke("library_info"),
       librarySetRoot: (path) => invoke("library_set_root", { path }),
       libraryScan: () => invoke("library_scan"),
+      libraryForget: (del, hide) => invoke("library_forget", { delete: del, hide }),
       libraryWriteTags: (jobs) => invoke("library_write_tags", { jobs }),
       libraryRename: (jobs) => invoke("library_rename", { jobs }),
       async pickFolder(title) {
@@ -322,6 +323,17 @@
         Object.assign(music, { root: path, watching: true, error: null, last: null, lastScan: null });
         fakeScan();
         return { ...music };
+      },
+      async libraryForget(del, hide) {
+        const removed = [];
+        const kept = [];
+        for (const id of [...del, ...hide]) {
+          const t = tracks.get(id);
+          if (!t || t.exists) continue;
+          removed.push(id);
+          if (hide.includes(id)) { t.forgotten = true; kept.push({ ...t }); } else tracks.delete(id);
+        }
+        return { removed, kept };
       },
       async libraryScan() { if (music.root && !music.scanning) fakeScan(); },
       async libraryWriteTags(jobs) {

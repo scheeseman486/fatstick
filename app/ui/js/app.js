@@ -45,6 +45,10 @@
     /** The last sync of each stick, by stick id. */
     syncs: {},
     sticks: [],
+    /** Every device plugged in, the excluded ones too (S.sticks leaves those out). */
+    allSticks: [],
+    /** Devices not to show or copy to: { key, name, sizeBytes }. */
+    excluded: [],
     stickError: null,
     current: null,
     setId: null,
@@ -1867,7 +1871,59 @@
       takenOther ? h("p", { class: "st-note warn", id: "holds-other", text: `This stick holds ${heldText(takenOther)}${heldElsewhere(takenOther)}. Syncing ${s.name} to it replaces that.` }) : null,
       items.length ? h("div", { class: "devices", role: "radiogroup", "aria-label": "USB stick" }, items) : h("p", { class: "st-note", text: "No USB stick found. Plug one in; it shows up here." }),
       S.stickError ? h("p", { class: "st-note err", text: `Looking for sticks failed: ${S.stickError}` }) : null,
+      S.allSticks.length > S.sticks.length ? h("p", { class: "st-note" },
+        `${plural(S.allSticks.length - S.sticks.length, "excluded device")} not shown. `,
+        h("button", { type: "button", class: "btn quiet small inline", text: "Exclude devices…", onclick: excludeDevicesDialog })) : null,
     );
+  }
+
+  // ---- devices left out ---------------------------------------------------------------------
+  // A card reader that's always plugged in, a backup drive: not shown, and
+  // never picked to copy to. Changes apply as they're ticked.
+  let excludeDlg = null;
+  function excludeDevicesDialog() {
+    const list = h("div", { class: "ex-list" });
+    const setExcluded = (d, on) => {
+      const k = devKey(d);
+      S.excluded = S.excluded.filter((x) => x.key !== k);
+      if (on) S.excluded.push({ key: k, name: d.name, sizeBytes: d.sizeBytes });
+      saveSetting("excludedDevices", S.excluded);
+      S.sticks = S.allSticks.filter((x) => !isExcluded(x));
+      renderStick();
+      renderSide();
+      draw();
+    };
+    function draw() {
+      if (!document.contains(list) && excludeDlg) return;
+      const here = new Set(S.allSticks.map(devKey));
+      const away = S.excluded.filter((x) => !here.has(x.key));
+      fill(list,
+        S.allSticks.length ? h("ul", { class: "ex-devs" }, S.allSticks.map((d) => h("li", null,
+          h("label", { class: "check ex-dev" },
+            h("input", { type: "checkbox", checked: isExcluded(d), onchange: (e) => setExcluded(d, e.target.checked) }),
+            h("span", null,
+              h("strong", { text: d.name }),
+              h("span", { class: "ex-meta", text: `${bytes(d.sizeBytes)}${d.bus ? `, ${d.bus.toUpperCase()}` : ""}${d.device ? `, ${d.device}` : ""}. ${d.volumes.length ? d.volumes.join("; ") : "Blank"}.` })))))) 
+          : h("p", { class: "st-note", text: "No USB sticks or memory cards are plugged in. Plug in the one to exclude, then look again." }),
+        away.length ? [
+          h("h3", { class: "ex-h", text: "Excluded, not plugged in now" }),
+          h("ul", { class: "ex-devs" }, away.map((x) => h("li", { class: "ex-away" },
+            h("span", null, h("strong", { text: x.name || "A device" }), h("span", { class: "ex-meta", text: bytes(x.sizeBytes || 0) })),
+            h("button", { type: "button", class: "btn small", text: "Show it again", onclick: () => { S.excluded = S.excluded.filter((y) => y.key !== x.key); saveSetting("excludedDevices", S.excluded); draw(); } })))),
+        ] : null);
+    }
+    excludeDlg = draw;
+    modal({
+      title: "Exclude devices",
+      body: [h("p", { text: "Ticked devices aren't shown and can't be picked to copy to: a card reader that's always plugged in, say, or a backup drive." }), list],
+      buttons: [
+        h("button", { type: "button", class: "btn left", text: "Look again", onclick: () => refreshSticks(true) }),
+        h("button", { type: "button", class: "btn primary", text: "Done", onclick: closeModal }),
+      ],
+      onClose: () => { excludeDlg = null; },
+    });
+    draw();
+    refreshSticks(true);
   }
 
   function renderSpace(plan) {
@@ -2906,16 +2962,23 @@
     changed();
     return true;
   }
+  /** What a device is known by: its own serial number when the system gives
+   * one, else its name and size (the same whatever is written to it). */
+  const devKey = (d) => (d.image ? `img:${d.id}` : d.hwSerial ? `sn:${d.hwSerial}` : `ms:${d.name}|${d.sizeBytes}`);
+  const isExcluded = (d) => S.excluded.some((x) => x.key === devKey(d));
   async function refreshSticks(quiet) {
     try {
       const r = await api.listSticks();
-      const changedSticks = JSON.stringify(r.sticks) !== JSON.stringify(S.sticks);
+      S.allSticks = r.sticks;
+      const shown = r.sticks.filter((d) => !isExcluded(d));
+      const changedSticks = JSON.stringify(shown) !== JSON.stringify(S.sticks);
       const before = new Set(S.sticks.map(stickKey));
-      S.sticks = r.sticks;
+      S.sticks = shown;
       S.stickError = r.error;
       if (changedSticks && recognize(before)) renderAll();
       else if (changedSticks || !quiet) { renderStick(); renderSide(); }
-      if (!quiet) toast(r.sticks.length ? `${plural(r.sticks.length, "stick")} found.` : "No USB stick found.");
+      if (!quiet) toast(shown.length ? `${plural(shown.length, "stick")} found.` : "No USB stick found.");
+      if (excludeDlg) excludeDlg();
     } catch (e) {
       if (!quiet) toast(`Couldn't look for sticks: ${e}`);
     }
@@ -3304,11 +3367,29 @@
       "-",
       n === 1 ? { label: S.expanded === id ? "Hide the tags" : "Show the tags", key: "T", action: () => toggleTags(id) } : null,
       { label: n === 1 ? "Edit tags…" : `Edit the tags of ${n} tracks…`, action: () => lib.editTagsDialog(tids()), disabled: !tids().some((x) => lib.canTag(track(x))) },
-      lib.inMusic(t) ? { label: "Show in the library", action: () => lib.revealInLibrary(t.id) } : null,
+      { label: "Show in the library", action: () => showInLibrary(t) },
       "-",
       t.exists ? { label: "Show where the file is", action: () => toast(t.path) } : { label: "Locate…", action: () => locate(t) },
       { label: n === 1 ? "Remove from playlist" : `Remove ${n} from playlist`, key: "Delete", action: removeSelected },
     ].filter(Boolean));
+  }
+
+  /** The library, with this track selected (to see and change its tags). */
+  function showInLibrary(t) {
+    if (!S.music || !S.music.root) {
+      setView("library");
+      toast("Choose your music folder first: the library is the music in it.");
+      return;
+    }
+    if (!lib.inMusic(t)) {
+      toast(`${t.title || t.filename} isn't in your music folder (${S.music.root}), so the library doesn't have it. Its file is at ${t.path}.`);
+      return;
+    }
+    if (t.forgotten) {
+      toast(`${t.title || t.filename} was taken out of the library: its file had gone. Locate it to bring it back.`);
+      return;
+    }
+    lib.revealInLibrary(t.id);
   }
 
   // ---- theme and the app menu -----------------------------------------------------------------------
@@ -3334,6 +3415,7 @@
       theme("light", "Light"),
       theme("dark", "Dark"),
       "-",
+      { label: "Exclude devices…", action: excludeDevicesDialog },
       { label: "Clear the cache…", action: clearCacheDialog },
       { label: "About Fatstick", action: aboutDialog },
     ]);
@@ -3425,6 +3507,7 @@
     try { Object.assign(S.cols, JSON.parse(st.columns || "{}")); } catch { /* keep the defaults */ }
     if (st.volume) S.player.volume = Number(st.volume) || 0.8;
     if (REPEAT[st.repeat]) S.player.repeat = st.repeat;
+    try { const ex = JSON.parse(st.excludedDevices || "[]"); if (Array.isArray(ex)) S.excluded = ex.filter((x) => x && typeof x.key === "string"); } catch { /* none */ }
     try { setlist.load(JSON.parse(st.setlist || "null")); } catch { /* the defaults */ }
     for (const t of d.tracks) putTrack({ ...t });
     S.playlists = clone(d.playlists);

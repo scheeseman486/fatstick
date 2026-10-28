@@ -110,6 +110,10 @@ pub struct Track {
     /// Read quickly (see `fatstick_audio::Probe::quick`): read in full before it goes on a stick.
     #[serde(default)]
     pub quick: bool,
+    /// Taken out of the library by the person (its file had gone): not
+    /// listed there any more, though a playlist may still refer to it.
+    #[serde(default)]
+    pub forgotten: bool,
     pub drm: bool,
     pub lufs: Option<f64>,
     pub true_peak: Option<f64>,
@@ -167,6 +171,16 @@ pub fn stat(path: &Path) -> Option<(u64, i64)> {
     Some((m.len(), t))
 }
 
+/// Columns added since the first release, to libraries made before them.
+fn migrate(conn: &Connection) -> Result<()> {
+    let mut st = conn.prepare("PRAGMA table_info(tracks)")?;
+    let cols: Vec<String> = st.query_map([], |r| r.get::<_, String>(1))?.collect::<rusqlite::Result<_>>()?;
+    if !cols.iter().any(|c| c == "forgotten") {
+        conn.execute_batch("ALTER TABLE tracks ADD COLUMN forgotten INTEGER NOT NULL DEFAULT 0")?;
+    }
+    Ok(())
+}
+
 fn now() -> i64 {
     std::time::SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
@@ -192,12 +206,14 @@ impl Library {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Library { conn, seen: RefCell::default(), music_root: RefCell::default() })
     }
 
     pub fn open_in_memory() -> Result<Library> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Library { conn, seen: RefCell::default(), music_root: RefCell::default() })
     }
 
@@ -251,6 +267,7 @@ impl Library {
         let hint: Option<String> = row.get(7)?;
         let lufs: Option<f64> = row.get(8)?;
         let peak: Option<f64> = row.get(9)?;
+        let forgotten: i64 = row.get(10)?;
         let p: Probe = probe.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
         let filename = Path::new(&path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let exists = self.exists(Path::new(&path));
@@ -283,6 +300,7 @@ impl Library {
             cover: p.cover,
             exists,
             quick: p.quick,
+            forgotten: forgotten != 0,
             drm: p.drm,
             lufs,
             true_peak: peak,
@@ -292,7 +310,7 @@ impl Library {
         })
     }
 
-    const SELECT: &'static str = "SELECT t.id, t.path, t.size, t.mtime, t.content_key, t.probe, t.error, t.hint_title, a.lufs, a.true_peak
+    const SELECT: &'static str = "SELECT t.id, t.path, t.size, t.mtime, t.content_key, t.probe, t.error, t.hint_title, a.lufs, a.true_peak, t.forgotten
          FROM tracks t LEFT JOIN analysis a ON a.content_key = t.content_key AND t.content_key != ''";
 
     pub fn tracks(&self) -> Result<Vec<Track>> {
@@ -336,11 +354,38 @@ impl Library {
         let probe_json = probe.map(serde_json::to_string).transpose()?;
         self.conn.execute(
             "INSERT INTO tracks (path, size, mtime, content_key, probe, error, added) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(path) DO UPDATE SET size = ?2, mtime = ?3, content_key = ?4, probe = ?5, error = ?6",
+             ON CONFLICT(path) DO UPDATE SET size = ?2, mtime = ?3, content_key = ?4, probe = ?5, error = ?6, forgotten = 0",
             params![path.to_string_lossy(), size as i64, mtime, content_key, probe_json, error, now()],
         )?;
         let id: i64 = self.conn.query_row("SELECT id FROM tracks WHERE path = ?1", [path.to_string_lossy()], |r| r.get(0))?;
         Ok(track_id(id))
+    }
+
+    /// Tracks whose files have gone, out of the library: those no playlist
+    /// refers to (`delete`) are dropped; the others (`hide`) stay for their
+    /// playlists but aren't listed. A track whose file is there is left as
+    /// it is. Returns the tracks taken out. If a file comes back, the next
+    /// read of it puts it back.
+    pub fn forget(&self, delete: &[String], hide: &[String]) -> Result<Vec<String>> {
+        let mut out = Vec::new();
+        let tx = self.conn.unchecked_transaction()?;
+        for (ids, drop) in [(delete, true), (hide, false)] {
+            for id in ids {
+                let Some(t) = self.track(id)? else { continue };
+                if t.exists {
+                    continue;
+                }
+                let n = rowid(id).unwrap_or(-1);
+                if drop {
+                    tx.execute("DELETE FROM tracks WHERE id = ?1", [n])?;
+                } else {
+                    tx.execute("UPDATE tracks SET forgotten = 1 WHERE id = ?1", [n])?;
+                }
+                out.push(id.clone());
+            }
+        }
+        tx.commit()?;
+        Ok(out)
     }
 
     /// A track a playlist refers to whose file isn't there (yet).
@@ -496,6 +541,44 @@ impl Library {
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)", params![key, value])?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod forgetting {
+    use super::*;
+
+    #[test]
+    fn gone_files_can_be_taken_out_of_the_library() {
+        let d = tempfile::tempdir().unwrap();
+        let lib = Library::open(&d.path().join("library.db")).unwrap();
+        let here = d.path().join("here.mp3");
+        std::fs::write(&here, b"x").unwrap();
+        let a = lib.put_missing(&d.path().join("gone a.mp3"), Some("Gone A")).unwrap();
+        let b = lib.put_missing(&d.path().join("gone b.mp3"), Some("Gone B")).unwrap();
+        let c = lib.put_track(&here, 1, 1, "k", None, None).unwrap();
+        let out = lib.forget(&[a.clone(), c.clone()], &[b.clone()]).unwrap();
+        assert_eq!(out, vec![a.clone(), b.clone()], "a file that's there is left alone");
+        assert!(lib.track(&a).unwrap().is_none(), "dropped");
+        assert!(lib.track(&b).unwrap().unwrap().forgotten, "kept for its playlist, not listed");
+        assert!(!lib.track(&c).unwrap().unwrap().forgotten);
+        // The file comes back and is read again: listed again.
+        lib.put_track(&d.path().join("gone b.mp3"), 1, 1, "k2", None, None).unwrap();
+        assert!(!lib.track(&b).unwrap().unwrap().forgotten);
+    }
+
+    #[test]
+    fn an_older_library_gets_the_new_column() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("old.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("CREATE TABLE tracks (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, size INTEGER NOT NULL DEFAULT 0, mtime INTEGER NOT NULL DEFAULT 0, content_key TEXT NOT NULL DEFAULT '', probe TEXT, error TEXT, hint_title TEXT, added INTEGER NOT NULL DEFAULT 0); INSERT INTO tracks (path) VALUES ('/x/old.mp3');").unwrap();
+        }
+        let lib = Library::open(&path).unwrap();
+        let ts = lib.tracks().unwrap();
+        assert_eq!(ts.len(), 1);
+        assert!(!ts[0].forgotten);
     }
 }
 

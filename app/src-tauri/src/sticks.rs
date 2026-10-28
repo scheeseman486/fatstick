@@ -36,6 +36,10 @@ pub struct StickView {
     pub note: Option<serde_json::Value>,
     /// Volume serial numbers, as "1A2B-3C4D", where the OS reports them.
     pub serials: Vec<String>,
+    /// The device's own serial number, if the OS gives it: the same whatever
+    /// is written to it, so the window can recognize a device it was told
+    /// to leave out.
+    pub hw_serial: String,
 }
 
 /// A note is ours if it says so; anything else is ignored.
@@ -115,6 +119,7 @@ pub fn list() -> (Vec<StickView>, Option<String>) {
         Ok(v) => out.extend(v.into_iter().map(|s| StickView {
             note: s.volumes.iter().filter_map(|v| v.mount_point.as_deref()).find_map(note_in_folder),
             serials: s.volumes.iter().filter(|v| !v.serial.is_empty()).map(|v| v.serial.clone()).collect(),
+            hw_serial: s.serial.clone(),
             volumes: s.volumes.iter().map(describe_volume).collect(),
             id: s.id,
             device: s.device,
@@ -138,6 +143,7 @@ pub fn list() -> (Vec<StickView>, Option<String>) {
             image: true,
             note,
             serials,
+            hw_serial: String::new(),
         });
     }
     (out, error)
