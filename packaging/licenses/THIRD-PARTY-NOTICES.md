@@ -40,6 +40,36 @@ alongside the installers. The build script fetches them too.
 - DSEG14 Classic, by keshikan: SIL Open Font License 1.1 (`app/ui/fonts/DSEG-LICENSE.txt`).
 - Barlow, by Jeremy Tribby: SIL Open Font License 1.1 (`app/ui/fonts/barlow-OFL.txt`).
 
+## Signalsmith Stretch (key shifting)
+
+Signalsmith Stretch 1.3.1 and Signalsmith Linear, by Geraint Luff /
+Signalsmith Audio, compiled into the app for changing a track's key. The C
+wrapper is adapted from the signalsmith-stretch crate by Colin Marc. All MIT:
+
+> Copyright (c) 2022 Geraint Luff / Signalsmith Audio Ltd.
+> Copyright (c) 2025 Signalsmith Audio
+> Copyright 2024 Colin Marc
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to
+> deal in the Software without restriction, including without limitation the
+> rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+> sell copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in
+> all copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+> FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+> LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+> FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+> IN THE SOFTWARE.
+
+Sources: `crates/p2u-stretch/vendor` in the Playlist2USB source.
+
 ## Rust libraries
 
 Compiled into the Playlist2USB programs. All are under licences compatible

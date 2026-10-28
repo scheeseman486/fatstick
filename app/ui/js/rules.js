@@ -102,6 +102,20 @@
     const x = edges(e);
     return !!(x.cutStart || x.cutEnd || x.padStart || x.padEnd);
   }
+  /** A track's key on the stick: semitones up or down (cents as hundredths), and
+   * whether voices keep their natural character (formants), from its entry. */
+  function key(e) {
+    const p = Number(e && e.pitch);
+    const pitch = Number.isFinite(p) ? Math.round(Math.max(-24, Math.min(24, p)) * 100) / 100 : 0;
+    return { pitch, keepFormants: !(e && e.keepFormants === false) };
+  }
+  function hasKey(e) {
+    return key(e).pitch !== 0;
+  }
+  /** An entry whose track is rendered, not copied: cut, padded or in another key. */
+  function reworks(e) {
+    return hasEdges(e) || hasKey(e);
+  }
   /** How long a track is on the stick: cut at its ends, then padded. */
   function stickSeconds(t, e) {
     const x = edges(e);
@@ -109,7 +123,8 @@
   }
   /** One part of a rendered file: a track with its gain, cuts and silences. */
   function part(t, e, g) {
-    return { trackId: t.id, gainDb: g && g.db ? Math.round(g.db * 10) / 10 : 0, ...edges(e) };
+    const k = key(e);
+    return { trackId: t.id, gainDb: g && g.db ? Math.round(g.db * 10) / 10 : 0, ...edges(e), ...(k.pitch ? k : {}) };
   }
   /** A file rendered from parts: a cut or padded track, silence, a joined playlist. */
   function render(parts, profile, rate) {
@@ -119,7 +134,7 @@
   /**
    * The recipe the app's preparation and sync take: a plain copy, a copy with
    * lossless gain steps, an encode (with the exact gain), or, for a track cut
-   * or padded at its ends (entry `e`), a render.
+   * or padded at its ends or in another key (entry `e`), a render.
    */
   function recipe(t, d, g, profile, e) {
     if (d.action === "skip") return null;
@@ -128,7 +143,7 @@
       return steps ? { kind: "gain", steps } : { kind: "copy" };
     }
     const rate = outputRate(t.sampleRate, profile.sampleRates);
-    if (e && hasEdges(e)) return render([part(t, e, g)], profile, rate);
+    if (e && reworks(e)) return render([part(t, e, g)], profile, rate);
     return {
       kind: "encode", cap: profile.bitrateCap, vbr: profile.mode === "vbr",
       sampleRate: rate, gainDb: g && g.db ? Math.round(g.db * 10) / 10 : 0,
@@ -139,7 +154,7 @@
     if (r.kind === "copy") return "copy";
     if (r.kind === "gain") return `gain${r.steps > 0 ? "+" : ""}${r.steps}`;
     if (r.kind === "render") {
-      const ps = r.parts.map((x) => `${x.trackId || "-"}:${x.gainDb || 0}:${x.cutStart || 0}:${x.cutEnd || 0}:${x.padStart || 0}:${x.padEnd || 0}`).join(",");
+      const ps = r.parts.map((x) => `${x.trackId || "-"}:${x.gainDb || 0}:${x.cutStart || 0}:${x.cutEnd || 0}:${x.padStart || 0}:${x.padEnd || 0}${x.pitch ? `:k${x.pitch}${x.keepFormants ? "f" : ""}` : ""}`).join(",");
       return `render/${r.vbr ? "vbr" : "cbr"}${r.cap}/${r.sampleRate}/${hash(ps)}`;
     }
     return `${r.vbr ? "vbr" : "cbr"}${r.cap}/${r.sampleRate}/${r.gainDb}`;
@@ -201,6 +216,6 @@
 
   P2U.rules = {
     LOSSLESS, CODEC_NAME, formatLabel, decide, gains, outBytes, geometry, layout, outputRate, recipe, describe, STEP,
-    edges, hasEdges, stickSeconds, part, render, hash,
+    edges, hasEdges, key, hasKey, reworks, stickSeconds, part, render, hash,
   };
 })(typeof window !== "undefined" ? (window.P2U = window.P2U || {}) : (globalThis.P2U = globalThis.P2U || {}));

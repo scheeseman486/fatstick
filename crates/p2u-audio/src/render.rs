@@ -1,7 +1,9 @@
 //! Rendering: one stick file made of stretches of audio and silence.
 //!
-//! Each part is a track's audio, cut at either end and with a gain, with
-//! silence before and after it; or silence alone. The parts are decoded to
+//! Each part is a track's audio, cut at either end, shifted to another key
+//! (pitch without tempo, by Signalsmith Stretch, the whole track at once and
+//! the same length out) and with a gain, with silence before and after it;
+//! or silence alone. The parts are decoded to
 //! 32-bit float stereo PCM one after another and streamed, as one WAV stream,
 //! into a single LAME encode. That covers a track cut or padded at its ends,
 //! a stretch of silence between playlists, and a whole playlist joined into
@@ -41,6 +43,16 @@ pub struct RenderPart {
     pub pad_start: f64,
     #[serde(default)]
     pub pad_end: f64,
+    /// Semitones up or down (cents as fractions), keeping the length.
+    #[serde(default)]
+    pub pitch: f64,
+    /// When shifting: voices keep their natural character (formants).
+    #[serde(default = "yes")]
+    pub keep_formants: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -74,6 +86,9 @@ impl RenderSpec {
                 _ => "silence",
             };
             s.push_str(&format!("|{what}:{:.3}:{:.3}:{:.3}:{:.3}:{:+.2}", p.cut_start, p.cut_end, p.pad_start, p.pad_end, p.gain_db));
+            if p.pitch != 0.0 {
+                s.push_str(&format!(":key{:+.2}{}:ss1.3.1", p.pitch, if p.keep_formants { "f" } else { "" }));
+            }
         }
         s
     }
@@ -92,6 +107,9 @@ impl RenderSpec {
             }
             if p.track_id.is_some() && s.is_none() {
                 return Err(AudioError::Invalid("a part's track has no source".into()));
+            }
+            if !p.pitch.is_finite() || p.pitch.abs() > 24.0 {
+                return Err(AudioError::Invalid("a key shift is up to 24 semitones either way".into()));
             }
         }
         Ok(())
@@ -136,6 +154,18 @@ fn silence(out: &mut impl Write, n_frames: usize) -> std::io::Result<()> {
 /// back and dropped at the end, so the cut is exact whatever the file's
 /// stated length.
 fn track_audio(tools: &Tools, out: &mut impl Write, path: &Path, p: &RenderPart, rate: u32) -> Result<()> {
+    if p.pitch != 0.0 {
+        // The cut track through the shifter, a block at a time (the same as
+        // shifting it whole, in constant memory), the same length out.
+        let mut sink = Shifted { out, st: Some(crate::stretch::ExactStream::new(2, rate, crate::stretch::Key { semitones: p.pitch as f32, keep_formants: p.keep_formants })), carry: Vec::new(), buf: Vec::new() };
+        cut_audio(tools, &mut sink, path, p, rate)?;
+        return sink.finish();
+    }
+    cut_audio(tools, out, path, p, rate)
+}
+
+/// The track's audio, cut and with its gain.
+fn cut_audio(tools: &Tools, out: &mut dyn Write, path: &Path, p: &RenderPart, rate: u32) -> Result<()> {
     let mut pcm = PcmStream::start(tools, path, p.cut_start, rate, p.gain_db)?;
     let hold = frames(p.cut_end, rate) * FRAME;
     let mut held: Vec<u8> = Vec::with_capacity(hold + 256 * 1024);
@@ -161,6 +191,49 @@ fn track_audio(tools: &Tools, out: &mut impl Write, path: &Path, p: &RenderPart,
         return Err(AudioError::Tool(format!("{} gave no audio{}", path.display(), if p.cut_start > 0.0 { " after the cut" } else { "" })));
     }
     Ok(())
+}
+
+/// A writer that shifts the float stereo PCM going through it.
+struct Shifted<'a, W: Write> {
+    out: &'a mut W,
+    st: Option<crate::stretch::ExactStream>,
+    /// Bytes short of a whole sample.
+    carry: Vec<u8>,
+    buf: Vec<f32>,
+}
+
+impl<W: Write> Shifted<'_, W> {
+    fn emit(&mut self) -> std::io::Result<()> {
+        let mut bytes = Vec::with_capacity(self.buf.len() * 4);
+        for x in self.buf.drain(..) {
+            bytes.extend_from_slice(&x.to_le_bytes());
+        }
+        self.out.write_all(&bytes)
+    }
+    fn finish(mut self) -> Result<()> {
+        if let Some(st) = self.st.take() {
+            st.finish(&mut self.buf);
+        }
+        self.emit()?;
+        Ok(())
+    }
+}
+
+impl<W: Write> Write for Shifted<'_, W> {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        self.carry.extend_from_slice(data);
+        let whole = self.carry.len() / FRAME * FRAME;
+        let samples: Vec<f32> = self.carry[..whole].chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect();
+        self.carry.drain(..whole);
+        if let Some(st) = self.st.as_mut() {
+            st.push(&samples, &mut self.buf);
+        }
+        self.emit()?;
+        Ok(data.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.out.flush()
+    }
 }
 
 fn once(tools: &Tools, spec: &RenderSpec, sources: &[Option<Source>], dst: &Path, vbr: bool) -> Result<()> {

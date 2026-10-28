@@ -323,6 +323,29 @@ input[type="range"] { accent-color: var(--accent); }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
 }
 .edge-btn:hover { color: var(--ink); text-decoration: underline; }
+.c-key { font-variant-numeric: tabular-nums; }
+
+/* The key dialog: the shift on a small LCD, like the display band's. */
+.key-dial { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: end; margin-top: 4px; }
+.key-mid { display: grid; gap: 8px; min-width: 0; }
+.key-lcd {
+  justify-self: center; display: inline-grid; padding: 9px 16px 8px; margin-bottom: 4px;
+  border-radius: var(--r-glass); background-color: var(--disp-bg); color: var(--disp-ink); box-shadow: var(--glass-shadow);
+}
+.key-lcd > * { grid-area: 1 / 1; font-size: 30px; }
+.key-range { width: 100%; margin: 0; }
+.key-scale { display: flex; justify-content: space-between; padding-inline: 2px; margin-top: -4px; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.key-step { width: 34px; height: 34px; border-radius: 50%; margin-bottom: 22px; }
+.key-sign { font-size: 20px; line-height: 1; margin-top: -2px; }
+.key-words { margin: 0; text-align: center; font-weight: 600; min-height: 1.4em; }
+.key-fine { display: grid; grid-template-columns: auto minmax(0, 1fr) 5.6em; gap: 12px; align-items: center; }
+.key-fine .lbl { font-size: 13px; color: var(--ink-2); }
+.key-fine input { width: 100%; margin: 0; }
+.key-fine output { text-align: right; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.key-hint { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-3); }
+.key-listen { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 12px; border-radius: var(--r-s); background: var(--pane); }
+.key-listen .btn { min-width: 6.5em; }
+.key-status { margin: 0; flex: 1 1 220px; }
 .edges-form { display: grid; grid-template-columns: max-content minmax(0, 9em) minmax(0, 9em); gap: 8px 14px; align-items: center; }
 .edges-form .lbl { font-size: 13px; color: var(--ink-2); }
 .input.secs { width: 100%; min-width: 4.5em; }

@@ -31,6 +31,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -214,6 +215,16 @@ def main():
     record("the silence between the playlists: 3 s, silent", abs(lens[1] - 3.0) < 0.12 and peak(gap) < -80, f"{lens[1]:.2f} s, peak {peak(gap):.0f} dB")
     record("the second playlist joined into one track of 16 s, both tracks audible", abs(lens[2] - 16.0) < 0.15 and peak(joined, 1, 6) > -30 and peak(joined, 9, 6) > -45,
            f"{lens[2]:.2f} s; {peak(joined, 1, 6):.0f} and {peak(joined, 9, 6):.0f} dB")
+    def freq(path, start, dur):
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(start), "-t", str(dur), "-i", path, "-ac", "1", "-ar", "44100", "-f", "f32le", "-"],
+                             capture_output=True).stdout
+        x = struct.unpack(f"<{len(raw) // 4}f", raw)
+        ups = sum(1 for i in range(1, len(x)) if x[i - 1] < 0 <= x[i])
+        return ups / (len(x) / 44100) if x else 0.0
+
+    second = probes[1][2]
+    f2, l2 = freq(second, 2, 4), length(second)
+    record("the second track: 5 semitones up (550 Hz became 734 Hz), still 8 s", abs(f2 - 550 * 2 ** (5 / 12)) < 6 and abs(l2 - 8.0) < 0.12, f"{f2:.1f} Hz, {l2:.2f} s")
     record("the joined track takes the playlist's name and the shared artist", probes[5][4].get("album") == "Live" and probes[5][4].get("artist") == "Live Band", str(probes[5][4]))
 
     run_app("phase 2", "app_selftest2.js", cfg, env)

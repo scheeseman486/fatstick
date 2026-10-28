@@ -3,6 +3,10 @@
 //! reads), a decoder thread keeps about two seconds buffered, and the device's
 //! callback drains the buffer. Seeking restarts the decoder at the new place.
 //!
+//! A track in another key goes through the key shifter as the device takes
+//! it, after the buffer, so moving the key slider is heard at once (well,
+//! after the shifter's tenth of a second). Other tracks skip it.
+//!
 //! The device lives on its own thread (cpal streams aren't Send everywhere);
 //! the UI talks to it with commands and hears back through `player` events
 //! about ten times a second.
@@ -17,11 +21,14 @@ use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use p2u_audio::decode::PcmStream;
+use p2u_audio::stretch::{Key, Shifter};
 use p2u_audio::Tools;
 use serde::Serialize;
 
 pub enum Cmd {
-    Play { path: PathBuf, from: f64, gain_db: f64, duration: f64, token: String },
+    Play { path: PathBuf, from: f64, gain_db: f64, duration: f64, token: String, key: Option<Key> },
+    /// Another key for what's playing (live, from the key slider), or none.
+    Key(Option<Key>),
     Pause,
     Resume,
     Seek(f64),
@@ -41,9 +48,18 @@ pub struct PlayerEvent {
     pub error: Option<String>,
 }
 
+/// The key shifter and its buffers, used by the device callback.
+#[derive(Default)]
+struct Shift {
+    shifter: Option<Shifter>,
+    input: Vec<f32>,
+    output: Vec<f32>,
+}
+
 /// Samples shared between the decoder thread and the device callback.
 struct Shared {
     buf: Mutex<VecDeque<f32>>,
+    shift: Mutex<Shift>,
     playing: AtomicBool,
     /// Stereo frames handed to the device since the last (re)start.
     frames: AtomicU64,
@@ -57,16 +73,35 @@ struct Shared {
 impl Shared {
     fn take(&self, out: &mut [f32], channels: usize) {
         let vol = f32::from_bits(self.volume.load(Ordering::Relaxed));
-        let mut buf = self.buf.lock().unwrap();
         let playing = self.playing.load(Ordering::Relaxed);
+        let n = out.len() / channels;
         let mut frames = 0u64;
-        for frame in out.chunks_mut(channels) {
-            let (l, r) = if playing && buf.len() >= 2 {
-                frames += 1;
-                (buf.pop_front().unwrap(), buf.pop_front().unwrap())
-            } else {
-                (0.0, 0.0)
-            };
+        let mut sh = self.shift.lock().unwrap();
+        let Shift { shifter, input, output } = &mut *sh;
+        input.clear();
+        {
+            let mut buf = self.buf.lock().unwrap();
+            for _ in 0..n {
+                if playing && buf.len() >= 2 {
+                    frames += 1;
+                    input.push(buf.pop_front().unwrap());
+                    input.push(buf.pop_front().unwrap());
+                } else {
+                    input.push(0.0);
+                    input.push(0.0);
+                }
+            }
+        }
+        let stereo: &[f32] = match shifter.as_mut() {
+            Some(s) if playing => {
+                output.resize(input.len(), 0.0);
+                s.process(input, output);
+                output
+            }
+            _ => input,
+        };
+        for (i, frame) in out.chunks_mut(channels).enumerate() {
+            let (l, r) = (stereo[2 * i], stereo[2 * i + 1]);
             match frame.len() {
                 1 => frame[0] = (l + r) * 0.5 * vol,
                 _ => {
@@ -233,6 +268,7 @@ impl Player {
 fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
     let shared = Arc::new(Shared {
         buf: Mutex::new(VecDeque::new()),
+        shift: Mutex::new(Shift::default()),
         playing: AtomicBool::new(false),
         frames: AtomicU64::new(0),
         volume: AtomicU32::new(0.8f32.to_bits()),
@@ -250,6 +286,30 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
         s.buf.lock().unwrap().clear();
         s.frames.store(0, Ordering::SeqCst);
         s.eof.store(false, Ordering::SeqCst);
+        if let Some(sh) = s.shift.lock().unwrap().shifter.as_mut() {
+            sh.reset();
+        }
+    };
+    // A shifter for the key (made here, never in the device callback), or none.
+    let set_key = |s: &Shared, key: Option<Key>, rate: u32, fresh: bool| {
+        let mut made = match key {
+            Some(_) if fresh || s.shift.lock().unwrap().shifter.is_none() => Some(Shifter::new(2, rate)),
+            _ => None,
+        };
+        let mut sh = s.shift.lock().unwrap();
+        match key {
+            None => sh.shifter = None,
+            Some(k) => {
+                if let Some(new) = made.take() {
+                    sh.input.reserve(rate as usize);
+                    sh.output.reserve(rate as usize);
+                    sh.shifter = Some(new);
+                }
+                if let Some(x) = sh.shifter.as_mut() {
+                    x.set_key(k);
+                }
+            }
+        }
     };
     loop {
         let cmd = match rx.recv_timeout(Duration::from_millis(100)) {
@@ -262,7 +322,7 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
         let token = current.as_ref().map(|c| c.2.clone()).unwrap_or_default();
         let ev = |state: &str, pos: f64, error: Option<String>, token: &str| PlayerEvent { state: state.into(), token: token.into(), pos, dur: dur.get(), error };
         match cmd {
-            Some(Cmd::Play { path, from, gain_db, duration, token }) => {
+            Some(Cmd::Play { path, from, gain_db, duration, token, key }) => {
                 let Some(t) = tools.clone() else {
                     emit(ev("error", 0.0, Some("ffmpeg isn't available, so nothing can play.".into()), &token));
                     continue;
@@ -279,6 +339,7 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
                 reset(&shared);
                 while err_rx.try_recv().is_ok() {}
                 let rate = output.as_ref().unwrap().1;
+                set_key(&shared, key, rate, true);
                 base = from;
                 dur.set(duration);
                 current = Some((path.clone(), gain_db, token.clone()));
@@ -317,6 +378,7 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
                 emit(ev(&state, 0.0, None, &token));
             }
             Some(Cmd::Volume(v)) => shared.volume.store(v.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed),
+            Some(Cmd::Key(key)) => set_key(&shared, key, rate, false),
             None => {
                 if let Ok(e) = err_rx.try_recv() {
                     shared.playing.store(false, Ordering::SeqCst);
@@ -337,5 +399,65 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+
+    fn shared(samples: Vec<f32>) -> Shared {
+        Shared {
+            buf: Mutex::new(samples.into()),
+            shift: Mutex::new(Shift::default()),
+            playing: AtomicBool::new(true),
+            frames: AtomicU64::new(0),
+            volume: AtomicU32::new(1.0f32.to_bits()),
+            eof: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
+        }
+    }
+    fn tone(hz: f32, secs: f32) -> Vec<f32> {
+        (0..(secs * 44100.0) as usize).flat_map(|i| {
+            let x = (i as f32 * hz * std::f32::consts::TAU / 44100.0).sin() * 0.5;
+            [x, x]
+        }).collect()
+    }
+    fn hz(s: &[f32]) -> f32 {
+        let left: Vec<f32> = s.iter().step_by(2).copied().collect();
+        let ups = (1..left.len()).filter(|&i| left[i - 1] < 0.0 && left[i] >= 0.0).count();
+        ups as f32 * 44100.0 / left.len() as f32
+    }
+    fn drain(s: &Shared, blocks: usize) -> Vec<f32> {
+        let mut all = Vec::new();
+        let mut out = vec![0.0f32; 512 * 2];
+        for _ in 0..blocks {
+            s.take(&mut out, 2);
+            all.extend_from_slice(&out);
+        }
+        all
+    }
+
+    #[test]
+    fn the_device_hears_the_key_and_follows_the_slider() {
+        let s = shared(tone(440.0, 6.0));
+        let mut sh = Shifter::new(2, 44100);
+        sh.set_key(Key { semitones: 12.0, keep_formants: false });
+        s.shift.lock().unwrap().shifter = Some(sh);
+        let a = drain(&s, 200); // about 2.3 s
+        assert!((hz(&a[44100..]) - 880.0).abs() < 15.0, "an octave up: {}", hz(&a[44100..]));
+        // The slider moves: the next blocks are in the new key.
+        s.shift.lock().unwrap().shifter.as_mut().unwrap().set_key(Key { semitones: -12.0, keep_formants: false });
+        let b = drain(&s, 200);
+        assert!((hz(&b[44100..]) - 220.0).abs() < 8.0, "an octave down: {}", hz(&b[44100..]));
+        assert_eq!(s.frames.load(Ordering::Relaxed), 400 * 512, "the position counts the source");
+    }
+
+    #[test]
+    fn without_a_key_it_passes_through() {
+        let t = tone(440.0, 1.0);
+        let s = shared(t.clone());
+        let a = drain(&s, 40);
+        assert_eq!(&a[..], &t[..a.len()]);
     }
 }

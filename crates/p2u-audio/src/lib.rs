@@ -25,6 +25,8 @@ pub mod mp3;
 pub mod prepare;
 pub mod probe;
 pub mod render;
+/// Key shifting (Signalsmith Stretch): see the `p2u-stretch` crate.
+pub use p2u_stretch as stretch;
 pub mod tags;
 pub mod tagwrite;
 pub mod tools;

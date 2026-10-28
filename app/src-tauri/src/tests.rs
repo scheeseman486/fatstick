@@ -311,7 +311,7 @@ fn player_plays_seeks_and_ends() {
     let p = crate::player::Player::start(Some(Tools::locate().unwrap()), move |e| {
         let _ = tx.send(e);
     });
-    p.send(crate::player::Cmd::Play { path: f.clone(), from: 0.0, gain_db: 0.0, duration: 2.0, token: "e1".into() });
+    p.send(crate::player::Cmd::Play { path: f.clone(), from: 0.0, gain_db: 0.0, duration: 2.0, token: "e1".into(), key: None });
     let mut states = Vec::new();
     let mut max_pos = 0.0f64;
     let start = std::time::Instant::now();
@@ -330,7 +330,7 @@ fn player_plays_seeks_and_ends() {
     assert!((1.7..3.5).contains(&took), "real time: {took}");
     assert!(max_pos > 1.5);
     // Seeking near the end ends sooner.
-    p.send(crate::player::Cmd::Play { path: f, from: 0.0, gain_db: -6.0, duration: 2.0, token: "e2".into() });
+    p.send(crate::player::Cmd::Play { path: f, from: 0.0, gain_db: -6.0, duration: 2.0, token: "e2".into(), key: Some(p2u_audio::stretch::Key { semitones: 3.0, keep_formants: true }) });
     std::thread::sleep(std::time::Duration::from_millis(200));
     p.send(crate::player::Cmd::Seek(1.6));
     let start = std::time::Instant::now();

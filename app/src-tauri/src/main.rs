@@ -331,6 +331,20 @@ struct PlayArgs {
     gain_db: f64,
     #[serde(default)]
     recipe: Option<Recipe>,
+    /// The entry's key: semitones up or down, shifted live (unless the
+    /// prepared file plays, which has it already).
+    #[serde(default)]
+    pitch: f64,
+    #[serde(default = "yes")]
+    keep_formants: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn key_of(pitch: f64, keep_formants: bool) -> Option<p2u_audio::stretch::Key> {
+    (pitch != 0.0 && pitch.is_finite()).then(|| p2u_audio::stretch::Key { semitones: pitch.clamp(-24.0, 24.0) as f32, keep_formants })
 }
 
 #[derive(Serialize)]
@@ -351,16 +365,22 @@ fn player_play(st: State<AppState>, args: PlayArgs) -> Res<Playing> {
         (PathBuf::from(&t.path), t.duration)
     };
     let cached = args.recipe.as_ref().and_then(|r| work::cached_for(&st.lib, &st.cache, &args.track_id, r));
-    let (path, gain, from, dur) = match cached {
+    let (path, gain, from, dur, key) = match cached {
         // A prepared file can be longer or shorter than its source (cut, padded).
         Some(p) => {
             let d = p2u_audio::mp3::scan(&p).ok().flatten().map(|i| i.duration).unwrap_or(dur);
-            (p, 0.0, "cache", d)
+            (p, 0.0, "cache", d, None)
         }
-        None => (path, args.gain_db, "source", dur),
+        None => (path, args.gain_db, "source", dur, key_of(args.pitch, args.keep_formants)),
     };
-    st.player.send(player::Cmd::Play { path, from: args.from, gain_db: gain, duration: dur, token: args.token });
+    st.player.send(player::Cmd::Play { path, from: args.from, gain_db: gain, duration: dur, token: args.token, key });
     Ok(Playing { from: from.into() })
+}
+
+/// The key slider, live: another key for what's playing (0 for its own).
+#[tauri::command]
+fn player_key(st: State<AppState>, pitch: f64, keep_formants: bool) {
+    st.player.send(player::Cmd::Key(key_of(pitch, keep_formants).or_else(|| (pitch == 0.0).then_some(p2u_audio::stretch::Key { semitones: 0.0, keep_formants }))));
 }
 
 #[tauri::command]
@@ -568,6 +588,7 @@ fn main() {
             cancel_sync,
             player_play,
             player_pause,
+            player_key,
             player_resume,
             player_seek,
             player_stop,

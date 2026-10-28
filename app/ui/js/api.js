@@ -53,6 +53,7 @@
       cancelSync: () => invoke("cancel_sync"),
       play: (args) => invoke("player_play", { args }),
       pause: () => invoke("player_pause"),
+      playerKey: (pitch, keepFormants) => invoke("player_key", { pitch, keepFormants }),
       resume: () => invoke("player_resume"),
       seek: (pos) => invoke("player_seek", { pos }),
       stop: () => invoke("player_stop"),
@@ -282,6 +283,7 @@
         pev("playing");
         return { from: "source", silent: !(t && t.url) };
       },
+      async playerKey() {},
       async pause() { P.playing = false; if (P.audio) P.audio.pause(); pev("paused"); },
       async resume() { P.playing = true; if (P.audio) P.audio.play().catch(() => {}); pev("playing"); },
       async seek(pos) { P.pos = pos; if (P.audio) P.audio.currentTime = pos; pev(P.playing ? "playing" : "paused"); },

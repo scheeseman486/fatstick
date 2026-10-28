@@ -75,6 +75,15 @@ GPL version 3 or later.
 - **A track's start and end.** Cut seconds away, or add silence, at either
   end of a track: select it and press E, or "Start and end…" in its
   right-click menu. Only the stick's copy changes, never your file.
+- **A track's key.** Play a track higher or lower without changing its
+  speed or length: select it and press K, or "Key…" in its right-click
+  menu. The slider moves in semitones (named as intervals: "a fourth up"),
+  with a fine tune in cents, and "Keep voices natural" keeps a singer's
+  character (formants) instead of sounding smaller when higher and bigger
+  when lower. Listen while you slide: the key changes as it plays. The
+  player plays an entry in its key from then on. On the stick the track is
+  rendered in its key at full quality (Signalsmith Stretch), like a cut
+  track; the file itself is never changed.
 - **Silence between playlists.** A stick's list can hold stretches of
   silence (30 s unless you change it) between its playlists. Each gets a
   folder of its own holding one silent MP3.
@@ -181,6 +190,7 @@ crates/p2u-core      playlists, naming plan, FAT32 layout + writer + read-back c
 crates/p2u-device    USB stick discovery and OS-brokered raw disk access (linux/macos/windows)
 crates/p2u-audio     the ffmpeg engine: probing, MP3 frame scan, loudness, LAME encodes, lossless gain,
                      covers, ID3 tags, the prepared-file cache, PCM for the player
+crates/p2u-stretch   key shifting: Signalsmith Stretch (MIT, vendored C++) behind a small C interface
 crates/p2u-library   the SQLite library, reading files, folders and playlist files into it, and the
                      music folder's scan (new, changed, moved and missing files)
 crates/p2u-cli       `p2u` command-line tool
@@ -272,7 +282,8 @@ python3 tests/kernel_stick.py --kroot <kernel dir> --p2u target/x86_64-unknown-l
 `tests/app_e2e.py` runs the real app under Xvfb, three times. The first run starts
 from an empty library: it adds two folders of real audio (FLAC, Opus, WAV,
 MP3s at 320 kbps and at 22.05 kHz mono), turns on even volume, cuts and pads
-a track, joins the second playlist into one track and puts silence between
+a track, shifts another 5 semitones up (changing its key live while it
+plays), joins the second playlist into one track and puts silence between
 the two, picks a disk image standing in for a stick, syncs through the button
 and its confirmation, opens the stick's layout window and plays a track. The second run checks that all of it
 was kept, that an edit makes the stick out of date, that the stick is
@@ -284,7 +295,8 @@ reading of the folder doesn't set off another scan). Then the image is
 read with tools that aren't ours: fsck.fat, mtools (the order a player sees),
 ffprobe (codec, sample rate, tags, cover, lengths), and ffmpeg's EBU R128
 meter and volumedetect (−18 LUFS where the volume was evened out; silence
-where it was added). ffprobe also reads back the tags the library wrote,
+where it was added), and the shifted track is measured: 550 Hz became 734 Hz,
+at the same length. ffprobe also reads back the tags the library wrote,
 including labels in an MP3 that another app had kept in TXXX:GROUPING.
 
 ## Status

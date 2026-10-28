@@ -73,6 +73,18 @@
     const e0 = S.playlists[0].entries[0];
     check("the first track is cut and padded", e0.cutStart === 2 && e0.padEnd === 1, JSON.stringify(e0));
 
+    // The second track, 5 semitones up (voices not kept natural: it's a tone).
+    key({ key: "ArrowDown" });
+    key({ key: "k" });
+    const semis = await until(() => document.getElementById("key-semis"));
+    semis.value = "5";
+    semis.dispatchEvent(new Event("input", { bubbles: true }));
+    document.getElementById("key-keep").click();
+    check("the key dialog names the shift", document.getElementById("key-words").textContent === "5 semitones up (a fourth)", document.getElementById("key-words").textContent);
+    [...document.querySelectorAll("#modal .btn.primary")].find((b) => b.textContent === "Apply").click();
+    const e1 = S.playlists[0].entries[1];
+    check("the second track is 5 semitones up", e1.pitch === 5 && e1.keepFormants === false, JSON.stringify(e1));
+
     // Three seconds of silence between the two playlists.
     const add2 = [...document.querySelectorAll("#stick select")].find((x) => x.getAttribute("aria-label") === "Add a playlist to this stick");
     add2.value = "__gap";
@@ -137,6 +149,21 @@
     await A.playEntry(p.entries[0].id, p.id);
     const moved = await until(() => S.player.pos > 0.5, 10000);
     check("the player plays", !!moved, `position ${S.player.pos}`);
+    // The second track plays in its key; the key dialog changes it as it plays.
+    await A.playEntry(p.entries[1].id, p.id);
+    await until(() => S.player.pos > 0.3, 10000);
+    A.keyDialog([p.entries[1].id]);
+    const live = await until(() => document.getElementById("key-semis"));
+    for (const v of ["7", "-3", "2"]) {
+      live.value = v;
+      live.dispatchEvent(new Event("input", { bubbles: true }));
+      await sleep(250);
+    }
+    const p0 = S.player.pos;
+    const still = await until(() => S.player.playing && S.player.pos > p0 + 0.5, 10000);
+    check("the key changes while it plays, and it plays on", !!still && !S.player.error, `position ${S.player.pos}`);
+    [...document.querySelectorAll("#modal .btn")].find((b) => b.textContent === "Cancel").click();
+    check("Cancel leaves the entry's key", p.entries[1].pitch === 5);
     A.stopPlayback();
   } catch (e) {
     check("no exception", false, String((e && e.stack) || e));

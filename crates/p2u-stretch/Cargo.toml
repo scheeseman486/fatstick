@@ -1,0 +1,10 @@
+[package]
+name = "p2u-stretch"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Key shifting (pitch without tempo) for Playlist2USB: Signalsmith Stretch (MIT), vendored, behind a small C interface"
+build = "build.rs"
+
+[build-dependencies]
+cc = "1"

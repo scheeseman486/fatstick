@@ -330,3 +330,46 @@ fn quick_probe_matches_the_full_one() {
     assert_eq!((quick.vbr, quick.peak_bitrate, quick.bitrate), (false, 192, 192));
     assert!(probe::probe_quick(&t, &p("vbr.mp3")).unwrap().vbr);
 }
+
+/// Upward zero crossings per second of the left channel, from `from` to `to` seconds.
+fn hz(s: &[f32], from: f64, to: f64) -> f64 {
+    let left: Vec<f32> = s.iter().step_by(2).copied().collect();
+    let (a, b) = ((from * 44100.0) as usize, ((to * 44100.0) as usize).min(left.len()));
+    let ups = (a.max(1)..b).filter(|&i| left[i - 1] < 0.0 && left[i] >= 0.0).count();
+    ups as f64 / ((b - a) as f64 / 44100.0)
+}
+
+/// A key shift on the stick: the tone an octave up (and a fifth down), the
+/// same length, cut first, and its own cache entry.
+#[test]
+fn render_shifts_the_key() {
+    let Some(t) = tools() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let p = |n: &str| dir.path().join(n);
+    ff(&["-f", "lavfi", "-i", "sine=frequency=440:duration=6", "-ac", "2", "-c:a", "flac", &p("a.flac").display().to_string()]);
+    let src = [Some(Source { path: p("a.flac"), content_key: probe::content_key(&p("a.flac")).unwrap() })];
+    let cache = Cache::open(dir.path().join("cache")).unwrap();
+    let with = |pitch: f64, keep_formants: bool| RenderSpec {
+        cap: 320,
+        vbr: false,
+        sample_rate: 44100,
+        parts: vec![RenderPart { track_id: Some("a".into()), cut_start: 1.0, pad_end: 0.5, pitch, keep_formants, ..Default::default() }],
+    };
+    let spec = |pitch: f64| with(pitch, false);
+    for (pitch, want, formants) in [(12.0, 880.0, false), (-7.0, 440.0 * 2f64.powf(-7.0 / 12.0), false), (3.0, 440.0 * 2f64.powf(3.0 / 12.0), true)] {
+        let out = render::prepare(&t, &cache, &with(pitch, formants), &src).unwrap();
+        let info = mp3::scan(&out.path).unwrap().unwrap();
+        assert!((info.duration - 5.5).abs() < 0.08, "{pitch:+}: 6 - 1 + 0.5 = 5.5 s: {}", info.duration);
+        let s = pcm(&out.path);
+        let f = hz(&s, 1.0, 4.0);
+        assert!((f - want).abs() / want < 0.01, "{pitch:+} semitones: {f} Hz, wanted {want}");
+        // A lone sine is where keeping formants changes the level most: checked without.
+        let (was, now) = (rms(&pcm(&p("a.flac")), 2.0, 5.0), rms(&s, 1.0, 4.0));
+        assert!(formants || (now / was - 1.0).abs() < 0.15, "as loud as before: {now} vs {was}");
+        assert!(rms(&s, 5.1, 5.45) < 1e-3, "then the silence");
+    }
+    assert_ne!(render::cache_key(&spec(0.0), &src), render::cache_key(&spec(2.0), &src));
+    assert_ne!(render::cache_key(&with(2.0, true), &src), render::cache_key(&with(2.0, false), &src));
+    // No shift: the key is what it was before shifting existed.
+    assert!(!spec(0.0).recipe(&src).contains("key"));
+}

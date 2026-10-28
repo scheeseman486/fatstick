@@ -7,6 +7,7 @@ members = [
     "crates/p2u-helper",
     "crates/p2u-audio",
     "crates/p2u-library",
+    "crates/p2u-stretch",
 ]
 # The Tauri shell lives in app/src-tauri and is its own workspace member when
 # its system dependencies (webkit2gtk-4.1 on Linux) are installed:

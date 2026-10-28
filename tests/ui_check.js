@@ -435,6 +435,47 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
 
   }
 
+  // 27. A track's key: the dialog, its slider and fine tune, Apply, Cancel and undo.
+  {
+    await p.locator('[data-pl="p-road"]').click();
+    await row(2).click();
+    await row(2).click();
+    const kid = await p.evaluate(() => P2U.app.pl().entries[2].id);
+    await p.keyboard.press('k');
+    check('K opens the key dialog', /^Key of /.test(await p.locator('#modal-title').textContent()) && (await p.locator('#key-words').textContent()) === 'The original key');
+    for (let i = 0; i < 3; i++) await p.locator('#key-semis').press('ArrowRight');
+    check('the slider moves in semitones, named as intervals', (await p.locator('#key-words').textContent()) === '3 semitones up (a minor third)');
+    await p.locator('#key-cents').fill('15');
+    check('fine tune in cents', /and 15 cents up/.test(await p.locator('#key-words').textContent()) && /\+3\+15C/.test((await p.locator('#key-seg').textContent()).replace(/[! ]/g, '')));
+    await p.locator('#key-keep').uncheck();
+    await p.screenshot({ path: `${out}/key.png` });
+    await p.locator('#modal .btn.primary').click();
+    const ent = await p.evaluate((id) => P2U.app.pl().entries.find((e) => e.id === id), kid);
+    check('Apply sets the entry\'s key', ent.pitch === 3.15 && ent.keepFormants === false, JSON.stringify(ent));
+    check('the Key column shows it', (await p.locator(`#row-${kid} .c-key`).textContent()) === '+3 +15¢');
+    const plan = await p.evaluate((id) => {
+      const A = P2U.app;
+      const f = A.planSet(A.stickSet()).folders.find((x) => x.items.some((it) => it.entry && it.entry.id === id));
+      const it = f.items.find((x) => x.entry && x.entry.id === id);
+      return { recipe: it.recipe, reason: it.d.reason };
+    }, kid);
+    check('it goes on the stick rendered, in its key', plan.recipe && plan.recipe.kind === 'render' && plan.recipe.parts[0].pitch === 3.15 && plan.recipe.parts[0].keepFormants === false, JSON.stringify(plan));
+    await p.keyboard.press('Control+z');
+    check('undo puts it back in its own key', !(await p.evaluate((id) => P2U.app.pl().entries.find((e) => e.id === id).pitch, kid)));
+    await p.keyboard.press('Control+y');
+    // Cancel leaves it as it was.
+    await row(2).click({ button: 'right' });
+    await p.getByRole('menuitem', { name: 'Key…' }).click();
+    await p.locator('#key-semis').press('ArrowLeft');
+    await p.getByRole('button', { name: 'Cancel' }).click();
+    check('Cancel changes nothing', (await p.evaluate((id) => P2U.app.pl().entries.find((e) => e.id === id).pitch, kid)) === 3.15);
+    // A joined playlist keeps each track's key.
+    await p.evaluate((id) => { const A = P2U.app; A.pl().join = true; }, kid);
+    const parts = await p.evaluate(() => { const A = P2U.app; const f = A.planSet(A.stickSet()).folders.find((x) => x.p.id === A.pl().id); return f.files[0].recipe.parts.map((x) => x.pitch || 0); });
+    check('a joined playlist keeps each track\'s key', parts.filter((x) => x === 3.15).length === 1 && parts.length > 10, JSON.stringify(parts));
+    await p.evaluate(() => { P2U.app.pl().join = false; });
+  }
+
   check('no console errors', errs.length === 0, errs.join(' / '));
   await b.close();
   server.close();

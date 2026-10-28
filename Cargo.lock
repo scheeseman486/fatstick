@@ -971,6 +971,7 @@ dependencies = [
  "image",
  "lofty",
  "mp3rgain",
+ "p2u-stretch",
  "serde",
  "serde_json",
  "tempfile",
@@ -1042,6 +1043,13 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+]
+
+[[package]]
+name = "p2u-stretch"
+version = "0.1.0"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

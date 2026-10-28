@@ -51,7 +51,7 @@
     sel: new Set(),
     anchor: null,
     focus: null,
-    cols: { album: true, format: true, stick: true, gain: true, name: false, edges: true },
+    cols: { album: true, format: true, stick: true, gain: true, name: false, edges: true, key: true },
     listWidth: 800,
     undo: [],
     redo: [],
@@ -183,8 +183,10 @@
     // A track cut or padded at its ends is encoded, as is every track of a joined playlist.
     const ds = items.map((it) => {
       const d = R.decide(it.t, profile);
-      if (d.action !== "copy" || !(p.join || R.hasEdges(it.entry))) return d;
-      return { ...d, action: "encode", reason: p.join ? `Joined into one track, encoded at ${cap} kbps` : `Cut or padded at its ends, so encoded at ${cap} kbps` };
+      if (d.action !== "copy" || !(p.join || R.reworks(it.entry))) return d;
+      const why = p.join ? `Joined into one track, encoded at ${cap} kbps`
+        : R.hasKey(it.entry) ? `In another key (${keyText(R.key(it.entry).pitch)}), so encoded at ${cap} kbps` : `Cut or padded at its ends, so encoded at ${cap} kbps`;
+      return { ...d, action: "encode", reason: why };
     });
     const gs = R.gains(items.map((i) => i.t), ds, p.norm);
     let at = 0;
@@ -285,7 +287,8 @@
     // sticks synced before these existed stay up to date).
     const edge = (e) => {
       const x = R.edges(e);
-      return R.hasEdges(e) ? `[${x.cutStart},${x.cutEnd},${x.padStart},${x.padEnd}]` : "";
+      const k = R.key(e);
+      return (R.hasEdges(e) ? `[${x.cutStart},${x.cutEnd},${x.padStart},${x.padEnd}]` : "") + (k.pitch ? `k${k.pitch}${k.keepFormants ? "f" : ""}` : "");
     };
     const shape = plan.folders.map((f) => (f.p.gap != null ? `S${f.p.gap}` : `${f.p.join ? "J" : ""}${f.present.map((it) => edge(it.entry)).join("")}`));
     return shape.join("") ? `${base}|${shape.join(",")}` : base;
@@ -720,6 +723,7 @@
     stick: { label: "On the stick", w: "7.6em" },
     gain: { label: "Gain", w: "4.6em" },
     edges: { label: "Start / end", w: "7.4em" },
+    key: { label: "Key", w: "5.2em" },
     name: { label: "Name on the stick", w: "minmax(9em, 2fr)" },
   };
   function visibleCols(p) {
@@ -732,6 +736,7 @@
     if (w >= 500 && S.cols.stick) k.push("stick");
     if (w >= 660 && S.cols.gain && p.norm.on) k.push("gain");
     if (w >= 560 && S.cols.edges && p.entries.some((e) => R.hasEdges(e))) k.push("edges");
+    if (w >= 540 && S.cols.key && p.entries.some((e) => R.hasKey(e))) k.push("key");
     if (w >= 700 && S.cols.name) k.push("name");
     return k;
   }
@@ -782,6 +787,7 @@
       { label: "On the stick", checked: S.cols.stick, action: t("stick") },
       { label: "Gain (when evening the volume)", checked: S.cols.gain, action: t("gain") },
       { label: "Start / end (when cut or padded)", checked: S.cols.edges, action: t("edges") },
+      { label: "Key (when shifted)", checked: S.cols.key, action: t("key") },
       { label: "Name on the stick", checked: S.cols.name, action: t("name") },
     ]);
   }
@@ -921,6 +927,161 @@
     for (const input of Object.values(f)) input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } });
   }
 
+  // ---- key: the track higher or lower, at the same speed --------------------------------------
+  const INTERVALS = ["", "a semitone", "a whole tone", "a minor third", "a major third", "a fourth", "a tritone", "a fifth", "a minor sixth", "a major sixth", "a minor seventh", "a major seventh", "an octave"];
+  const split = (pitch) => { const semis = Math.round(pitch); return { semis, cents: Math.round((pitch - semis) * 100) }; };
+  const signed = (n) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n)}`;
+  /** "+2", "−3", "+2 +15¢", "−20¢", "0". */
+  function keyText(pitch) {
+    const { semis, cents } = split(pitch);
+    return [semis ? signed(semis) : "", cents ? `${signed(cents)}¢` : ""].filter(Boolean).join(" ") || "0";
+  }
+  /** "2 semitones up (a whole tone)", "An octave down", "15 cents up", "The original key". */
+  function keyWords(pitch) {
+    const { semis, cents } = split(pitch);
+    if (!semis && !cents) return "The original key";
+    const way = (n) => (n > 0 ? "up" : "down");
+    const a = Math.abs(semis);
+    const st = !semis ? "" : a === 12 ? `An octave ${way(semis)}` : `${plural(a, "semitone")} ${way(semis)}${a < 12 ? ` (${INTERVALS[a]})` : ""}`;
+    const c = cents ? `${Math.abs(cents)} cents ${way(cents)}` : "";
+    const out = [st, c].filter(Boolean).join(", and ");
+    return out.charAt(0).toUpperCase() + out.slice(1);
+  }
+
+  /**
+   * The key of the selected entries: a slider in semitones, a fine tune in
+   * cents, and voices kept natural or not. Listening plays the track in the
+   * new key from the source, and moving the slider changes it as it plays.
+   * Only the stick's copy changes, rendered at full quality when it syncs.
+   */
+  function keyDialog(ids) {
+    const p = pl();
+    const es = p.entries.filter((e) => ids.includes(e.id));
+    if (!es.length) return;
+    const k0 = R.key(es[0]);
+    const mixed = es.some((e) => R.key(e).pitch !== k0.pitch || R.key(e).keepFormants !== k0.keepFormants);
+    let { semis, cents } = split(k0.pitch);
+    let keep = k0.keepFormants;
+    const value = () => Math.round((semis + cents / 100) * 100) / 100;
+    const pp = S.player;
+    const playingHere = () => !!pp.entryId && pp.playlistId === p.id && es.some((e) => e.id === pp.entryId);
+    const wasPlaying = playingHere();
+    let startedHere = false;
+    let fromSource = playingHere() && pp.from !== "cache";
+    let applied = false;
+
+    const lcd = h("output", { class: "key-lcd", for: "key-semis", "aria-hidden": "true" },
+      h("span", { class: "seg ghost", text: "~~~~~~~~" }), h("span", { class: "seg", id: "key-seg" }));
+    const words = h("p", { class: "key-words", id: "key-words", "aria-live": "polite" });
+    const slider = h("input", { type: "range", min: "-12", max: "12", step: "1", value: String(semis), id: "key-semis", class: "key-range", list: "key-ticks", "aria-label": "Key, in semitones" });
+    const ticks = h("datalist", { id: "key-ticks" }, [-12, -6, 0, 6, 12].map((v) => h("option", { value: String(v) })));
+    const fine = h("input", { type: "range", min: "-50", max: "50", step: "1", value: String(cents), id: "key-cents", "aria-label": "Fine tune, in cents" });
+    const fineOut = h("output", { class: "num", for: "key-cents" });
+    const keepBox = h("input", { type: "checkbox", checked: keep, id: "key-keep" });
+    const listen = h("button", { type: "button", class: "btn", id: "key-listen" });
+    const status = h("p", { class: "st-note key-status" });
+
+    let raf = 0;
+    /** The new key to the player, if it's playing one of these tracks (from the source). */
+    function live() {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        if (!playingHere()) return;
+        if (!fromSource) {
+          // The prepared file has the old key in it: the source, from here, in the new one.
+          fromSource = true;
+          playEntry(pp.entryId, p.id, pp.pos, { source: true, key: { pitch: value(), keepFormants: keep } });
+        } else api.playerKey(value(), keep).catch(() => {});
+      });
+    }
+    function show() {
+      const lcdText = keyText(value()).replace(/¢/g, "C").replace(/−/g, "-");
+      // DSEG's full-width blank is "!" (its space is narrow): centred on the 8 cells.
+      const left = Math.floor((8 - lcdText.length) / 2);
+      $("key-seg").textContent = ("!".repeat(Math.max(0, left)) + lcdText).padEnd(8, "!");
+      words.textContent = keyWords(value());
+      slider.setAttribute("aria-valuetext", keyWords(value()));
+      fineOut.textContent = cents ? `${signed(cents)} cents` : "0 cents";
+      const on = playingHere() && pp.playing;
+      fill(listen, icon(on ? "pause" : "play"), on ? "Pause" : "Listen");
+      const t = playingHere() ? track(p.entries.find((e) => e.id === pp.entryId).trackId) : null;
+      status.textContent = DEMO ? "The demo plays no sound; in the app, the key changes as it plays."
+        : t ? `${t.title || t.filename}, ${clock(pp.pos)}. Move the slider and hear the key change.` : "Listen plays the track in this key; moving the slider changes it as it plays.";
+    }
+    const step = (d) => { semis = Math.max(-12, Math.min(12, semis + d)); slider.value = String(semis); show(); live(); };
+    slider.addEventListener("input", () => { semis = Number(slider.value); show(); live(); });
+    fine.addEventListener("input", () => { cents = Number(fine.value); show(); live(); });
+    keepBox.addEventListener("change", () => { keep = keepBox.checked; show(); live(); });
+    listen.addEventListener("click", () => {
+      if (playingHere()) togglePlay();
+      else {
+        startedHere = true;
+        fromSource = true;
+        const e = es[0];
+        playEntry(e.id, p.id, 0, { source: true, key: { pitch: value(), keepFormants: keep } });
+      }
+      setTimeout(show, 60);
+    });
+    const ticker = setInterval(() => { if (document.contains(status)) show(); }, 500);
+
+    const apply = () => {
+      applied = true;
+      const v = value();
+      closeModal();
+      edit(es.length === 1 ? "Change the key" : `Change the key of ${plural(es.length, "track")}`, () => {
+        for (const e of es) {
+          const x = p.entries.find((y) => y.id === e.id);
+          if (!x) continue;
+          if (v) {
+            x.pitch = v;
+            if (keep) delete x.keepFormants;
+            else x.keepFormants = false;
+          } else {
+            delete x.pitch;
+            delete x.keepFormants;
+          }
+        }
+      });
+    };
+    const t0 = track(es[0].trackId);
+    modal({
+      title: es.length === 1 ? `Key of ${t0.title || t0.filename}` : `Key of ${plural(es.length, "track")}`,
+      body: [
+        h("p", { text: "Higher or lower, at the same speed. Only the stick's copy changes, shifted at full quality when the stick syncs; the file itself isn't touched, and the length stays the same." }),
+        h("div", { class: "key-dial" },
+          h("button", { type: "button", class: "btn icon key-step", "aria-label": "A semitone down", title: "A semitone down", onclick: () => step(-1) }, h("span", { class: "key-sign", text: "−" })),
+          h("div", { class: "key-mid" }, lcd, slider, ticks,
+            h("div", { class: "key-scale", "aria-hidden": "true" }, ["−12", "−6", "0", "+6", "+12"].map((x) => h("span", { text: x })))),
+          h("button", { type: "button", class: "btn icon key-step", "aria-label": "A semitone up", title: "A semitone up", onclick: () => step(1) }, icon("plus"))),
+        words,
+        h("div", { class: "key-fine" }, h("label", { class: "lbl", for: "key-cents", text: "Fine tune" }), fine, fineOut),
+        h("label", { class: "check" }, keepBox, h("span", null, h("span", { text: "Keep voices natural" }), h("small", { class: "hint key-hint", text: "Voices keep their own character instead of sounding smaller when higher and bigger when lower. Leave it on for songs; off can sound cleaner on instruments alone." }))),
+        h("div", { class: "key-listen" }, listen, status),
+        mixed ? h("p", { class: "st-note", text: "These tracks aren't all in the same key now; Apply puts them all in this one." }) : null,
+      ],
+      buttons: [
+        h("button", { type: "button", class: "btn left", text: "Original key", onclick: () => { semis = 0; cents = 0; slider.value = "0"; fine.value = "0"; show(); live(); } }),
+        h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal }),
+        h("button", { type: "button", class: "btn primary", text: "Apply", onclick: apply }),
+      ],
+      onClose: () => {
+        clearInterval(ticker);
+        cancelAnimationFrame(raf);
+        if (applied) return;
+        // Cancelled: the music goes back to how it was.
+        if (startedHere && !wasPlaying) stopPlayback();
+        else if (playingHere() && fromSource) {
+          const k = R.key(p.entries.find((e) => e.id === pp.entryId));
+          api.playerKey(k.pitch, k.keepFormants).catch(() => {});
+        }
+      },
+    });
+    show();
+    slider.focus();
+    slider.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } });
+  }
+
   function renderList() {
     const p = pl();
     const prf = listProfile();
@@ -1003,6 +1164,15 @@
           type: "button", class: "edge-btn", title: `${edgeTitle(it.entry)}. Click to change.`,
           text: `${edgeText(x.cutStart, x.padStart)} / ${edgeText(x.cutEnd, x.padEnd)} s`,
           onclick: (ev) => { ev.stopPropagation(); if (!S.sel.has(it.entry.id)) { selectOnly(it.entry.id); syncSelection(); } edgesDialog([...S.sel]); },
+        }));
+      }
+      case "key": {
+        const k = R.key(it.entry);
+        if (!k.pitch) return h("div", { class: "c c-key" });
+        return h("div", { class: "c c-key" }, h("button", {
+          type: "button", class: "edge-btn", title: `${keyWords(k.pitch)}${k.keepFormants ? "" : ", voices not kept natural"}. Click to change.`,
+          text: keyText(k.pitch),
+          onclick: (ev) => { ev.stopPropagation(); if (!S.sel.has(it.entry.id)) { selectOnly(it.entry.id); syncSelection(); } keyDialog([...S.sel]); },
         }));
       }
       case "name": {
@@ -1335,7 +1505,7 @@
     vol.addEventListener("input", () => { pp.volume = Number(vol.value); api.volume(pp.volume).catch(() => {}); saveSetting("volume", String(pp.volume)); });
     let sub = "Double-click a track, or press Enter, to hear it.";
     if (t && one) sub = `${t.artist || "No artist tag"}. From the library, on its own.${pp.silent ? " Demo track, no sound." : ""}`;
-    else if (t) sub = `${t.artist || "No artist tag"}. ${p.name}, ${idx + 1} of ${p.entries.length}.${pp.silent ? " Demo track, no sound." : ""}`;
+    else if (t) sub = `${t.artist || "No artist tag"}. ${p.name}, ${idx + 1} of ${p.entries.length}.${R.hasKey(e) ? ` Key ${keyText(R.key(e).pitch)}.` : ""}${pp.silent ? " Demo track, no sound." : ""}`;
     fill($("player"), 
       h("div", { class: "pad" },
         h("button", { type: "button", class: "pbtn", "aria-label": "Previous", title: "Previous", disabled: !t, onclick: prevTrack }, icon("prev")),
@@ -1455,7 +1625,7 @@
     const st = staleness(plan);
     const pr = plan.profile;
     const how = (it) => (it.d.action !== "copy" ? `MP3 ${pr.bitrateCap}` : it.recipe && it.recipe.kind === "gain" ? `Copy, ${db(it.recipe.steps * R.STEP)}` : "Copy");
-    const ends = (e) => (e && R.hasEdges(e) ? edgeTitle(e) : "");
+    const ends = (e) => [e && R.hasEdges(e) ? edgeTitle(e) : "", e && R.hasKey(e) ? `key ${keyText(R.key(e).pitch)}` : ""].filter(Boolean).join("; ");
     const gain = (it) => (it.g && it.g.db ? db(it.g.db) : "");
     const kind = (f) => (f.p.gap != null ? "silence" : f.p.join ? "joined" : "playlist");
     return {
@@ -2035,14 +2205,16 @@
       if (S.player.token === token) stopPlayback();
     }
   }
-  async function playEntry(entryId, plId = S.current, from = 0) {
+  /** opts.source: the source file (not the prepared one), in opts.key or the entry's key. */
+  async function playEntry(entryId, plId = S.current, from = 0, opts = {}) {
     const p = pl(plId);
     const e = p && p.entries.find((x) => x.id === entryId);
     if (!e) return;
     const t = track(e.trackId);
     if (!t.exists) { toast(`${t.title || t.filename} can't play: the file isn't where the playlist says. Use Locate to find it.`); return; }
-    const args = { trackId: t.id, token: entryId, from, gainDb: 0, recipe: null };
-    if (S.player.asOnStick) {
+    const k = opts.key || R.key(e);
+    const args = { trackId: t.id, token: entryId, from, gainDb: 0, recipe: null, pitch: k.pitch, keepFormants: k.keepFormants };
+    if (S.player.asOnStick && !opts.source) {
       const it = stickItem(plId, entryId);
       if (it && it.recipe && it.recipe.kind !== "copy") {
         args.recipe = it.recipe;
@@ -2598,6 +2770,7 @@
     if (e.key === "Enter" && S.focus) { e.preventDefault(); playEntry(S.focus); return; }
     if (k === "e" && !mod && !e.altKey && S.sel.size) { e.preventDefault(); edgesDialog([...S.sel]); return; }
     if (k === "t" && !mod && !e.altKey && S.focus) { e.preventDefault(); toggleTags(S.focus); return; }
+    if (k === "k" && !mod && !e.altKey && S.sel.size) { e.preventDefault(); keyDialog([...S.sel]); return; }
     if (e.key === "Escape") { selectOnly(null); syncSelection(); }
   }
 
@@ -2619,6 +2792,7 @@
       ...(others.length ? [{ heading: n === 1 ? "Add to playlist" : `Add ${n} tracks to` }, ...others.map((p) => ({ label: p.name, action: () => { addTracks(tids(), p.id); toast(`Added ${plural(n, "track")} to ${p.name}.`, { label: "Undo", run: undo }); } }))] : []),
       "-",
       { label: n === 1 ? "Start and end…" : `Start and end of ${n} tracks…`, key: "E", action: () => edgesDialog([...S.sel]) },
+      { label: n === 1 ? "Key…" : `Key of ${n} tracks…`, key: "K", action: () => keyDialog([...S.sel]) },
       "-",
       n === 1 ? { label: S.expanded === id ? "Hide the tags" : "Show the tags", key: "T", action: () => toggleTags(id) } : null,
       { label: n === 1 ? "Edit tags…" : `Edit the tags of ${n} tracks…`, action: () => lib.editTagsDialog(tids()), disabled: !tids().some((x) => lib.canTag(track(x))) },
@@ -2689,7 +2863,7 @@
           a.ffmpegPath ? [h("dt", { text: "ffmpeg" }), h("dd", { text: a.ffmpegPath })] : null,
           a.dataDir ? [h("dt", { text: "Library" }), h("dd", { text: a.dataDir })] : null,
           h("dt", { text: "Cache" }), h("dd", { text: `${plural(a.cache.files, "file")}, ${bytes(a.cache.bytes)}${a.cache.dir ? ` in ${a.cache.dir}` : ""}` })),
-        h("p", { class: "st-note", text: "Free software under the GNU General Public License, version 3 or later. It includes FFmpeg (LGPL 2.1 or later) built with LAME (LGPL), and the fonts DSEG14 and Barlow (SIL Open Font License). The licence texts and the source code for every bundled part come with the app." }),
+        h("p", { class: "st-note", text: "Free software under the GNU General Public License, version 3 or later. It includes FFmpeg (LGPL 2.1 or later) built with LAME (LGPL), Signalsmith Stretch for changing keys (MIT), and the fonts DSEG14 and Barlow (SIL Open Font License). The licence texts and the source code for every bundled part come with the app." }),
       ],
       buttons: [h("button", { type: "button", class: "btn primary", text: "Close", onclick: closeModal })],
     });
@@ -2771,7 +2945,7 @@
     persist();
     scheduleWork();
     // For the app's self-test (tests/app_e2e.py) and for poking around in the inspector.
-    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, playTrack, stopPlayback, refreshSticks, holder, selectSet, openLayout, layoutData, setView, lib, toggleTags, ready: true };
+    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, refreshSticks, holder, selectSet, openLayout, layoutData, setView, lib, toggleTags, ready: true };
     if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Playlist2USB to get it back.");
     if (!DEMO) {
       stickPoll = setInterval(() => { if (!(S.sync && S.sync.running)) refreshSticks(true); }, 3000);
