@@ -1,6 +1,8 @@
 # Linux and Windows are built on Linux; macOS needs a macOS runner because the
-# Apple SDK licence forbids using it on other hardware. Untested draft: the
-# commands mirror what was run locally (see README "Build").
+# Apple SDK licence forbids using it on other hardware. The three builds don't
+# wait for the tests, so a failing test doesn't hold up an installer; the
+# macOS job runs the tests that exercise its own code (audio engine, library,
+# and the app's backend with a sync to a disk image).
 #
 # The bundled ffmpeg (packaging/ffmpeg/build-ffmpeg.sh) takes a few minutes per
 # target, so it is cached, keyed on the script: a new FFmpeg or LAME version
@@ -61,7 +63,6 @@ jobs:
           node tests/ui_check.js
 
   linux-and-windows:
-    needs: test
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -118,7 +119,6 @@ jobs:
             sources/
 
   macos:
-    needs: test
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -128,21 +128,34 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: brew install nasm
+      - name: nasm (for the ffmpeg build) and ffmpeg (the tests make their fixtures with it)
+        run: brew install nasm ffmpeg
       - uses: actions/cache@v4
         with:
-          path: app/src-tauri/binaries/ff*-universal-apple-darwin
+          path: app/src-tauri/binaries/ff*-apple-darwin
           key: ffmpeg-macos-${{ hashFiles('packaging/ffmpeg/build-ffmpeg.sh') }}
       - name: Bundled ffmpeg (arm64 and x86_64, joined)
         run: |
           [ -x app/src-tauri/binaries/ffmpeg-universal-apple-darwin ] ||
             packaging/ffmpeg/build-ffmpeg.sh universal-apple-darwin
-      - name: Universal .app and .dmg
+          app/src-tauri/binaries/ffmpeg-universal-apple-darwin -hide_banner -version | head -1
+          lipo -info app/src-tauri/binaries/ffmpeg-universal-apple-darwin
+      - name: Universal .app and .dmg (ad-hoc signed)
         working-directory: app/src-tauri
         run: npx --yes @tauri-apps/cli@^2 build --target universal-apple-darwin
-        # Signing/notarization: set APPLE_CERTIFICATE, APPLE_SIGNING_IDENTITY,
-        # APPLE_API_KEY etc. as Tauri documents, or sign later with rcodesign.
+        # For a Developer ID signature and notarization, set APPLE_CERTIFICATE,
+        # APPLE_SIGNING_IDENTITY, APPLE_API_KEY etc. as Tauri documents.
+      - name: Keep the .app's permissions (artifact zips drop them)
+        run: |
+          cd app/src-tauri/target/universal-apple-darwin/release/bundle/macos
+          tar czf Playlist2USB.app.tar.gz Playlist2USB.app
       - uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: app/src-tauri/target/universal-apple-darwin/release/bundle/
+          path: |
+            app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            app/src-tauri/target/universal-apple-darwin/release/bundle/macos/Playlist2USB.app.tar.gz
+      - name: Tests on macOS, after the upload so a failure doesn't hold up the build (FAT writer, audio engine, library; the app's sync and player)
+        run: |
+          cargo test -p p2u-core -p p2u-audio -p p2u-library
+          cargo test --manifest-path app/src-tauri/Cargo.toml
