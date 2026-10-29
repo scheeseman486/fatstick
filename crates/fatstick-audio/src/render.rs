@@ -54,17 +54,98 @@ pub struct RenderPart {
     pub fade_in: f64,
     #[serde(default)]
     pub fade_out: f64,
+    /// The shape of each fade (smooth unless chosen).
+    #[serde(default)]
+    pub fade_in_shape: FadeShape,
+    #[serde(default)]
+    pub fade_out_shape: FadeShape,
 }
 
-/// The fade curve: gain from 0 to 1 as `x` goes from 0 to 1, an S (half a
-/// cosine), so a fade starts and ends without a corner. The player's live
-/// fades use it too.
+/// The smooth fade curve: gain from 0 to 1 as `x` goes from 0 to 1, an S
+/// (half a cosine), so a fade starts and ends without a corner.
 pub fn fade_curve(x: f64) -> f64 {
     0.5 - 0.5 * (std::f64::consts::PI * x.clamp(0.0, 1.0)).cos()
 }
 
+/// How a fade moves between silence and full volume, named for when the
+/// change happens: early in the fade or late in it. The player's live fades
+/// use the same curves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum FadeShape {
+    /// An S: eases off the start and into the end.
+    #[default]
+    Smooth,
+    /// A straight line.
+    Linear,
+    /// Most of the change at the start (a quarter sine): a fade out drops
+    /// away and trails off, a fade in comes up and levels off.
+    Early,
+    /// Most of the change at the end: a fade out holds and then falls away,
+    /// a fade in stays low and then rises.
+    Late,
+    /// Early, more so (a cube).
+    VeryEarly,
+    /// Late, more so.
+    VeryLate,
+}
+
+impl FadeShape {
+    pub const ALL: [FadeShape; 6] = [FadeShape::Smooth, FadeShape::Linear, FadeShape::Early, FadeShape::Late, FadeShape::VeryEarly, FadeShape::VeryLate];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            FadeShape::Smooth => "smooth",
+            FadeShape::Linear => "linear",
+            FadeShape::Early => "early",
+            FadeShape::Late => "late",
+            FadeShape::VeryEarly => "very-early",
+            FadeShape::VeryLate => "very-late",
+        }
+    }
+
+    /// The gain at `x`, the way from silence (0) to full volume (1). A fade
+    /// out runs from 1 to 0, so `out` turns early and late round.
+    pub fn gain(self, x: f64, out: bool) -> f64 {
+        use std::f64::consts::FRAC_PI_2;
+        let x = x.clamp(0.0, 1.0);
+        // "Full" stays near full volume longer; "thin" stays near silence longer.
+        let full = || (FRAC_PI_2 * x).sin();
+        let thin = || 1.0 - (FRAC_PI_2 * x).cos();
+        match (self, out) {
+            (FadeShape::Smooth, _) => fade_curve(x),
+            (FadeShape::Linear, _) => x,
+            (FadeShape::Early, false) | (FadeShape::Late, true) => full(),
+            (FadeShape::Early, true) | (FadeShape::Late, false) => thin(),
+            (FadeShape::VeryEarly, false) | (FadeShape::VeryLate, true) => 1.0 - (1.0 - x).powi(3),
+            (FadeShape::VeryEarly, true) | (FadeShape::VeryLate, false) => x.powi(3),
+        }
+    }
+}
+
+/// Anything not known is smooth, as it was before there were shapes.
+impl From<String> for FadeShape {
+    fn from(s: String) -> Self {
+        FadeShape::ALL.into_iter().find(|x| x.name() == s).unwrap_or_default()
+    }
+}
+
+impl From<FadeShape> for String {
+    fn from(s: FadeShape) -> Self {
+        s.name().to_string()
+    }
+}
+
 fn yes() -> bool {
     true
+}
+
+impl RenderPart {
+    /// The shapes of the fades there are (smooth where there's none).
+    pub fn shapes(&self) -> (FadeShape, FadeShape) {
+        let or = |len: f64, s: FadeShape| if len > 0.0 { s } else { FadeShape::Smooth };
+        (or(self.fade_in, self.fade_in_shape), or(self.fade_out, self.fade_out_shape))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -103,6 +184,12 @@ impl RenderSpec {
             }
             if p.fade_in > 0.0 || p.fade_out > 0.0 {
                 s.push_str(&format!(":fade{:.3}/{:.3}", p.fade_in, p.fade_out));
+                // Shapes only where they're not smooth (and there's a fade to
+                // shape), so what was rendered before they existed still matches.
+                let (a, b) = p.shapes();
+                if a != FadeShape::Smooth || b != FadeShape::Smooth {
+                    s.push_str(&format!(":shape-{}/{}", a.name(), b.name()));
+                }
             }
         }
         s
@@ -172,7 +259,7 @@ fn silence(out: &mut impl Write, n_frames: usize) -> std::io::Result<()> {
 /// back and dropped at the end, so the cut is exact whatever the file's
 /// stated length.
 fn track_audio(tools: &Tools, out: &mut impl Write, path: &Path, p: &RenderPart, rate: u32) -> Result<()> {
-    let mut faded = Faded::new(out, p.fade_in, p.fade_out, rate);
+    let mut faded = Faded::new(out, p, rate);
     if p.pitch != 0.0 {
         // The cut track through the shifter, a block at a time (the same as
         // shifting it whole, in constant memory), the same length out.
@@ -191,6 +278,7 @@ struct Faded<'a, W: Write> {
     out: &'a mut W,
     fade_in: usize,
     fade_out: usize,
+    shapes: (FadeShape, FadeShape),
     /// Frames passed on so far.
     at: usize,
     carry: Vec<u8>,
@@ -199,8 +287,8 @@ struct Faded<'a, W: Write> {
 }
 
 impl<'a, W: Write> Faded<'a, W> {
-    fn new(out: &'a mut W, fade_in: f64, fade_out: f64, rate: u32) -> Self {
-        Faded { out, fade_in: frames(fade_in, rate), fade_out: frames(fade_out, rate), at: 0, carry: Vec::new(), held: Default::default() }
+    fn new(out: &'a mut W, p: &RenderPart, rate: u32) -> Self {
+        Faded { out, fade_in: frames(p.fade_in, rate), fade_out: frames(p.fade_out, rate), shapes: p.shapes(), at: 0, carry: Vec::new(), held: Default::default() }
     }
     fn send(&mut self, f: [f32; 2]) -> std::io::Result<()> {
         let mut b = [0u8; 8];
@@ -212,7 +300,7 @@ impl<'a, W: Write> Faded<'a, W> {
         let n = self.held.len();
         for (j, f) in std::mem::take(&mut self.held).into_iter().enumerate() {
             // Frames left to the end, this one included.
-            let g = fade_curve((n - j) as f64 / self.fade_out.max(1) as f64) as f32;
+            let g = self.shapes.1.gain((n - j) as f64 / self.fade_out.max(1) as f64, true) as f32;
             self.send([f[0] * g, f[1] * g])?;
         }
         Ok(())
@@ -231,7 +319,7 @@ impl<W: Write> Write for Faded<'_, W> {
         for c in self.carry[..whole].chunks_exact(FRAME) {
             let mut f = [f32::from_le_bytes(c[..4].try_into().unwrap()), f32::from_le_bytes(c[4..].try_into().unwrap())];
             if self.at < self.fade_in {
-                let g = fade_curve(self.at as f64 / self.fade_in as f64) as f32;
+                let g = self.shapes.0.gain(self.at as f64 / self.fade_in as f64, false) as f32;
                 f = [f[0] * g, f[1] * g];
             }
             self.at += 1;

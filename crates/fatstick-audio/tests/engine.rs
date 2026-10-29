@@ -8,7 +8,7 @@ use std::process::Command;
 
 use fatstick_audio::encode::EncodeSpec;
 use fatstick_audio::prepare::{copy_allowed, prepare, Recipe};
-use fatstick_audio::render::{self, RenderPart, RenderSpec, Source};
+use fatstick_audio::render::{self, FadeShape, RenderPart, RenderSpec, Source};
 use fatstick_audio::tagwrite::{write_tags, TagEdit};
 use fatstick_audio::tags::{id3v1, id3v2, TagSpec};
 use fatstick_audio::{cover, loudness, mp3, probe, Cache, Tools};
@@ -410,6 +410,31 @@ fn render_fades_in_and_out() {
     assert_ne!(render::cache_key(&spec(0.0), &src), render::cache_key(&plain, &src));
     assert!(!plain.recipe(&src).contains("fade"));
     assert!(render::fade_curve(0.0) == 0.0 && (render::fade_curve(0.5) - 0.5).abs() < 1e-12 && render::fade_curve(1.0) == 1.0);
+
+    // Shapes: a late fade out holds up, a very early one is down low, a
+    // linear fade in is half way at its middle; and smooth is as it was.
+    let shaped = |a: FadeShape, b: FadeShape| RenderSpec { parts: vec![RenderPart { fade_in_shape: a, fade_out_shape: b, ..spec(0.0).parts[0].clone() }], ..spec(0.0) };
+    assert_eq!(render::cache_key(&shaped(FadeShape::Smooth, FadeShape::Smooth), &src), render::cache_key(&spec(0.0), &src), "smooth is the old recipe");
+    assert!(shaped(FadeShape::Linear, FadeShape::VeryEarly).recipe(&src).ends_with(":shape-linear/very-early"));
+    // A shape with no fade to shape changes nothing.
+    let unfaded = RenderSpec { parts: vec![RenderPart { fade_out_shape: FadeShape::Late, ..plain.parts[0].clone() }], ..plain.clone() };
+    assert_eq!(unfaded.recipe(&src), plain.recipe(&src));
+    let level = |a: FadeShape, b: FadeShape, x: f64| {
+        let out = render::prepare(&t, &cache, &shaped(a, b), &src).unwrap();
+        let s = pcm(&out.path);
+        rms(&s, x - 0.05, x + 0.05) / full
+    };
+    // 4.75 s is a quarter of the way into the fade out (4 s to 7 s): 0.75 of the way from silence.
+    let late = level(FadeShape::Linear, FadeShape::Late, 4.75);
+    let early = level(FadeShape::Linear, FadeShape::VeryEarly, 4.75);
+    assert!((late - (std::f64::consts::FRAC_PI_2 * 0.75).sin()).abs() < 0.08, "late holds up: {late}");
+    assert!((early - 0.75f64.powi(3)).abs() < 0.08, "very early is down: {early}");
+    assert!((level(FadeShape::Linear, FadeShape::Late, 1.0) - 0.5).abs() < 0.08, "linear in, half way");
+    for s in FadeShape::ALL {
+        assert_eq!(FadeShape::from(String::from(s)), s);
+        assert!(s.gain(0.0, false) == 0.0 && s.gain(0.0, true) == 0.0 && (s.gain(1.0, false) - 1.0).abs() < 1e-12 && (s.gain(1.0, true) - 1.0).abs() < 1e-12, "{s:?} runs from silence to full");
+    }
+    assert_eq!(FadeShape::from("wobbly".to_string()), FadeShape::Smooth);
 }
 
 #[test]

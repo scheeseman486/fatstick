@@ -94,9 +94,11 @@ GPL version 3 or later.
   end of a track: select it and press E, or "Start and end…" in its
   right-click menu. Each end has a panel with the waveform of its first or
   last half minute (faint where it's cut or faded), the cut marked on it
-  (drag it, or use the slider), the silence to add beside it, and a button
-  to hear it, silence included. Only the stick's copy changes, never your
-  file.
+  (drag it, or use the slider, which reaches a minute and a half), the
+  silence to add beside it, and a button to hear it, silence included. The
+  picture switches between 0:30 close up and 1:30 wide, and widens by itself
+  when a cut goes past half a minute; a longer cut can be typed in. Only the
+  stick's copy changes, never your file.
 - **A track's key.** Play a track higher or lower without changing its
   speed or length: select it and press K, or "Key…" in its right-click
   menu. The slider moves in semitones (named as intervals: "a fourth up"),
@@ -108,12 +110,18 @@ GPL version 3 or later.
   track; the file itself is never changed.
 - **Fades.** Fade a track in at its start and out at its end, after any
   cut: select it and press F, or "Fade in and out…" in its right-click menu.
-  Each end has its own slider (up to 30 s), drawn as the curve it makes (an
-  S curve, gentle at both ends of the fade), and a button to hear it: "Hear
-  the end" plays from a few seconds before the fade out. The waveform shows
-  the track turned down by the fade. Moving a slider changes what's playing
-  as it plays. On the stick the fades are rendered
-  into the track, after any key shift; the file itself is never changed.
+  Each end has its own slider (up to 30 s), drawn as the curve it makes, a
+  shape, and a button to hear it: "Hear the end" plays from a few seconds
+  before the fade out. The shapes are named for when the change happens:
+  Smooth (an S curve, gentle at both ends of the fade; the default), Linear,
+  Early (a fade out drops away, then trails off; a fade in comes up, then
+  levels off), Late (a fade out holds the volume, then falls away; a fade in
+  stays low, then rises), and Very early and Very late, more so. Each is
+  drawn for its end, with a line saying how it sounds; the arrow keys move
+  along them. The waveform shows the track turned down by the fade. Moving a
+  slider or picking a shape changes what's playing as it plays. On the stick
+  the fades are rendered into the track in their shapes, after any key
+  shift; the file itself is never changed.
 - **Previews play in the main player.** The start and end, key and fade
   dialogs don't have a player of their own: they change what the player at
   the bottom of the window plays, and that player stays usable while they're
@@ -351,8 +359,8 @@ python3 tests/kernel_stick.py --kroot <kernel dir> --fatstick target/x86_64-unkn
 from an empty library: it adds two folders of real audio (FLAC, Opus, WAV,
 MP3s at 320 kbps and at 22.05 kHz mono), turns on even volume, cuts and pads
 a track, shifts another 5 semitones up (changing its key live while it
-plays), fades a third in and out (changing the fades live, and seeking, while
-it plays), joins the second playlist into one track and puts silence between
+plays), fades a third in and out with a late fade out (changing the fades
+and their shapes live, and seeking, while it plays), joins the second playlist into one track and puts silence between
 the two, picks a disk image standing in for a stick, syncs through the button
 and its confirmation, shows the stick's view, plays a track, and hears the
 silence being tried in the start and end dialog (with the track's waveform
@@ -368,8 +376,9 @@ read with tools that aren't ours: fsck.fat, mtools (the order a player sees),
 ffprobe (codec, sample rate, tags, cover, lengths), and ffmpeg's EBU R128
 meter and volumedetect (−18 LUFS where the volume was evened out; silence
 where it was added), and the shifted track is measured: 550 Hz became 734 Hz,
-at the same length. The faded track is silent at both ends and half as loud
-(−6 dB) at the middle of each fade, still 8 s long. ffprobe also reads back the tags the library wrote,
+at the same length. The faded track is silent at both ends, half as loud
+(−6 dB) at the middle of its smooth fade in and only 3 dB down at the middle
+of its late fade out, still 8 s long. ffprobe also reads back the tags the library wrote,
 including labels in an MP3 that another app had kept in TXXX:GROUPING.
 
 ## Status

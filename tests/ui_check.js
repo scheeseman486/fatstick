@@ -237,6 +237,21 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   const dragged = Number(await p.locator('#edge-cutStart').inputValue());
   check('dragging on the waveform moves the cut', dragged > 2 && dragged < 4.5, String(dragged));
   check('the waveform is drawn, faint where it is cut', ((await p.locator('.edge-panel.start .wave').getAttribute('d')) || '').length > 100 && ((await p.locator('.edge-panel.start .wave-on').getAttribute('d')) || '').length > 100);
+  // The cut reaches a minute and a half: the slider goes to 1:30, and a cut
+  // past the close-up half minute widens the picture (which can then close in again).
+  {
+    const dur = await p.evaluate(() => { const A = Fatstick.app; return A.track(A.pl().entries[1].trackId).duration; });
+    const axisEnd = () => p.locator('.edge-panel.start .fade-axis > span').last().textContent();
+    check('the cut slider reaches a minute and a half', Number(await p.locator('#edge-cutStart-range').getAttribute('max')) === Math.min(90, Math.round((dur - 1) * 10) / 10), String(dur));
+    check('the picture starts close up, on the first half minute', (await axisEnd()) === '0:30' && (await p.locator('.edge-panel.start .edge-zoom-btn[aria-pressed="true"]').textContent()) === '0:30');
+    await p.locator('#edge-cutStart-range').evaluate((el) => { el.value = '75'; el.dispatchEvent(new Event('input')); });
+    check('a cut of 75 s from the slider widens the picture to 1:30', (await p.locator('#edge-cutStart').inputValue()) === '75' && (await axisEnd()) === '1:30' && await p.locator('.edge-panel.start .edge-zoom-btn').first().isDisabled());
+    const cutW = await p.locator('.edge-panel.start .edge-cut').evaluate((el) => Number(el.getAttribute('width')));
+    check('the cut is drawn most of the way across', cutW > 240 && cutW < 260, String(cutW));
+    await p.locator('#edge-cutStart').fill('3');
+    await p.locator('.edge-panel.start .edge-zoom-btn').first().click();
+    check('once the cut is back inside, the picture can close in again', (await axisEnd()) === '0:30' && (await p.locator('.edge-panel.start .edge-zoom-btn').first().getAttribute('aria-pressed')) === 'true');
+  }
   await p.locator('#edge-cutStart').fill('2');
   await p.locator('#edge-padEnd').fill('1.5');
   check('the silence shows beside the end', /1.5 s/.test(await p.locator('.edge-panel.end .edge-gap').textContent()) && /1.5 s of silence after/.test(await p.locator('.edge-panel.end .edge-sum').textContent()));
@@ -573,6 +588,16 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('the fade-in slider draws its curve', (await curve()) !== flat && (await p.locator('.fade-panel.in .fade-val input').inputValue()) === '4');
     await p.locator('.fade-panel.out .fade-val input').fill('6.5');
     check('a number sets the fade-out too', (await p.locator('#fade-out').inputValue()) === '6.5');
+    // Shapes: smooth to start with; a pick redraws the curve and says how it sounds.
+    const outCurve = () => p.locator('.fade-panel.out .fade-line').getAttribute('d');
+    check('each end offers six shapes, smooth picked', (await p.locator('.fade-panel.out [role="radio"]').count()) === 6 && (await p.locator('.fade-panel.out [role="radio"][aria-checked="true"]').getAttribute('data-shape')) === 'smooth');
+    const smoothOut = await outCurve();
+    await p.locator('.fade-panel.out [role="radio"][data-shape="late"]').click();
+    check('picking "Late" redraws the fade out and says how it sounds', (await outCurve()) !== smoothOut && /Holds the volume/.test(await p.locator('.fade-panel.out .fade-shape-hint').textContent()));
+    // The arrow keys move along the shapes.
+    await p.locator('.fade-panel.in [role="radio"][aria-checked="true"]').focus();
+    await p.keyboard.press('ArrowRight');
+    check('an arrow key picks the next shape', (await p.locator('.fade-panel.in [role="radio"][aria-checked="true"]').getAttribute('data-shape')) === 'linear' && (await p.evaluate(() => document.activeElement.dataset.shape)) === 'linear');
     check('the player bar stays usable over the dimmed window', await p.evaluate(() => {
       const b = document.querySelector('#player .pbtn');
       const r = b.getBoundingClientRect();
@@ -589,7 +614,8 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.locator('#modal .btn.primary').click();
     const fe = await p.evaluate((id) => Fatstick.app.pl().entries.find((e) => e.id === id), fid);
     check('Apply sets the entry\'s fades', fe.fadeIn === 4 && fe.fadeOut === 6.5, JSON.stringify(fe));
-    check('the Fades column shows them', (await p.locator(`#row-${fid} .c-fades`).textContent()) === '4 / 6.5 s');
+    check('and their shapes', fe.fadeInShape === 'linear' && fe.fadeOutShape === 'late', JSON.stringify(fe));
+    check('the Fades column shows them', (await p.locator(`#row-${fid} .c-fades`).textContent()) === '4 / 6.5 s' && /in over 4 s \(linear\) and out over 6.5 s \(late\)/.test(await p.locator(`#row-${fid} .c-fades button`).getAttribute('title')));
     check('the dialog let go of the player bar', !(await p.evaluate(() => document.body.classList.contains('modal-player'))));
     const fplan = await p.evaluate((id) => {
       const A = Fatstick.app;
@@ -598,6 +624,8 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
       return { recipe: it.recipe, reason: it.d.reason };
     }, fid);
     check('it goes on the stick rendered, with its fades', fplan.recipe && fplan.recipe.kind === 'render' && fplan.recipe.parts[0].fadeIn === 4 && fplan.recipe.parts[0].fadeOut === 6.5 && !/Cut or padded/.test(fplan.reason), JSON.stringify(fplan));
+    check('in their shapes, which make it another render', fplan.recipe.parts[0].fadeInShape === 'linear' && fplan.recipe.parts[0].fadeOutShape === 'late'
+      && await p.evaluate((r) => { const R = Fatstick.rules; const plain = { ...r, parts: [{ ...r.parts[0], fadeInShape: undefined, fadeOutShape: undefined }] }; return R.describe(r) !== R.describe(plain); }, fplan.recipe), JSON.stringify(fplan.recipe));
     await p.keyboard.press('Control+z');
     check('undo takes the fades off', !(await p.evaluate((id) => { const e = Fatstick.app.pl().entries.find((x) => x.id === id); return e.fadeIn || e.fadeOut; }, fid)));
     await p.keyboard.press('Control+y');
@@ -610,7 +638,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.keyboard.press('f');
     await p.getByRole('button', { name: 'No fades' }).click();
     await p.locator('#modal .btn.primary').click();
-    check('"No fades" takes them off', !(await p.evaluate((id) => { const e = Fatstick.app.pl().entries.find((x) => x.id === id); return e.fadeIn || e.fadeOut; }, fid)) && (await p.locator('.c-fades').count()) === 0);
+    check('"No fades" takes them off, shapes and all', !(await p.evaluate((id) => { const e = Fatstick.app.pl().entries.find((x) => x.id === id); return e.fadeIn || e.fadeOut || e.fadeInShape || e.fadeOutShape; }, fid)) && (await p.locator('.c-fades').count()) === 0);
     await p.keyboard.press('Control+z');
     await p.evaluate(() => Fatstick.app.stopPlayback());
   }

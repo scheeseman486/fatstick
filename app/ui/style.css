@@ -374,6 +374,30 @@ body.modal-player .player { position: relative; z-index: 60; }
 .edge-rows input[type="range"].mixed { opacity: 0.45; }
 .fade-axis { display: flex; justify-content: space-between; margin-top: -2px; font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .fade-panel input[type="range"] { width: 100%; margin: 2px 0; }
+/* A fade's shape: six small drawn curves, close up and late in a column each. */
+.fade-shape-row { display: grid; gap: 4px; margin-top: 4px; }
+.fade-shape-row .lbl { font-size: 13px; color: var(--ink-2); }
+.fade-shapes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, auto); grid-auto-flow: column; gap: 4px; }
+.fade-shape {
+  display: flex; align-items: center; gap: 6px; min-width: 0; height: 30px; padding: 0 6px;
+  border: 1px solid var(--rule); border-radius: var(--r-s); background: var(--sheet); color: var(--ink-2);
+  font: inherit; font-size: 12.5px; text-align: left; cursor: pointer;
+}
+.fade-shape span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fade-shape:hover { border-color: var(--ink-3); color: var(--ink); }
+.fade-shape[aria-checked="true"] { border-color: var(--accent-strong); color: var(--ink); box-shadow: inset 0 0 0 1px var(--accent-strong); }
+.fade-shape:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
+.fade-shape-svg { flex: none; width: 24px; height: 15px; }
+.fade-shape-svg path { fill: none; stroke: var(--ink-3); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.fade-shape[aria-checked="true"] .fade-shape-svg path { stroke: var(--accent-strong); }
+.fade-shape-hint { margin: 0; min-height: 1.4em; font-size: 12.5px; color: var(--ink-2); }
+/* The start and end pictures: half a minute close up, or a minute and a half. */
+.fade-axis .edge-zoom { display: inline-flex; border: 1px solid var(--rule); border-radius: 999px; overflow: hidden; }
+.edge-zoom-btn { border: 0; background: transparent; color: var(--ink-3); font: inherit; font-size: 11px; padding: 1px 8px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.edge-zoom-btn + .edge-zoom-btn { border-left: 1px solid var(--rule); }
+.edge-zoom-btn[aria-pressed="true"] { background: var(--pane); color: var(--ink); font-weight: 600; }
+.edge-zoom-btn:disabled { opacity: 0.4; cursor: default; }
+.edge-zoom-btn:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
 .fade-panel .btn { justify-self: start; }
 @media (max-width: 620px) { .fade-panels { grid-template-columns: minmax(0, 1fr); } }
 

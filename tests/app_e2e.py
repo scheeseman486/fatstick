@@ -231,10 +231,11 @@ def main():
     record("the second track: 5 semitones up (550 Hz became 734 Hz), still 8 s", abs(f2 - 550 * 2 ** (5 / 12)) < 6 and abs(l2 - 8.0) < 0.12, f"{f2:.1f} Hz, {l2:.2f} s")
     fourth = probes[3][2]
     full, l4 = peak(fourth, 3.0, 1.0), length(fourth)
-    # The S curve is half way (-6 dB) at the middle of each fade: 1 s in, and 1.5 s before the end.
+    # The smooth S curve is half way (-6 dB) at the middle of the fade in, 1 s in; the
+    # late fade out holds up, sin(45°) (-3 dB) at its middle, 1.5 s before the end.
     pin, pmid_in, pmid_out, pout = peak(fourth, 0, 0.15), peak(fourth, 0.95, 0.1), peak(fourth, 6.45, 0.1), peak(fourth, 7.85)
-    record("the fourth track fades in over 2 s and out over 3 s, still 8 s",
-           abs(l4 - 8.0) < 0.12 and pin < full - 18 and abs(pmid_in - (full - 6)) < 1.5 and abs(pmid_out - (full - 6)) < 1.5 and pout < full - 18,
+    record("the fourth track fades in over 2 s and out over 3 s (late), still 8 s",
+           abs(l4 - 8.0) < 0.12 and pin < full - 18 and abs(pmid_in - (full - 6)) < 1.5 and abs(pmid_out - (full - 3)) < 1.2 and pout < full - 18,
            f"{l4:.2f} s; {pin:.0f}, {pmid_in:.1f}, {full:.1f}, {pmid_out:.1f}, {pout:.0f} dB")
     record("the joined track takes the playlist's name and the shared artist", probes[5][4].get("album") == "Live" and probes[5][4].get("artist") == "Live Band", str(probes[5][4]))
 

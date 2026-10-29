@@ -112,18 +112,53 @@
   function hasKey(e) {
     return key(e).pitch !== 0;
   }
-  /** A track's fades on the stick (seconds), after its cuts, from its entry. */
+  /**
+   * The shapes a fade can take, named for when the change happens (the
+   * app's render and player have the same): early in the fade or late in it.
+   */
+  const FADE_SHAPES = ["smooth", "linear", "early", "late", "very-early", "very-late"];
+  const shapeOf = (x) => (FADE_SHAPES.includes(x) ? x : "smooth");
+  /** A track's fades on the stick (seconds, after its cuts) and their shapes, from its entry. */
   function fades(e) {
     const n = (x) => (Number.isFinite(+x) && +x > 0 ? Math.round(Math.min(600, +x) * 100) / 100 : 0);
-    return { fadeIn: n(e && e.fadeIn), fadeOut: n(e && e.fadeOut) };
+    return { fadeIn: n(e && e.fadeIn), fadeOut: n(e && e.fadeOut), fadeInShape: shapeOf(e && e.fadeInShape), fadeOutShape: shapeOf(e && e.fadeOutShape) };
   }
   function hasFades(e) {
     const f = fades(e);
     return !!(f.fadeIn || f.fadeOut);
   }
-  /** The S curve fades follow (the app's render and player use the same). */
+  /** The smooth S curve: gain from 0 to 1 as x goes from 0 to 1. */
   function fadeCurve(x) {
     return 0.5 - 0.5 * Math.cos(Math.PI * Math.max(0, Math.min(1, x)));
+  }
+  /** A fade's gain at x, the way from silence (0) to full (1), in its shape; a
+   * fade out (`out`) runs from 1 to 0, so early and late turn round. */
+  function fadeGain(shape, x, out) {
+    x = Math.max(0, Math.min(1, x));
+    const full = () => Math.sin((Math.PI / 2) * x);
+    const thin = () => 1 - Math.cos((Math.PI / 2) * x);
+    switch (shapeOf(shape)) {
+      case "linear": return x;
+      case "early": return out ? thin() : full();
+      case "late": return out ? full() : thin();
+      case "very-early": return out ? x ** 3 : 1 - (1 - x) ** 3;
+      case "very-late": return out ? 1 - (1 - x) ** 3 : x ** 3;
+      default: return fadeCurve(x);
+    }
+  }
+  /** The fades as a render part has them: lengths, and shapes where they aren't smooth. */
+  function fadePart(f) {
+    if (!f.fadeIn && !f.fadeOut) return {};
+    const x = { fadeIn: f.fadeIn, fadeOut: f.fadeOut };
+    if (f.fadeIn && f.fadeInShape !== "smooth") x.fadeInShape = f.fadeInShape;
+    if (f.fadeOut && f.fadeOutShape !== "smooth") x.fadeOutShape = f.fadeOutShape;
+    return x;
+  }
+  /** The shapes in a recipe's words: "" when both are smooth, as before shapes. */
+  function shapeText(f) {
+    const a = f.fadeIn ? shapeOf(f.fadeInShape) : "smooth";
+    const b = f.fadeOut ? shapeOf(f.fadeOutShape) : "smooth";
+    return a === "smooth" && b === "smooth" ? "" : `~${a}/${b}`;
   }
   /** An entry whose track is rendered, not copied: cut, padded, faded or in another key. */
   function reworks(e) {
@@ -138,7 +173,7 @@
   function part(t, e, g) {
     const k = key(e);
     const f = fades(e);
-    return { trackId: t.id, gainDb: g && g.db ? Math.round(g.db * 10) / 10 : 0, ...edges(e), ...(k.pitch ? k : {}), ...(f.fadeIn || f.fadeOut ? f : {}) };
+    return { trackId: t.id, gainDb: g && g.db ? Math.round(g.db * 10) / 10 : 0, ...edges(e), ...(k.pitch ? k : {}), ...fadePart(f) };
   }
   /** A file rendered from parts: a cut or padded track, silence, a joined playlist. */
   function render(parts, profile, rate) {
@@ -168,7 +203,7 @@
     if (r.kind === "copy") return "copy";
     if (r.kind === "gain") return `gain${r.steps > 0 ? "+" : ""}${r.steps}`;
     if (r.kind === "render") {
-      const ps = r.parts.map((x) => `${x.trackId || "-"}:${x.gainDb || 0}:${x.cutStart || 0}:${x.cutEnd || 0}:${x.padStart || 0}:${x.padEnd || 0}${x.pitch ? `:k${x.pitch}${x.keepFormants ? "f" : ""}` : ""}${x.fadeIn || x.fadeOut ? `:f${x.fadeIn || 0}/${x.fadeOut || 0}` : ""}`).join(",");
+      const ps = r.parts.map((x) => `${x.trackId || "-"}:${x.gainDb || 0}:${x.cutStart || 0}:${x.cutEnd || 0}:${x.padStart || 0}:${x.padEnd || 0}${x.pitch ? `:k${x.pitch}${x.keepFormants ? "f" : ""}` : ""}${x.fadeIn || x.fadeOut ? `:f${x.fadeIn || 0}/${x.fadeOut || 0}${shapeText(x)}` : ""}`).join(",");
       return `render/${r.vbr ? "vbr" : "cbr"}${r.cap}/${r.sampleRate}/${hash(ps)}`;
     }
     return `${r.vbr ? "vbr" : "cbr"}${r.cap}/${r.sampleRate}/${r.gainDb}`;
@@ -230,6 +265,6 @@
 
   Fatstick.rules = {
     LOSSLESS, CODEC_NAME, formatLabel, decide, gains, outBytes, geometry, layout, outputRate, recipe, describe, STEP,
-    edges, hasEdges, key, hasKey, fades, hasFades, fadeCurve, reworks, stickSeconds, part, render, hash,
+    edges, hasEdges, key, hasKey, fades, hasFades, fadeCurve, fadeGain, FADE_SHAPES, shapeText, reworks, stickSeconds, part, render, hash,
   };
 })(typeof window !== "undefined" ? (window.Fatstick = window.Fatstick || {}) : (globalThis.Fatstick = globalThis.Fatstick || {}));

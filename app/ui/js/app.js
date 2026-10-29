@@ -299,7 +299,7 @@
       const k = R.key(e);
       const f = R.fades(e);
       return (R.hasEdges(e) ? `[${x.cutStart},${x.cutEnd},${x.padStart},${x.padEnd}]` : "") + (k.pitch ? `k${k.pitch}${k.keepFormants ? "f" : ""}` : "")
-        + (f.fadeIn || f.fadeOut ? `f${f.fadeIn}/${f.fadeOut}` : "");
+        + (f.fadeIn || f.fadeOut ? `f${f.fadeIn}/${f.fadeOut}${R.shapeText(f)}` : "");
     };
     const shape = plan.folders.map((f) => (f.p.gap != null ? `S${f.p.gap}` : `${f.p.join ? "J" : ""}${f.present.map((it) => edge(it.entry)).join("")}`));
     return shape.join("") ? `${base}|${shape.join(",")}` : base;
@@ -907,9 +907,10 @@
   // ---- a track's ends: drawn, and heard through the main player --------------------------------
   const secsText = (x) => String(Math.round(x * 10) / 10);
   const SVG = "http://www.w3.org/2000/svg";
-  const sv = (tag, attrs) => {
+  const sv = (tag, attrs, ...kids) => {
     const el = document.createElementNS(SVG, tag);
     for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+    el.append(...kids);
     return el;
   };
   const peaksMemo = new Map();
@@ -981,7 +982,7 @@
     const k = f || R.fades(e);
     return {
       duration: track(e.trackId).duration || 0,
-      edges: { cutStart: g.cutStart, cutEnd: g.cutEnd, padStart: g.padStart, padEnd: g.padEnd, fadeIn: k.fadeIn, fadeOut: k.fadeOut },
+      edges: { cutStart: g.cutStart, cutEnd: g.cutEnd, padStart: g.padStart, padEnd: g.padEnd, fadeIn: k.fadeIn, fadeOut: k.fadeOut, fadeInShape: k.fadeInShape, fadeOutShape: k.fadeOutShape },
     };
   }
   /**
@@ -1018,9 +1019,10 @@
 
   /**
    * The start and end of the selected tracks on the stick. Each end has the
-   * waveform of its first or last half minute with the cut marked (drag it,
-   * or use the slider), silence to add, and a button to hear it. Changes are
-   * heard as the track plays, the silences too; the player bar stays usable.
+   * waveform of its first or last half minute (or minute and a half) with the
+   * cut marked (drag it, or use the slider, up to a minute and a half), silence
+   * to add, and a button to hear it. Changes are heard as the track plays, the
+   * silences too; the player bar stays usable.
    */
   function edgesDialog(ids) {
     const p = pl();
@@ -1044,20 +1046,27 @@
     const pv = previewer(p, es, (e) => ({ edges: tried(e) }));
     const err = h("p", { class: "st-note err", role: "alert" });
     const shortest = Math.min(...es.map((e) => track(e.trackId).duration || 0));
+    // The slider reaches a minute and a half; the picture shows half a minute
+    // close up, or the whole reach.
+    const NEAR = 30;
+    const FAR = 90;
 
     function panel(which) {
       const isStart = which === "start";
       const ck = isStart ? "cutStart" : "cutEnd";
       const pk = isStart ? "padStart" : "padEnd";
       const other = isStart ? "cutEnd" : "cutStart";
-      let win = Math.min(dur, Math.max(30, val(ck) + 10));
+      // How far the picture goes in (more than FAR for a cut typed in beyond it).
+      let reach = val(ck) > NEAR - 5 ? Math.max(FAR, val(ck) + 10) : NEAR;
+      const win = () => Math.min(dur, reach);
       const strip = waveStrip(t0, "edge-wave");
       const cutRect = sv("rect", { class: "edge-cut", y: "0", height: String(strip.H) });
       const fadeLine = sv("path", { class: "edge-fade" });
       const handle = sv("line", { class: "edge-handle", y1: "0", y2: String(strip.H) });
       strip.layers.append(cutRect, fadeLine, handle);
       const gap = h("div", { class: "edge-gap", title: isStart ? "Silence before the track" : "Silence after the track" });
-      const axis = h("div", { class: "fade-axis" });
+      const axisFrom = h("span");
+      const axisTo = h("span");
       const sum = h("span", { class: "edge-sum" });
       const range = (k, label) => h("input", { type: "range", min: "0", step: "0.1", id: `edge-${k}-range`, "aria-label": label });
       const num = (k, label) => h("input", { type: "number", class: "input secs", min: "0", max: "3600", step: "0.1", id: `edge-${k}`, "aria-label": label });
@@ -1068,10 +1077,16 @@
       ctl[pk].range.max = "10";
       ctl[pk].range.step = "0.5";
       const hear = h("button", { type: "button", class: "btn small" }, icon("play"), isStart ? "Hear the start" : "Hear the end");
+      // The picture close up or wide, when the track is longer than close up.
+      const zoomBtn = (r, text) => h("button", { type: "button", class: "edge-zoom-btn", text, "aria-label": `Show the ${isStart ? "first" : "last"} ${text}`, onclick: () => { reach = r; draw(); } });
+      const zNear = zoomBtn(NEAR, clock(NEAR));
+      const zFar = zoomBtn(FAR, clock(Math.min(dur, FAR)));
+      const zoom = dur > NEAR + 1 ? h("span", { class: "edge-zoom", role: "group", "aria-label": "How much of the track to show" }, zNear, zFar) : null;
+      const axis = h("div", { class: "fade-axis" }, axisFrom, zoom, axisTo);
 
       function show(k, src) {
         const c = ctl[k];
-        if (k === ck) c.range.max = String(Math.round(win * 10) / 10);
+        if (k === ck) c.range.max = String(Math.round(Math.max(0, Math.min(dur - 1, Math.max(FAR, val(ck)))) * 10) / 10);
         c.range.classList.toggle("mixed", v[k] == null);
         if (src !== c.range) c.range.value = String(val(k));
         if (src !== c.num) { c.num.value = v[k] == null ? "" : secsText(v[k]); c.num.placeholder = v[k] == null ? "mixed" : ""; }
@@ -1081,8 +1096,9 @@
         // Leave at least a second of the track.
         if (k === ck) n = Math.min(n, Math.max(0, Math.floor((dur - 1 - val(other)) * 10) / 10));
         v[k] = n;
-        // A cut typed in beyond the picture widens it (dragging stays inside).
-        if (k === ck && src === ctl[ck].num && n > win - 2 && win < dur) win = Math.min(dur, n + 10);
+        // A cut beyond the picture from the slider or typed in widens it
+        // (dragging stays inside).
+        if (k === ck && src !== null && n > reach - 2 && win() < dur) reach = n > FAR - 2 ? n + 10 : FAR;
         err.textContent = "";
         show(k, src);
         draw();
@@ -1100,7 +1116,7 @@
       // Drag the cut on the waveform.
       let dragging = false;
       const drag = (ev) => {
-        const sec = Math.max(isStart ? 0 : dur - win, Math.min(isStart ? win : dur, strip.secAt(ev.clientX)));
+        const sec = Math.max(isStart ? 0 : dur - win(), Math.min(isStart ? win() : dur, strip.secAt(ev.clientX)));
         set(ck, isStart ? sec : dur - sec, null);
       };
       strip.svg.addEventListener("pointerdown", (ev) => { ev.preventDefault(); strip.svg.setPointerCapture(ev.pointerId); dragging = true; drag(ev); });
@@ -1127,12 +1143,12 @@
       });
 
       function draw() {
-        const [a, b] = isStart ? [0, win] : [dur - win, dur];
+        const [a, b] = isStart ? [0, win()] : [dur - win(), dur];
         const start = val("cutStart");
         const end = dur - val("cutEnd");
         const f = R.fades(e0);
         // What plays: nothing where it's cut, and the entry's fades.
-        const gain = (t) => (t < start || t > end ? 0 : (f.fadeIn ? R.fadeCurve((t - start) / f.fadeIn) : 1) * (f.fadeOut ? R.fadeCurve((end - t) / f.fadeOut) : 1));
+        const gain = (t) => (t < start || t > end ? 0 : (f.fadeIn ? R.fadeGain(f.fadeInShape, (t - start) / f.fadeIn) : 1) * (f.fadeOut ? R.fadeGain(f.fadeOutShape, (end - t) / f.fadeOut, true) : 1));
         strip.draw(a, b, gain);
         const at = isStart ? start : end;
         const xp = strip.x(at);
@@ -1145,7 +1161,7 @@
           const pts = [];
           for (let i = 0; i <= 24; i++) {
             const t = isStart ? at + (i / 24) * fs : at - fs + (i / 24) * fs;
-            const g = isStart ? R.fadeCurve((t - at) / fs) : R.fadeCurve((at - t) / fs);
+            const g = isStart ? R.fadeGain(f.fadeInShape, (t - at) / fs) : R.fadeGain(f.fadeOutShape, (at - t) / fs, true);
             pts.push(`${strip.x(t).toFixed(1)},${(strip.H - 3 - g * (strip.H - 8)).toFixed(1)}`);
           }
           fadeLine.setAttribute("d", `M${pts.join(" L")}`);
@@ -1153,7 +1169,15 @@
         const pad = val(pk);
         gap.classList.toggle("on", pad > 0);
         fill(gap, h("strong", { text: pad > 0 ? `${secsText(pad)} s` : "–" }), h("small", { text: pad > 0 ? "silence" : "no silence" }));
-        fill(axis, h("span", { text: clock(a) }), h("span", { text: clock(b) }));
+        axisFrom.textContent = clock(a);
+        axisTo.textContent = clock(b);
+        if (zoom) {
+          const wide = reach > NEAR;
+          zNear.setAttribute("aria-pressed", String(!wide));
+          zFar.setAttribute("aria-pressed", String(wide));
+          // Close up would leave the cut out of the picture.
+          zNear.disabled = val(ck) > NEAR - 1;
+        }
         const cut = v[ck];
         const words = [cut == null ? "cuts differ" : cut ? `${secsText(cut)} s cut` : "", v[pk] == null ? "silences differ" : v[pk] ? `${secsText(v[pk])} s of silence ${isStart ? "before" : "after"}` : ""].filter(Boolean);
         sum.textContent = words.length ? words.join(", ") : "As it is";
@@ -1408,28 +1432,42 @@
   }
 
   // ---- fades: in at the start, out at the end ------------------------------------------------
+  /** The shapes a fade can take (R.FADE_SHAPES), and how each sounds at either end. */
+  const FADE_SHAPES = {
+    smooth: { label: "Smooth", in: "Eases up from silence and settles at full volume.", out: "Eases down and settles gently into silence." },
+    linear: { label: "Linear", in: "Turns up at a steady rate.", out: "Turns down at a steady rate." },
+    early: { label: "Early", in: "Comes up quickly, then levels off.", out: "Drops away quickly, then trails off." },
+    late: { label: "Late", in: "Stays low, then rises toward the end.", out: "Holds the volume, then falls away at the end." },
+    "very-early": { label: "Very early", in: "Up almost at once, then a long, gentle finish.", out: "Drops sharply, then a long, quiet tail." },
+    "very-late": { label: "Very late", in: "Quiet for most of it, then swells up at the end.", out: "Holds nearly full, then drops sharply at the end." },
+  };
   function fadeTitle(e) {
     const f = R.fades(e);
-    if (f.fadeIn && f.fadeOut) return `Fades in over ${secsText(f.fadeIn)} s and out over ${secsText(f.fadeOut)} s`;
-    if (f.fadeIn) return `Fades in over ${secsText(f.fadeIn)} s`;
-    return `Fades out over ${secsText(f.fadeOut)} s`;
+    const sh = (x) => (x === "smooth" ? "" : ` (${FADE_SHAPES[x].label.toLowerCase()})`);
+    const fin = `in over ${secsText(f.fadeIn)} s${sh(f.fadeInShape)}`;
+    const fout = `out over ${secsText(f.fadeOut)} s${sh(f.fadeOutShape)}`;
+    if (f.fadeIn && f.fadeOut) return `Fades ${fin} and ${fout}`;
+    if (f.fadeIn) return `Fades ${fin}`;
+    return `Fades ${fout}`;
   }
 
   /**
    * Fades of the selected entries: one panel for each end, with the
    * waveform of its first or last half minute turned down by the fade, the
-   * curve, a slider, and a button to hear it. Moving a slider changes what
-   * plays as it plays; the player bar stays usable, so seeking keeps the
-   * fades being tried.
+   * curve, a slider, the fade's shape, and a button to hear it. Moving a
+   * slider or picking a shape changes what plays as it plays; the player bar
+   * stays usable, so seeking keeps the fades being tried.
    */
   function fadeDialog(ids) {
     const p = pl();
     const es = p.entries.filter((e) => ids.includes(e.id));
     if (!es.length) return;
     const f0 = R.fades(es[0]);
-    const mixed = es.some((e) => { const f = R.fades(e); return f.fadeIn !== f0.fadeIn || f.fadeOut !== f0.fadeOut; });
+    const mixed = es.some((e) => { const f = R.fades(e); return ["fadeIn", "fadeOut", "fadeInShape", "fadeOutShape"].some((k) => f[k] !== f0[k]); });
     let fin = f0.fadeIn;
     let fout = f0.fadeOut;
+    let sin = f0.fadeInShape;
+    let sout = f0.fadeOutShape;
     const e0 = es[0];
     const t0 = track(e0.trackId);
     const x0 = R.edges(e0);
@@ -1438,7 +1476,7 @@
     const len = end - start;
     const MAX = Math.max(1, Math.min(30, Math.floor(len)));
     const WIN = Math.min(30, len);
-    const now = () => ({ fadeIn: fin, fadeOut: fout });
+    const now = () => ({ fadeIn: fin, fadeOut: fout, fadeInShape: sin, fadeOutShape: sout });
     const pv = previewer(p, es, () => ({ shape: now() }));
     let applied = false;
 
@@ -1452,6 +1490,48 @@
       const hear = h("button", { type: "button", class: "btn small" }, icon("play"), isIn ? "Hear the start" : "Hear the end");
       const from = isIn ? start : end - WIN;
       const axis = h("div", { class: "fade-axis" }, h("span", { text: clock(from) }), h("span", { text: clock(from + WIN) }));
+      const shapeNow = () => (isIn ? sin : sout);
+      // The shapes, each drawn as it goes at this end, as a row of radio buttons.
+      const mini = (name) => {
+        const pts = [];
+        for (let i = 0; i <= 20; i++) {
+          const q = i / 20;
+          const g = isIn ? R.fadeGain(name, q) : R.fadeGain(name, 1 - q, true);
+          pts.push(`${(2 + q * 26).toFixed(1)},${(15 - g * 12).toFixed(1)}`);
+        }
+        return sv("svg", { viewBox: "0 0 30 18", class: "fade-shape-svg", "aria-hidden": "true" }, sv("path", { d: `M${pts.join(" L")}` }));
+      };
+      const shapeBtns = R.FADE_SHAPES.map((name) => h("button", {
+        type: "button", role: "radio", class: "fade-shape", dataset: { shape: name },
+        onclick: () => pick(name),
+      }, mini(name), h("span", { text: FADE_SHAPES[name].label })));
+      const shapes = h("div", { class: "fade-shapes", role: "radiogroup", "aria-label": isIn ? "Shape of the fade in" : "Shape of the fade out" }, ...shapeBtns);
+      const hint = h("p", { class: "fade-shape-hint", "aria-live": "polite" });
+      shapes.addEventListener("keydown", (ev) => {
+        const d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[ev.key];
+        if (!d) return;
+        ev.preventDefault();
+        const i = (R.FADE_SHAPES.indexOf(shapeNow()) + d + R.FADE_SHAPES.length) % R.FADE_SHAPES.length;
+        pick(R.FADE_SHAPES[i]);
+        shapeBtns[i].focus();
+      });
+      function showShape() {
+        const on = shapeNow();
+        for (const b of shapeBtns) {
+          const here = b.dataset.shape === on;
+          b.setAttribute("aria-checked", String(here));
+          b.tabIndex = here ? 0 : -1;
+        }
+        hint.textContent = FADE_SHAPES[on][isIn ? "in" : "out"];
+      }
+      function pick(name) {
+        if (isIn) sin = name;
+        else sout = name;
+        showShape();
+        draw();
+        live();
+      }
+      showShape();
       const set = (v, src) => {
         v = Math.max(0, Math.min(MAX, Math.round(v * 10) / 10));
         if (isIn) fin = v;
@@ -1469,7 +1549,7 @@
       });
       function draw() {
         const f = isIn ? fin : fout;
-        const g = (t) => (!f ? 1 : isIn ? R.fadeCurve((t - start) / f) : R.fadeCurve((end - t) / f));
+        const g = (t) => (!f ? 1 : isIn ? R.fadeGain(sin, (t - start) / f) : R.fadeGain(sout, (end - t) / f, true));
         strip.draw(from, from + WIN, g);
         const pts = [];
         for (let i = 0; i <= 60; i++) {
@@ -1482,8 +1562,10 @@
       draw();
       const el = h("section", { class: `fade-panel ${which}` },
         h("div", { class: "fade-top" }, h("h3", { text: isIn ? "Fade in" : "Fade out" }), h("span", { class: "fade-val" }, num, "s")),
-        strip.svg, axis, slider, hear);
-      return { el, draw, set };
+        strip.svg, axis, slider,
+        h("div", { class: "fade-shape-row" }, h("span", { class: "lbl", text: "Shape" }), shapes),
+        hint, hear);
+      return { el, draw, set, pick };
     }
 
     let raf = 0;
@@ -1502,8 +1584,8 @@
       pout.draw();
       const t = pv.playingHere() ? track(pv.current().trackId) : null;
       status.textContent = DEMO ? "The demo plays no sound; in the app, the fades change as it plays."
-        : t ? `${t.title || t.filename}, ${clock(S.player.pos)}. Move a slider and hear it change; the player below works as usual.`
-          : "Hear the start or the end; moving a slider changes it as it plays.";
+        : t ? `${t.title || t.filename}, ${clock(S.player.pos)}. Move a slider or pick a shape and hear it change; the player below works as usual.`
+          : "Hear the start or the end; moving a slider or picking a shape changes it as it plays.";
     }
     const ticker = setInterval(() => { if (document.contains(status)) tick(); }, 250);
 
@@ -1516,6 +1598,8 @@
           if (!x) continue;
           if (fin) x.fadeIn = fin; else delete x.fadeIn;
           if (fout) x.fadeOut = fout; else delete x.fadeOut;
+          if (fin && sin !== "smooth") x.fadeInShape = sin; else delete x.fadeInShape;
+          if (fout && sout !== "smooth") x.fadeOutShape = sout; else delete x.fadeOutShape;
         }
       });
     };
@@ -1524,13 +1608,13 @@
       wide: true,
       player: true,
       body: [
-        h("p", { text: "Fade the track in at its start and out at its end, after any cut. Only the stick's copy changes; the file itself isn't touched." }),
+        h("p", { text: "Fade the track in at its start and out at its end, after any cut, in the shape you pick. Only the stick's copy changes; the file itself isn't touched." }),
         h("div", { class: "fade-panels" }, pin.el, pout.el),
         h("div", { class: "key-listen" }, status),
         mixed || es.length > 1 ? h("p", { class: "st-note", text: `Apply gives all ${es.length} tracks these fades${mixed ? " (they differ now)" : ""}; the pictures show the first.` }) : null,
       ],
       buttons: [
-        h("button", { type: "button", class: "btn left", text: "No fades", onclick: () => { pin.set(0); pout.set(0); } }),
+        h("button", { type: "button", class: "btn left", text: "No fades", onclick: () => { pin.set(0); pout.set(0); pin.pick("smooth"); pout.pick("smooth"); } }),
         h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal }),
         h("button", { type: "button", class: "btn primary", text: "Apply", onclick: apply }),
       ],
@@ -2752,7 +2836,8 @@
     // to its cut end, faded and in its key, then the silence after it.
     const args = {
       trackId: t.id, token: entryId, from, gainDb: 0, recipe: null, pitch: k.pitch, keepFormants: k.keepFormants,
-      cutStart: x.cutStart, cutEnd: x.cutEnd, padStart: x.padStart, padEnd: x.padEnd, fadeIn: f.fadeIn, fadeOut: f.fadeOut,
+      cutStart: x.cutStart, cutEnd: x.cutEnd, padStart: x.padStart, padEnd: x.padEnd,
+      fadeIn: f.fadeIn, fadeOut: f.fadeOut, fadeInShape: f.fadeInShape || "smooth", fadeOutShape: f.fadeOutShape || "smooth",
     };
     if (S.player.asOnStick && !opts.source) {
       const it = stickItem(plId, entryId);

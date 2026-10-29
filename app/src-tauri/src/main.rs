@@ -355,6 +355,8 @@ struct Edges {
     cut_end: f64,
     fade_in: f64,
     fade_out: f64,
+    fade_in_shape: fatstick_audio::render::FadeShape,
+    fade_out_shape: fatstick_audio::render::FadeShape,
     pad_start: f64,
     pad_end: f64,
 }
@@ -364,7 +366,16 @@ fn shape_of(duration: f64, e: &Edges) -> player::Shape {
     let end = if ok(e.cut_end) > 0.0 && duration > 0.0 { (duration - ok(e.cut_end)).max(ok(e.cut_start)) } else { f64::INFINITY };
     // A fade out needs to know where the end is: the file's length.
     let end = if !end.is_finite() && ok(e.fade_out) > 0.0 && duration > 0.0 { duration } else { end };
-    player::Shape { start: ok(e.cut_start), end, fade_in: ok(e.fade_in), fade_out: ok(e.fade_out), pad_start: ok(e.pad_start).min(3600.0), pad_end: ok(e.pad_end).min(3600.0) }
+    player::Shape {
+        start: ok(e.cut_start),
+        end,
+        fade_in: ok(e.fade_in),
+        fade_out: ok(e.fade_out),
+        fade_in_shape: e.fade_in_shape,
+        fade_out_shape: e.fade_out_shape,
+        pad_start: ok(e.pad_start).min(3600.0),
+        pad_end: ok(e.pad_end).min(3600.0),
+    }
 }
 
 fn key_of(pitch: f64, keep_formants: bool) -> Option<fatstick_audio::stretch::Key> {

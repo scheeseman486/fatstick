@@ -85,7 +85,8 @@
     const e1 = S.playlists[0].entries[1];
     check("the second track is 5 semitones up", e1.pitch === 5 && e1.keepFormants === false, JSON.stringify(e1));
 
-    // The fourth track fades in over 2 s and out over 3 s.
+    // The fourth track fades in over 2 s and out over 3 s, a late fade out
+    // (it holds up, then falls away).
     key({ key: "ArrowDown" });
     key({ key: "ArrowDown" });
     key({ key: "f" });
@@ -93,9 +94,10 @@
     const slide = (el, v) => { el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); };
     slide(fin, "2");
     slide(document.getElementById("fade-out"), "3");
+    document.querySelector('.fade-panel.out [role="radio"][data-shape="late"]').click();
     [...document.querySelectorAll("#modal .btn.primary")].find((b) => b.textContent === "Apply").click();
     const e3 = S.playlists[0].entries[3];
-    check("the fourth track fades in over 2 s and out over 3 s", e3.fadeIn === 2 && e3.fadeOut === 3, JSON.stringify(e3));
+    check("the fourth track fades in over 2 s and out over 3 s, late", e3.fadeIn === 2 && e3.fadeOut === 3 && e3.fadeOutShape === "late" && !e3.fadeInShape, JSON.stringify(e3));
 
     // Three seconds of silence between the two playlists.
     const add2 = [...document.querySelectorAll("#stick select")].find((x) => x.getAttribute("aria-label") === "Add a playlist to this stick");
@@ -186,12 +188,25 @@
       fo.dispatchEvent(new Event("input", { bubbles: true }));
       await sleep(250);
     }
+    // The shapes go to the player as it plays (and one it doesn't know is smooth).
+    for (const sh of ["very-early", "linear"]) {
+      document.querySelector(`.fade-panel.out [role="radio"][data-shape="${sh}"]`).click();
+      await sleep(250);
+    }
+    let shaped = "";
+    try {
+      await Fatstick.api.playerShape({ duration: 8, edges: { fadeOut: 3, fadeOutShape: "very-late", fadeInShape: "wobbly" } });
+      shaped = "ok";
+    } catch (err) {
+      shaped = String(err);
+    }
+    check("the player takes a fade's shape", shaped === "ok", shaped);
     A.seekTo(1.0);
     const p1 = S.player.pos;
     const on = await until(() => S.player.playing && S.player.pos > p1 + 0.5, 10000);
     check("the fades change while it plays, and a seek keeps it playing", !!on && !S.player.error && S.player.entryId === p.entries[3].id, `position ${S.player.pos}`);
     [...document.querySelectorAll("#modal .btn")].find((b) => b.textContent === "Cancel").click();
-    check("Cancel leaves the entry's fades", p.entries[3].fadeIn === 2 && p.entries[3].fadeOut === 3 && !document.body.classList.contains("modal-player"));
+    check("Cancel leaves the entry's fades", p.entries[3].fadeIn === 2 && p.entries[3].fadeOut === 3 && p.entries[3].fadeOutShape === "late" && !document.body.classList.contains("modal-player"));
     // The start and end dialog: its waveform comes from the file, and the
     // silence being tried is heard before the track (the position waits at
     // the cut start while it plays).

@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use fatstick_audio::decode::PcmStream;
-use fatstick_audio::render::fade_curve;
+use fatstick_audio::render::FadeShape;
 use fatstick_audio::stretch::{Key, Shifter};
 use fatstick_audio::Tools;
 use serde::Serialize;
@@ -38,13 +38,15 @@ pub struct Shape {
     pub end: f64,
     pub fade_in: f64,
     pub fade_out: f64,
+    pub fade_in_shape: FadeShape,
+    pub fade_out_shape: FadeShape,
     pub pad_start: f64,
     pub pad_end: f64,
 }
 
 impl Default for Shape {
     fn default() -> Shape {
-        Shape { start: 0.0, end: f64::INFINITY, fade_in: 0.0, fade_out: 0.0, pad_start: 0.0, pad_end: 0.0 }
+        Shape { start: 0.0, end: f64::INFINITY, fade_in: 0.0, fade_out: 0.0, fade_in_shape: FadeShape::Smooth, fade_out_shape: FadeShape::Smooth, pad_start: 0.0, pad_end: 0.0 }
     }
 }
 
@@ -59,10 +61,10 @@ impl Shape {
         }
         let mut g = 1.0;
         if self.fade_in > 0.0 {
-            g *= fade_curve((t - self.start) / self.fade_in);
+            g *= self.fade_in_shape.gain((t - self.start) / self.fade_in, false);
         }
         if self.fade_out > 0.0 && self.end.is_finite() {
-            g *= fade_curve((self.end - t) / self.fade_out);
+            g *= self.fade_out_shape.gain((self.end - t) / self.fade_out, true);
         }
         g as f32
     }
@@ -594,6 +596,28 @@ mod key_tests {
         s.base.store(2.5f64.to_bits(), Ordering::Relaxed);
         let b = drain(&s, 1);
         assert!((b[0] - 0.25).abs() < 0.01, "2.5 s in: half way out: {}", b[0]);
+    }
+
+    #[test]
+    fn a_fade_takes_its_shape() {
+        // 2 s fading out over all of it: a quarter of the way in, each shape
+        // is where its curve says, and a late one is still louder than an early one.
+        let level = |shape: FadeShape| {
+            let s = shared(vec![1.0f32; 44100 * 2 * 2]);
+            *s.shape.lock().unwrap() = Shape { start: 0.0, end: 2.0, fade_out: 2.0, fade_out_shape: shape, ..Default::default() };
+            let a = drain(&s, 50);
+            a[(0.5 * 44100.0) as usize * 2]
+        };
+        let near = |a: f32, b: f64| (a as f64 - b).abs() < 0.01;
+        assert!(near(level(FadeShape::Linear), 0.75), "linear: {}", level(FadeShape::Linear));
+        assert!(near(level(FadeShape::Late), (std::f64::consts::FRAC_PI_2 * 0.75).sin()));
+        assert!(near(level(FadeShape::VeryEarly), 0.75f64.powi(3)));
+        assert!(level(FadeShape::VeryLate) > level(FadeShape::Late) && level(FadeShape::Late) > level(FadeShape::Smooth) && level(FadeShape::Smooth) > level(FadeShape::Early) && level(FadeShape::Early) > level(FadeShape::VeryEarly));
+        // A fade in the other way round: early comes up sooner.
+        let s = shared(vec![1.0f32; 44100 * 2]);
+        *s.shape.lock().unwrap() = Shape { start: 0.0, fade_in: 1.0, fade_in_shape: FadeShape::Early, ..Default::default() };
+        let a = drain(&s, 30);
+        assert!(near(a[(0.25 * 44100.0) as usize * 2], (std::f64::consts::FRAC_PI_2 * 0.25).sin()));
     }
 
     #[test]
