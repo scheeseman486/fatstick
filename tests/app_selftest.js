@@ -117,6 +117,23 @@
     check("the second playlist is joined into one track", S.playlists[1].join === true && A.planSet(set).folders[2].files.length === 1);
     document.querySelector(`[data-pl="${S.playlists[0].id}"]`).click();
 
+    // A second disk image, excluded through Menu > Exclude devices: saved at
+    // once, no longer offered, and the list can't be overwritten as a plain setting.
+    document.getElementById("app-menu").click();
+    (await until(() => [...document.querySelectorAll('[role="menuitem"]')].find((m) => /Exclude devices/.test(m.textContent)))).click();
+    const spareBox = await until(() => [...document.querySelectorAll(".ex-dev")].find((d) => /spare\.img/.test(d.textContent)), 10000);
+    check("Exclude devices lists the second image", !!spareBox);
+    const spareId = spareBox.querySelector("input").dataset.id;
+    spareBox.querySelector("input").click();
+    const saved = await until(() => /Saved: .*spare\.img is excluded/.test(($(".ex-status") || {}).textContent || ""), 10000);
+    check("excluding it is saved", !!saved, ($(".ex-status") || {}).textContent);
+    [...document.querySelectorAll("#modal .btn")].find((b) => b.textContent === "Done").click();
+    await A.refreshSticks(true);
+    check("an excluded device isn't offered", !!spareId && !S.sticks.some((d) => d.id === spareId) && S.sticks.some((d) => d.image), S.sticks.map((d) => d.id).join(", "));
+    let overwrite = "";
+    try { await T.core.invoke("set_setting", { key: "excludedDevices", value: "[]" }); } catch (err) { overwrite = String(err); }
+    check("the list of excluded devices isn't a plain setting", /isn't set this way/.test(overwrite), overwrite);
+
     // The disk image, offered as a stick.
     await A.refreshSticks(true);
     const radio = await until(() => [...document.querySelectorAll("#stick .dev input")].find((i) => i.value.startsWith("image:")), 10000);
@@ -149,6 +166,12 @@
     const known = await until(() => { const hd = A.holder(S.sticks.find((d) => d.image)); return hd && hd.set && hd.set.id === set.id; }, 10000);
     check("the stick now carries a note naming this stick (set)", !!known);
     lines.push(`INFO names=${JSON.stringify(A.planSet(A.stickSet()).folders.map((f) => [f.folder, f.files.map((it) => it.name)]))}`);
+    // A sync aimed at the excluded image is refused by the app itself.
+    const aimed = A.buildSyncPlan(A.planSet(A.stickSet()));
+    aimed.stickId = spareId;
+    aimed.stickSize = null;
+    const refused = await Fatstick.api.sync(aimed);
+    check("a sync aimed at an excluded device is refused", !refused.ok && /excluded/.test(refused.error || ""), refused.error);
 
     // The stick's view, from a click in the sidebar: its folders in order.
     document.querySelector(`[data-set="${set.id}"]`).click();
@@ -225,6 +248,10 @@
     [...document.querySelectorAll("#modal .btn")].find((b) => b.textContent === "Cancel").click();
     check("Cancel leaves the entry's start and end", !p.entries[0].padStart && p.entries[0].cutStart === 2 && !S.player.entryId);
     A.stopPlayback();
+    // Repeat playlist, to see it kept after a restart.
+    document.getElementById("repeat").click();
+    document.getElementById("repeat").click();
+    check("repeat is set to the whole playlist", S.player.repeat === "all");
   } catch (e) {
     check("no exception", false, String((e && e.stack) || e));
   }

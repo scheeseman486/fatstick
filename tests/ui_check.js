@@ -750,23 +750,74 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.locator('[data-pl="p-road"]').click();
   }
 
-  // 32. Devices left out: Menu, "Exclude devices…"; ticked ones aren't shown or offered.
+  // 32. Devices left out: Menu, "Exclude devices…"; ticked ones aren't shown
+  // or offered, each change is saved as it's made, and the stick panel says
+  // nothing about them.
   {
     await p.locator('[data-pl="p-road"]').click();
     const devs = () => p.locator('#stick .dev').count();
     const n0 = await devs();
+    const box = () => p.locator('.ex-dev', { hasText: 'Generic Flash Disk' }).locator('input');
     await p.locator('#app-menu').click();
     await p.getByRole('menuitem', { name: 'Exclude devices…' }).click();
+    await p.locator('.ex-dev').first().waitFor();
     check('"Exclude devices…" lists what is plugged in', /^Exclude devices$/.test(await p.locator('#modal-title').textContent()) && (await p.locator('.ex-dev').count()) === n0, `${await p.locator('.ex-dev').count()} of ${n0}`);
-    await p.locator('.ex-dev', { hasText: 'Generic Flash Disk' }).locator('input').check();
-    check('ticking one takes it out of the stick list at once', (await devs()) === n0 - 1 && !(await p.locator('#stick .dev', { hasText: 'Generic Flash Disk' }).count()));
+    await box().check();
+    await p.locator('.ex-status', { hasText: 'Saved' }).waitFor();
+    check('ticking one saves it and takes it out of the stick list at once', (await devs()) === n0 - 1 && !(await p.locator('#stick .dev', { hasText: 'Generic Flash Disk' }).count())
+      && /Saved: Generic Flash Disk is excluded/.test(await p.locator('.ex-status').textContent()));
     await p.getByRole('button', { name: 'Done' }).click();
-    check('the stick panel says one is left out', /1 excluded device not shown/.test(await p.locator('#stick').textContent()));
-    await p.locator('#stick button', { hasText: 'Exclude devices…' }).click();
-    check('and it stays ticked', await p.locator('.ex-dev', { hasText: 'Generic Flash Disk' }).locator('input').isChecked());
-    await p.locator('.ex-dev', { hasText: 'Generic Flash Disk' }).locator('input').uncheck();
+    check('the stick panel says nothing about excluded devices', !/exclud/i.test(await p.locator('#stick').textContent()));
+    await p.evaluate(() => Fatstick.app.refreshSticks(true));
+    check('looking again leaves it out', (await devs()) === n0 - 1);
+    await p.locator('#app-menu').click();
+    await p.getByRole('menuitem', { name: 'Exclude devices…' }).click();
+    await p.locator('.ex-dev').first().waitFor();
+    check('and it stays ticked', await box().isChecked());
+    // Space plays and pauses over the dialog, even on a box; Enter ticks it.
+    const playing0 = await p.evaluate(() => Fatstick.app.S.player.playing);
+    await box().focus();
+    await p.keyboard.press('Space');
+    await p.waitForTimeout(80);
+    check('Space on a box plays (or pauses), and leaves the box', (await p.evaluate(() => Fatstick.app.S.player.playing)) !== playing0 && await box().isChecked());
+    await p.keyboard.press('Space');
+    await box().focus();
+    await p.keyboard.press('Enter');
+    await p.locator('.ex-status', { hasText: 'shown again' }).waitFor();
+    check('Enter unticks it, and it\'s back', !(await box().isChecked()) && (await devs()) === n0);
     await p.getByRole('button', { name: 'Done' }).click();
-    check('unticking brings it back', (await devs()) === n0);
+  }
+
+  // 32b. The player bar works under every dialog, undimmed, and Space plays
+  // and pauses with any dialog open (on a button too), but types in a text box.
+  {
+    await p.locator('#app-menu').click();
+    await p.getByRole('menuitem', { name: 'Exclude devices…' }).click();
+    const bar = await p.evaluate(() => {
+      const b = document.querySelector('#player .pbtn.play');
+      const r = b.getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      const m = document.getElementById('modal').getBoundingClientRect();
+      return { onTop: !!(top && top.closest('#player')), above: m.bottom <= document.getElementById('player').getBoundingClientRect().top, opacity: getComputedStyle(document.getElementById('player')).opacity };
+    });
+    check('a dialog leaves the player bar on top, undimmed, with the dialog above it', bar.onTop && bar.above && bar.opacity === '1', JSON.stringify(bar));
+    const was = await p.evaluate(() => Fatstick.app.S.player.playing);
+    await p.locator('#player .pbtn.play').click();
+    check('its play button works with the dialog open', (await p.evaluate(() => Fatstick.app.S.player.playing)) !== was && !(await p.locator('#modal-back').isHidden()));
+    await p.getByRole('button', { name: 'Done' }).focus();
+    await p.keyboard.press('Space');
+    await p.waitForTimeout(80);
+    check('Space on a dialog\'s button plays or pauses, without pressing the button', (await p.evaluate(() => Fatstick.app.S.player.playing)) === was && !(await p.locator('#modal-back').isHidden()));
+    await p.keyboard.press('Escape');
+    // A text box: Space types.
+    const before = await p.evaluate(() => Fatstick.app.S.player.playing);
+    await p.locator('#srch-btn').click();
+    await p.locator('#srch-in').click();
+    await p.keyboard.type('road trip');
+    check('Space in a text box types a space and leaves the player be', (await p.locator('#srch-in').inputValue()) === 'road trip' && (await p.evaluate(() => Fatstick.app.S.player.playing)) === before);
+    await p.keyboard.press('Escape');
+    await p.keyboard.press('Escape');
+    await p.evaluate(() => Fatstick.app.stopPlayback());
   }
 
   // 33. "Show in the library" from a playlist's track: the library, with it selected.

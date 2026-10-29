@@ -48,6 +48,33 @@ assert.deepStrictEqual(Q.search(idx, "  "), { exact: [], close: [] });
 assert.deepStrictEqual(Q.search(idx, "zzzzzz"), { exact: [], close: [] });
 assert.strictEqual(Q.distance("teardrop", "teadrop", 2), 1);
 assert.strictEqual(Q.distance("form", "from", 1), 1, "a swap is one edit");
+// Punctuation: initials with dots, apostrophes and marks inside a name, written either way.
+{
+  const pi = Q.build([
+    t("p1", "Y.M.C.A.", "Village People"),
+    t("p2", "YMCA (Live)", "Cover Band"),
+    t("p3", "Highway to Hell", "AC/DC"),
+    t("p4", "Don't Stop Me Now", "Queen"),
+    t("p5", "Empire State of Mind", "Jay-Z"),
+    t("p6", "Losing My Religion", "R.E.M."),
+    t("p7", "Air on the G String", "J. S. Bach"),
+  ]);
+  const ex = (q) => ids(Q.search(pi, q).exact).sort();
+  assert.deepStrictEqual(ex("ymca"), ["p1", "p2"], "YMCA finds Y.M.C.A.");
+  assert.deepStrictEqual(ex("Y.M.C.A."), ["p1", "p2"], "and the other way round");
+  assert.deepStrictEqual(ex("y.m.c.a"), ["p1", "p2"]);
+  assert.strictEqual(Q.search(pi, "ymca").exact[0].t.id, "p1", "the whole title first");
+  for (const q of ["acdc", "AC/DC", "ac dc", "ac-dc"]) assert.deepStrictEqual(ex(q), ["p3"], q);
+  for (const q of ["dont stop", "don't stop", "Don’t", "don t stop"]) assert.deepStrictEqual(ex(q), ["p4"], q);
+  for (const q of ["jayz", "jay-z", "jay z"]) assert.deepStrictEqual(ex(q), ["p5"], q);
+  for (const q of ["rem", "R.E.M.", "r e m"]) assert.deepStrictEqual(ex(q), ["p6"], q);
+  for (const q of ["js bach", "J.S. Bach", "j s bach", "bach"]) assert.deepStrictEqual(ex(q), ["p7"], q);
+  assert.ok(Q.search(pi, "ymca").exact[0].fields.includes("title"), "the field it matched in");
+  assert.deepStrictEqual(Q.words("Y.M.C.A. (Live)").sort(), ["a", "c", "live", "m", "y", "ymca"]);
+  // Not every dot is an initial.
+  assert.strictEqual(Q.norm("St. Louis Blues"), "st louis blues");
+  assert.strictEqual(Q.norm("Mr. Blue Sky"), "mr blue sky");
+}
 // Fast enough for a big library: 20,000 tracks.
 const big = [];
 for (let i = 0; i < 20000; i++) big.push(t(`b${i}`, `Song number ${i} of the ${["red", "blue", "green", "gold"][i % 4]} sky`, `Artist ${i % 900}`, { album: `Album ${i % 1500}`, labels: i % 7 ? [] : ["chill"] }));

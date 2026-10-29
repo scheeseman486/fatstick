@@ -44,11 +44,8 @@
     sets: [],
     /** The last sync of each stick, by stick id. */
     syncs: {},
+    /** The devices to offer: the app leaves out the excluded ones. */
     sticks: [],
-    /** Every device plugged in, the excluded ones too (S.sticks leaves those out). */
-    allSticks: [],
-    /** Devices not to show or copy to: { key, name, sizeBytes }. */
-    excluded: [],
     stickError: null,
     current: null,
     setId: null,
@@ -1244,7 +1241,6 @@
     modal({
       title: es.length === 1 ? `Start and end of ${t0.title || t0.filename}` : `Start and end of ${plural(es.length, "track")}`,
       wide: true,
-      player: true,
       body: [
         h("p", { text: "Cut audio away, or add silence, at either end of the track on the stick. The file itself isn't changed; a track that would be copied is encoded instead." }),
         h("div", { class: "fade-panels" }, ps.el, pe.el),
@@ -1395,7 +1391,6 @@
     const t0 = track(es[0].trackId);
     modal({
       title: es.length === 1 ? `Key of ${t0.title || t0.filename}` : `Key of ${plural(es.length, "track")}`,
-      player: true,
       body: [
         h("p", { text: "Higher or lower, at the same speed. Only the stick's copy changes, shifted at full quality when the stick syncs; the file itself isn't touched, and the length stays the same." }),
         h("div", { class: "key-dial" },
@@ -1606,7 +1601,6 @@
     modal({
       title: es.length === 1 ? `Fades of ${t0.title || t0.filename}` : `Fades of ${plural(es.length, "track")}`,
       wide: true,
-      player: true,
       body: [
         h("p", { text: "Fade the track in at its start and out at its end, after any cut, in the shape you pick. Only the stick's copy changes; the file itself isn't touched." }),
         h("div", { class: "fade-panels" }, pin.el, pout.el),
@@ -1955,60 +1949,76 @@
       takenOther ? h("p", { class: "st-note warn", id: "holds-other", text: `This stick holds ${heldText(takenOther)}${heldElsewhere(takenOther)}. Syncing ${s.name} to it replaces that.` }) : null,
       items.length ? h("div", { class: "devices", role: "radiogroup", "aria-label": "USB stick" }, items) : h("p", { class: "st-note", text: "No USB stick found. Plug one in; it shows up here." }),
       S.stickError ? h("p", { class: "st-note err", text: `Looking for sticks failed: ${S.stickError}` }) : null,
-      S.allSticks.length > S.sticks.length ? h("p", { class: "st-note" },
-        `${plural(S.allSticks.length - S.sticks.length, "excluded device")} not shown. `,
-        h("button", { type: "button", class: "btn quiet small inline", text: "Exclude devices…", onclick: excludeDevicesDialog })) : null,
     );
   }
 
   // ---- devices left out ---------------------------------------------------------------------
-  // A card reader that's always plugged in, a backup drive: not shown, and
-  // never picked to copy to. Changes apply as they're ticked.
+  // A card reader that's always plugged in, a backup drive: never shown, never
+  // read and never written. The app keeps the list (exclude.rs) and saves each
+  // change before it counts; this only shows it.
   let excludeDlg = null;
   function excludeDevicesDialog() {
     const list = h("div", { class: "ex-list" });
-    const setExcluded = (d, on) => {
-      const k = devKey(d);
-      S.excluded = S.excluded.filter((x) => x.key !== k);
-      if (on) S.excluded.push({ key: k, name: d.name, sizeBytes: d.sizeBytes });
-      saveSetting("excludedDevices", S.excluded);
-      S.sticks = S.allSticks.filter((x) => !isExcluded(x));
-      renderStick();
-      renderSide();
-      draw();
+    const status = h("p", { class: "st-note ex-status", role: "status" });
+    let chain = Promise.resolve();
+    /** One change at a time, in order; whatever happens, the list shows what's saved. */
+    const change = (fn, done) => {
+      chain = chain.then(async () => {
+        try {
+          draw(await fn());
+          status.classList.remove("err");
+          status.textContent = done;
+        } catch (e) {
+          status.classList.add("err");
+          status.textContent = `That didn't save, so nothing changed: ${e}`;
+          await load();
+        }
+        await refreshSticks(true);
+      });
     };
-    function draw() {
-      if (!document.contains(list) && excludeDlg) return;
-      const here = new Set(S.allSticks.map(devKey));
-      const away = S.excluded.filter((x) => !here.has(x.key));
+    async function load() {
+      try {
+        draw(await api.exclusions());
+      } catch (e) {
+        status.classList.add("err");
+        status.textContent = `Couldn't list the devices: ${e}`;
+      }
+    }
+    function draw(v) {
+      if (!document.contains(list)) return;
+      const devs = v.devices || [];
+      // Redrawn as devices come and go: the box in hand keeps the focus.
+      const focused = document.activeElement && list.contains(document.activeElement) ? document.activeElement.dataset.id : null;
       fill(list,
-        S.allSticks.length ? h("ul", { class: "ex-devs" }, S.allSticks.map((d) => h("li", null,
+        devs.length ? h("ul", { class: "ex-devs" }, devs.map((d) => h("li", null,
           h("label", { class: "check ex-dev" },
-            h("input", { type: "checkbox", checked: isExcluded(d), onchange: (e) => setExcluded(d, e.target.checked) }),
+            h("input", { type: "checkbox", checked: d.excluded, dataset: { id: d.id }, onchange: (e) => change(() => api.setExcluded(d.id, e.target.checked), `Saved: ${d.name} ${e.target.checked ? "is excluded" : "is shown again"}.`) }),
             h("span", null,
               h("strong", { text: d.name }),
               h("span", { class: "ex-meta", text: `${bytes(d.sizeBytes)}${d.bus ? `, ${d.bus.toUpperCase()}` : ""}${d.device ? `, ${d.device}` : ""}. ${d.volumes.length ? d.volumes.join("; ") : "Blank"}.` })))))) 
           : h("p", { class: "st-note", text: "No USB sticks or memory cards are plugged in. Plug in the one to exclude, then look again." }),
-        away.length ? [
+        v.away && v.away.length ? [
           h("h3", { class: "ex-h", text: "Excluded, not plugged in now" }),
-          h("ul", { class: "ex-devs" }, away.map((x) => h("li", { class: "ex-away" },
+          h("ul", { class: "ex-devs" }, v.away.map((x) => h("li", { class: "ex-away" },
             h("span", null, h("strong", { text: x.name || "A device" }), h("span", { class: "ex-meta", text: bytes(x.sizeBytes || 0) })),
-            h("button", { type: "button", class: "btn small", text: "Show it again", onclick: () => { S.excluded = S.excluded.filter((y) => y.key !== x.key); saveSetting("excludedDevices", S.excluded); draw(); } })))),
+            h("button", { type: "button", class: "btn small", text: "Show it again", onclick: () => change(() => api.includeAgain(x), `Saved: ${x.name || "the device"} is shown again when it's plugged in.`) })))),
         ] : null);
+      if (focused) { const b = list.querySelector(`input[data-id="${CSS.escape(focused)}"]`); if (b) b.focus(); }
     }
-    excludeDlg = draw;
+    // Looking again waits its turn behind a change, so an older answer never shows last.
+    excludeDlg = () => { chain = chain.then(load); };
     modal({
       title: "Exclude devices",
-      body: [h("p", { text: "Ticked devices aren't shown and can't be picked to copy to: a card reader that's always plugged in, say, or a backup drive." }), list],
+      body: [h("p", { text: "Ticked devices aren't shown, aren't read and can't be copied to: a card reader that's always plugged in, say, or a backup drive. Each change is saved as you make it." }), list, status],
       buttons: [
         h("button", { type: "button", class: "btn left", text: "Look again", onclick: () => refreshSticks(true) }),
         h("button", { type: "button", class: "btn primary", text: "Done", onclick: closeModal }),
       ],
       onClose: () => { excludeDlg = null; },
     });
-    draw();
-    refreshSticks(true);
+    excludeDlg();
   }
+
 
   function renderSpace(plan) {
     const lay = plan.lay;
@@ -3047,15 +3057,11 @@
     changed();
     return true;
   }
-  /** What a device is known by: its own serial number when the system gives
-   * one, else its name and size (the same whatever is written to it). */
-  const devKey = (d) => (d.image ? `img:${d.id}` : d.hwSerial ? `sn:${d.hwSerial}` : `ms:${d.name}|${d.sizeBytes}`);
-  const isExcluded = (d) => S.excluded.some((x) => x.key === devKey(d));
+  /** The sticks to offer (the app has left the excluded devices out). */
   async function refreshSticks(quiet) {
     try {
       const r = await api.listSticks();
-      S.allSticks = r.sticks;
-      const shown = r.sticks.filter((d) => !isExcluded(d));
+      const shown = r.sticks;
       const changedSticks = JSON.stringify(shown) !== JSON.stringify(S.sticks);
       const before = new Set(S.sticks.map(stickKey));
       S.sticks = shown;
@@ -3376,6 +3382,27 @@
   }
 
   // ---- keyboard --------------------------------------------------------------------------------------
+  /** Somewhere Space types a space: a text box, a list to pick from. */
+  const typing = (el) => !!el && (el.isContentEditable || el.tagName === "TEXTAREA" || el.tagName === "SELECT"
+    || (el.tagName === "INPUT" && !["checkbox", "radio", "range", "button", "submit", "reset", "color", "file"].includes(el.type)));
+  /**
+   * Space plays and pauses wherever the focus is, a dialog, a menu or the tag
+   * editor included, unless it's in a text box. It doesn't press a focused
+   * button (Enter does) or tick a box: Enter ticks a focused box instead.
+   */
+  function onSpace(e) {
+    if (e.type === "keydown" && e.key === "Enter" && e.target.tagName === "INPUT" && (e.target.type === "checkbox" || e.target.type === "radio") && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.target.click();
+      return;
+    }
+    if (e.key !== " " || e.ctrlKey || e.metaKey || e.altKey || typing(e.target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "keydown" && !e.repeat) togglePlay();
+  }
+
   function onKey(e) {
     // Ctrl+P is the setlist, wherever the focus is (never a print of the window itself).
     if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "p") {
@@ -3396,7 +3423,6 @@
     if (mod && k === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (mod && k === "y") { e.preventDefault(); redo(); return; }
     if (mod && k === "o") { e.preventDefault(); addFiles(false); return; }
-    if (e.key === " " && !e.target.closest("button")) { e.preventDefault(); togglePlay(); return; }
     if (k === "r" && !mod && !e.altKey && !S.player.trackId) { e.preventDefault(); stepRepeat(); return; }
     if (S.view !== "playlist") return;
     const inList = document.activeElement === $("list") || document.activeElement === document.body;
@@ -3558,6 +3584,8 @@
     list.addEventListener("lostpointercapture", () => { if (drag) endDrag(true); });
     list.addEventListener("contextmenu", rowMenu);
     list.addEventListener("focus", () => { if (pl() && !S.focus && pl().entries[0]) { S.focus = pl().entries[0].id; syncSelection(); } });
+    document.addEventListener("keydown", onSpace, true);
+    document.addEventListener("keyup", onSpace, true);
     document.addEventListener("keydown", onKey);
     wireFileDrops();
     api.on("prepared", onPrepared);
@@ -3592,7 +3620,6 @@
     try { Object.assign(S.cols, JSON.parse(st.columns || "{}")); } catch { /* keep the defaults */ }
     if (st.volume) S.player.volume = Number(st.volume) || 0.8;
     if (REPEAT[st.repeat]) S.player.repeat = st.repeat;
-    try { const ex = JSON.parse(st.excludedDevices || "[]"); if (Array.isArray(ex)) S.excluded = ex.filter((x) => x && typeof x.key === "string"); } catch { /* none */ }
     try { setlist.load(JSON.parse(st.setlist || "null")); } catch { /* the defaults */ }
     for (const t of d.tracks) putTrack({ ...t });
     S.playlists = clone(d.playlists);
@@ -3624,7 +3651,7 @@
     persist();
     scheduleWork();
     // For the app's self-test (tests/app_e2e.py) and for poking around in the inspector.
-    P.app = { S, pl, stickSet, track, planSet, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, edgesDialog, seekTo, refreshSticks, holder, selectSet, openStick, layoutData, setView, setlist, lib, toggleTags, ready: true };
+    P.app = { S, pl, stickSet, track, planSet, buildSyncPlan, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, edgesDialog, seekTo, refreshSticks, holder, selectSet, openStick, layoutData, setView, setlist, lib, toggleTags, ready: true };
     if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Fatstick to get it back.");
     if (!DEMO) {
       stickPoll = setInterval(() => { if (!(S.sync && S.sync.running)) refreshSticks(true); }, 3000);

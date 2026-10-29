@@ -181,7 +181,7 @@
   /** `tall` keeps the dialog one size whatever it shows (tabs). `player`
    * leaves the player bar usable above the dimmed window, for dialogs that
    * preview what they change. */
-  function modal({ title, body, buttons, wide, tall, onClose, player, cls }) {
+  function modal({ title, body, buttons, wide, tall, onClose, cls }) {
     const back = document.getElementById("modal-back");
     const m = document.getElementById("modal");
     m.className = `modal${wide ? " wide" : ""}${tall ? " tall" : ""}${cls ? ` ${cls}` : ""}`;
@@ -192,10 +192,11 @@
     );
     modalReturn = document.activeElement;
     modalOnClose = onClose || null;
-    document.body.classList.toggle("modal-player", !!player);
-    // The dialog sits above the player bar, not over it.
-    const bar = player && document.getElementById("player");
-    back.style.paddingBottom = bar ? `${bar.offsetHeight + 16}px` : "";
+    // Every dialog sits above the player bar, not over it: the bar stays
+    // usable and undimmed (and Space plays and pauses) whatever is open.
+    document.body.classList.add("modal-player");
+    const bar = document.getElementById("player");
+    back.style.paddingBottom = bar && bar.offsetHeight ? `${bar.offsetHeight + 16}px` : "";
     back.hidden = false;
     const f = m.querySelector("[data-autofocus]") || m.querySelector(".mfoot .btn:last-child");
     if (f) f.focus();

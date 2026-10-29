@@ -1079,5 +1079,6 @@ body.pl-dragging .sv-ins-btn { visibility: hidden; }
 .ex-dev > span, .ex-away > span:first-child { display: grid; gap: 1px; min-width: 0; }
 .ex-meta { font-size: 12.5px; color: var(--ink-2); }
 .ex-h { margin: 6px 0 0; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.ex-status:empty { display: none; }
 .ex-away { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .btn.inline { height: auto; padding: 0 2px; vertical-align: baseline; }

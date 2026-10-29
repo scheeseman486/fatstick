@@ -217,7 +217,10 @@ pub fn run(
     progress: &(dyn Fn(SyncProgress) + Sync),
 ) -> SyncResult {
     let Some(tools) = tools else { return SyncResult::fail("ffmpeg isn't available, so nothing can be prepared. Nothing was written.") };
-    let target = match sticks::find(&plan.stick_id) {
+    // The excluded devices as saved: a device left out is never written,
+    // whatever the window asked for.
+    let excluded = crate::exclude::load(&lib.lock().unwrap());
+    let target = match sticks::find(&plan.stick_id, &excluded) {
         Ok(t) => t,
         Err(e) => return SyncResult::fail(e),
     };

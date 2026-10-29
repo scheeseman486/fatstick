@@ -57,7 +57,9 @@ GPL version 3 or later.
   sidebar into a search panel. Type a title, an artist, an album, a genre,
   a label, a year or part of a file name: whole-word matches come first,
   then a divider and close ones (a word's start, part of a word, a letter or
-  two off). Each result shows its labels (those that matched first), with
+  two off). Punctuation doesn't matter: "YMCA" finds "Y.M.C.A." and the
+  other way round, "acdc" or "ac dc" finds "AC/DC", "dont" finds "Don't".
+  Each result shows its labels (those that matched first), with
   "+2" for any that don't fit, as in the library. Double-click a song to hear it, as in the library; drag songs
   into the playlist to add them.
 - **Tags in the playlist.** Click a track (or press T) to see its tags under
@@ -73,10 +75,13 @@ GPL version 3 or later.
   write, and whether it fits.
 - **Devices left out.** "Exclude devices…" in the menu lists what's plugged
   in; a ticked device (a card reader that's always there, a backup drive)
-  isn't shown and can't be picked to copy to. It's known by its serial
-  number where the system gives one (Linux, Windows), else by its name and
-  size, so it stays left out whatever is written to it; untick it, or "Show
-  it again" once it's unplugged, to bring it back.
+  isn't shown, isn't read (not even for the note a sync leaves) and can't be
+  copied to: the app refuses a sync aimed at it. Each tick is saved as it's
+  made, and kept across restarts. A device is known by its own serial
+  number and size (on macOS, the USB serial from the I/O Registry; a card
+  reader's serial plus the card's size tells cards apart), else by its name
+  and size, so it stays left out whatever is written to it. Untick it, or
+  "Show it again" once it's unplugged, to bring it back.
 - **Sticks that remember.** Every sync leaves a small hidden note on the stick
   saying which of your sticks it is, with its profile and playlists. Plug it in
   again and the app recognizes it, selects it and marks it "plugged in". Syncing
@@ -122,6 +127,11 @@ GPL version 3 or later.
   slider or picking a shape changes what's playing as it plays. On the stick
   the fades are rendered into the track in their shapes, after any key
   shift; the file itself is never changed.
+- **The player bar is always there.** Every dialog opens above the player
+  bar, which stays usable and undimmed, and Space plays and pauses wherever
+  the focus is (a dialog's button, a tick box, the tag editor) except in a
+  text box, where it types a space. Enter presses a focused button or ticks
+  a focused box.
 - **Previews play in the main player.** The start and end, key and fade
   dialogs don't have a player of their own: they change what the player at
   the bottom of the window plays, and that player stays usable while they're
@@ -364,8 +374,9 @@ and their shapes live, and seeking, while it plays), joins the second playlist i
 the two, picks a disk image standing in for a stick, syncs through the button
 and its confirmation, shows the stick's view, plays a track, and hears the
 silence being tried in the start and end dialog (with the track's waveform
-read by ffmpeg). The second run checks that all of it
-was kept, that an edit makes the stick out of date, that the stick is
+read by ffmpeg). It also excludes a second disk image through the menu and
+has a sync aimed at it refused. The second run checks that all of it
+was kept (the excluded image and the repeat mode too), that an edit makes the stick out of date, that the stick is
 recognized from its note, and that syncing another stick's playlists onto it
 asks first. The third chooses a music folder, scans and searches it, writes
 tags into two files as they're edited (no prompts) and renames them from the
@@ -376,7 +387,7 @@ read with tools that aren't ours: fsck.fat, mtools (the order a player sees),
 ffprobe (codec, sample rate, tags, cover, lengths), and ffmpeg's EBU R128
 meter and volumedetect (−18 LUFS where the volume was evened out; silence
 where it was added), and the shifted track is measured: 550 Hz became 734 Hz,
-at the same length. The faded track is silent at both ends, half as loud
+at the same length, and the excluded image is byte for byte as it was. The faded track is silent at both ends, half as loud
 (−6 dB) at the middle of its smooth fade in and only 3 dB down at the middle
 of its late fade out, still 8 s long. ffprobe also reads back the tags the library wrote,
 including labels in an MP3 that another app had kept in TXXX:GROUPING.

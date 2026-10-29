@@ -11,6 +11,8 @@ use fatstick_core::fat::{EntryKind, Volume};
 use fatstick_device::{StickInfo, StickVolume};
 use serde::Serialize;
 
+use crate::exclude::{self, Excluded, Ident};
+
 pub const IMAGE_PREFIX: &str = "image:";
 /// Fatstick's note of what a stick holds: a small hidden JSON file at the
 /// top level, written last by every sync. Read from wherever the OS mounted
@@ -112,41 +114,95 @@ fn describe_image(path: &Path) -> Vec<String> {
     vec![parts.join(", ")]
 }
 
-pub fn list() -> (Vec<StickView>, Option<String>) {
+/// A device found, before anything on it is read.
+pub struct Found {
+    pub view: StickView,
+    mounts: Vec<PathBuf>,
+    image: Option<PathBuf>,
+}
+
+/// What a device is known by, to leave it out if it's excluded.
+pub fn ident(v: &StickView) -> Ident {
+    Ident { serial: v.hw_serial.clone(), name: v.name.clone(), size_bytes: v.size_bytes, image: v.image.then(|| v.id.clone()) }
+}
+
+fn stick_name(s: &StickInfo) -> String {
+    if s.name.is_empty() {
+        "USB stick".into()
+    } else {
+        s.name.clone()
+    }
+}
+
+/// Every device plugged in (and test image), as the system describes it:
+/// nothing on them is read yet.
+pub fn found() -> (Vec<Found>, Option<String>) {
     let mut out = Vec::new();
     let mut error = None;
     match fatstick_device::list_sticks() {
-        Ok(v) => out.extend(v.into_iter().map(|s| StickView {
-            note: s.volumes.iter().filter_map(|v| v.mount_point.as_deref()).find_map(note_in_folder),
-            serials: s.volumes.iter().filter(|v| !v.serial.is_empty()).map(|v| v.serial.clone()).collect(),
-            hw_serial: s.serial.clone(),
-            volumes: s.volumes.iter().map(describe_volume).collect(),
-            id: s.id,
-            device: s.device,
-            name: if s.name.is_empty() { "USB stick".into() } else { s.name },
-            size_bytes: s.size_bytes,
-            bus: s.bus,
-            image: false,
+        Ok(v) => out.extend(v.into_iter().map(|s| Found {
+            mounts: s.volumes.iter().filter_map(|v| v.mount_point.clone()).collect(),
+            image: None,
+            view: StickView {
+                note: None,
+                serials: s.volumes.iter().filter(|v| !v.serial.is_empty()).map(|v| v.serial.clone()).collect(),
+                hw_serial: s.serial.clone(),
+                volumes: s.volumes.iter().map(describe_volume).collect(),
+                name: stick_name(&s),
+                id: s.id,
+                device: s.device,
+                size_bytes: s.size_bytes,
+                bus: s.bus,
+                image: false,
+            },
         })),
         Err(e) => error = Some(e.to_string()),
     }
     for p in test_images() {
         let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-        let (note, serials) = note_in_image(&p);
-        out.push(StickView {
-            id: format!("{IMAGE_PREFIX}{}", p.display()),
-            device: String::new(),
-            name: format!("Disk image {}", p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()),
-            size_bytes: size,
-            bus: "image".into(),
-            volumes: describe_image(&p),
-            image: true,
-            note,
-            serials,
-            hw_serial: String::new(),
+        out.push(Found {
+            view: StickView {
+                id: format!("{IMAGE_PREFIX}{}", p.display()),
+                device: String::new(),
+                name: format!("Disk image {}", p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()),
+                size_bytes: size,
+                bus: "image".into(),
+                volumes: describe_image(&p),
+                image: true,
+                note: None,
+                serials: vec![],
+                hw_serial: String::new(),
+            },
+            mounts: vec![],
+            image: Some(p),
         });
     }
     (out, error)
+}
+
+/// The devices to offer: the excluded ones left out, unread, and the note a
+/// sync left read from each of the others.
+pub fn shown(found: Vec<Found>, excluded: &[Excluded]) -> Vec<StickView> {
+    found
+        .into_iter()
+        .filter(|f| !exclude::is_excluded(excluded, &ident(&f.view)))
+        .map(|f| {
+            let mut v = f.view;
+            if let Some(p) = &f.image {
+                (v.note, v.serials) = note_in_image(p);
+            } else {
+                v.note = f.mounts.iter().find_map(|m| note_in_folder(m));
+            }
+            v
+        })
+        .collect()
+}
+
+/// The devices to offer, with no exclusions (tests).
+#[cfg(test)]
+pub fn list() -> (Vec<StickView>, Option<String>) {
+    let (f, e) = found();
+    (shown(f, &[]), e)
 }
 
 pub enum Target {
@@ -154,20 +210,29 @@ pub enum Target {
     Stick(StickInfo),
 }
 
-pub fn find(id: &str) -> Result<Target, String> {
+/// The device to write, unless it's gone or excluded.
+pub fn find(id: &str, excluded: &[Excluded]) -> Result<Target, String> {
+    const LEFT_OUT: &str = "That device is excluded, so nothing is written to it. Nothing was written.";
     if let Some(p) = id.strip_prefix(IMAGE_PREFIX) {
         let p = PathBuf::from(p);
-        if test_images().contains(&p) {
-            return Ok(Target::Image(p));
+        if !test_images().contains(&p) {
+            return Err("That disk image isn't offered any more.".into());
         }
-        return Err("That disk image isn't offered any more.".into());
+        if exclude::is_excluded(excluded, &Ident { image: Some(id.to_string()), ..Default::default() }) {
+            return Err(LEFT_OUT.into());
+        }
+        return Ok(Target::Image(p));
     }
-    fatstick_device::list_sticks()
+    let s = fatstick_device::list_sticks()
         .map_err(|e| e.to_string())?
         .into_iter()
         .find(|s| s.id == id)
-        .map(Target::Stick)
-        .ok_or_else(|| "The stick was removed or changed. Plug it in and pick it again.".into())
+        .ok_or_else(|| "The stick was removed or changed. Plug it in and pick it again.".to_string())?;
+    let me = Ident { serial: s.serial.clone(), name: stick_name(&s), size_bytes: s.size_bytes, image: None };
+    if exclude::is_excluded(excluded, &me) {
+        return Err(LEFT_OUT.into());
+    }
+    Ok(Target::Stick(s))
 }
 
 #[cfg(test)]

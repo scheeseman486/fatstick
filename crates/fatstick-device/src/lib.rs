@@ -22,6 +22,8 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(any(target_os = "macos", test))]
+mod ioreg;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(windows)]

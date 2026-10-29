@@ -3,6 +3,7 @@
 // measures, converts and caches audio, plays previews, and writes sticks.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod exclude;
 mod folder;
 #[cfg(target_os = "linux")]
 mod graphics;
@@ -34,6 +35,8 @@ struct AppState {
     syncing: AtomicBool,
     data_dir: PathBuf,
     music: Arc<folder::MusicFolder>,
+    /// The devices left out, as saved (see `exclude`).
+    excluded: Arc<Mutex<Vec<exclude::Excluded>>>,
 }
 
 type Res<T> = Result<T, String>;
@@ -75,10 +78,12 @@ struct InitView {
 #[tauri::command]
 fn init(st: State<AppState>) -> Res<InitView> {
     let lib = st.lib.lock().unwrap();
+    // Every setting the window saved (the excluded devices are kept on
+    // this side, and the library's id is given on its own).
     let mut settings = serde_json::Map::new();
-    for k in ["theme", "cacheCapBytes", "currentPlaylist", "currentSet", "columns", "volume"] {
-        if let Some(v) = lib.setting(k).map_err(err)? {
-            settings.insert(k.into(), v.into());
+    for (k, v) in lib.settings().map_err(err)? {
+        if k != exclude::SETTING && k != "libraryId" {
+            settings.insert(k, v.into());
         }
     }
     Ok(InitView {
@@ -109,6 +114,9 @@ fn save_docs(st: State<AppState>, kind: String, put: Vec<serde_json::Value>, del
 
 #[tauri::command]
 fn set_setting(st: State<AppState>, key: String, value: String) -> Res<()> {
+    if key == exclude::SETTING || key == "libraryId" {
+        return Err(format!("{key} isn't set this way"));
+    }
     st.lib.lock().unwrap().set_setting(&key, &value).map_err(err)
 }
 
@@ -275,14 +283,110 @@ struct SticksView {
     error: Option<String>,
 }
 
+/// The sticks to offer: excluded devices left out before anything on them is read.
 #[tauri::command]
-async fn list_sticks() -> Res<SticksView> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let (sticks, error) = sticks::list();
-        SticksView { sticks, error }
+async fn list_sticks(app: AppHandle) -> Res<SticksView> {
+    let (excluded, lib) = {
+        let st = app.state::<AppState>();
+        (st.excluded.clone(), st.lib.clone())
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let (found, error) = sticks::found();
+        let list = {
+            let mut list = excluded.lock().unwrap();
+            let ids: Vec<exclude::Ident> = found.iter().map(|f| sticks::ident(&f.view)).collect();
+            if exclude::learn_serials(&mut list, &ids) {
+                let _ = exclude::save(&lib.lock().unwrap(), &list);
+            }
+            list.clone()
+        };
+        SticksView { sticks: sticks::shown(found, &list), error }
     })
     .await
     .map_err(err)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeviceRow {
+    #[serde(flatten)]
+    view: sticks::StickView,
+    excluded: bool,
+}
+
+/// Every device plugged in, excluded or not (nothing on them read), and the
+/// excluded ones that aren't plugged in.
+#[derive(Serialize)]
+struct ExclusionsView {
+    devices: Vec<DeviceRow>,
+    away: Vec<exclude::Excluded>,
+    error: Option<String>,
+}
+
+fn exclusions_view(found: Vec<sticks::Found>, list: &[exclude::Excluded], error: Option<String>) -> ExclusionsView {
+    let ids: Vec<exclude::Ident> = found.iter().map(|f| sticks::ident(&f.view)).collect();
+    let away = list.iter().filter(|x| !ids.iter().any(|d| x.matches(d))).cloned().collect();
+    let devices = found.into_iter().zip(&ids).map(|(f, d)| DeviceRow { excluded: exclude::is_excluded(list, d), view: f.view }).collect();
+    ExclusionsView { devices, away, error }
+}
+
+#[tauri::command]
+async fn exclusions(app: AppHandle) -> Res<ExclusionsView> {
+    let excluded = app.state::<AppState>().excluded.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (found, error) = sticks::found();
+        let list = excluded.lock().unwrap().clone();
+        exclusions_view(found, &list, error)
+    })
+    .await
+    .map_err(err)
+}
+
+/// Leave a plugged-in device out, or stop leaving it out. Saved before it
+/// counts: if the save fails, nothing changes and the error says so.
+#[tauri::command]
+async fn set_excluded(app: AppHandle, id: String, on: bool) -> Res<ExclusionsView> {
+    let (excluded, lib) = {
+        let st = app.state::<AppState>();
+        (st.excluded.clone(), st.lib.clone())
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let (found, error) = sticks::found();
+        let me = found.iter().find(|f| f.view.id == id).map(|f| sticks::ident(&f.view)).ok_or("That device isn't plugged in any more.")?;
+        let mut held = excluded.lock().unwrap();
+        let mut list = held.clone();
+        if on {
+            if !exclude::is_excluded(&list, &me) {
+                list.push(exclude::Excluded::of(&me));
+            }
+        } else {
+            list.retain(|x| !x.matches(&me));
+        }
+        exclude::save(&lib.lock().unwrap(), &list)?;
+        *held = list.clone();
+        Ok(exclusions_view(found, &list, error))
+    })
+    .await
+    .map_err(err)?
+}
+
+/// Stop leaving out a device that isn't plugged in.
+#[tauri::command]
+async fn include_again(app: AppHandle, entry: exclude::Excluded) -> Res<ExclusionsView> {
+    let (excluded, lib) = {
+        let st = app.state::<AppState>();
+        (st.excluded.clone(), st.lib.clone())
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let (found, error) = sticks::found();
+        let mut held = excluded.lock().unwrap();
+        let list: Vec<exclude::Excluded> = held.iter().filter(|x| **x != entry).cloned().collect();
+        exclude::save(&lib.lock().unwrap(), &list)?;
+        *held = list.clone();
+        Ok(exclusions_view(found, &list, error))
+    })
+    .await
+    .map_err(err)?
 }
 
 #[tauri::command]
@@ -625,6 +729,7 @@ fn main() {
                 syncing: AtomicBool::new(false),
                 data_dir: data_dir.clone(),
                 music,
+                excluded: Arc::new(Mutex::new(exclude::load(&lib.lock().unwrap()))),
             });
             Ok(())
         })
@@ -648,6 +753,9 @@ fn main() {
             cache_info,
             clear_cache,
             list_sticks,
+            exclusions,
+            set_excluded,
+            include_again,
             sync,
             cancel_sync,
             player_play,

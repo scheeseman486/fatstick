@@ -538,6 +538,17 @@ impl Library {
         Ok(id)
     }
 
+    /// Every setting saved, by key.
+    pub fn settings(&self) -> Result<Vec<(String, String)>> {
+        let mut st = self.conn.prepare("SELECT key, value FROM settings ORDER BY key")?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)", params![key, value])?;
         Ok(())

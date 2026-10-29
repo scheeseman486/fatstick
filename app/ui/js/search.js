@@ -7,7 +7,9 @@
 // * close: every word of the search starts a word of the track's tags, is
 //   part of one, or is spelled a letter or two differently.
 //
-// Accents and case don't matter. Pure functions, no DOM.
+// Accents, case and punctuation don't matter: "Y.M.C.A." is found by
+// "ymca" and the other way round, "AC/DC" by "acdc" or "ac dc", "Don't" by
+// "dont". Pure functions, no DOM.
 "use strict";
 (function (Fatstick) {
   /** Fields searched, with how much a match there counts. */
@@ -17,14 +19,30 @@
   ];
   const WEIGHT = Object.fromEntries(FIELDS);
 
-  function norm(s) {
-    return String(s == null ? "" : s)
-      .normalize("NFD")
-      .replace(/[̀-ͯ]/g, "")
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}]+/gu, " ")
-      .trim();
+  const strip = (s) => String(s == null ? "" : s).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const tidy = (s) => s.replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  /** Run together what's written as one word: an apostrophe inside a word
+   * ("don't"), and initials with dots ("Y.M.C.A.", "R.E.M", "J. S."). */
+  function fold(s) {
+    return s
+      .replace(/(\p{L})['’ʼ`´](?=\p{L})/gu, "$1")
+      .replace(/(^|[^\p{L}\p{N}])((?:\p{L}\.\s?)+\p{L}\.?)(?=$|[^\p{L}\p{N}])/gu, (m, pre, ac) => pre + ac.replace(/[.\s]/g, ""));
   }
+  /** How a search is read: lower case, no accents, initials and apostrophes run together, the rest of the punctuation gone. */
+  function norm(s) {
+    return tidy(fold(strip(s)));
+  }
+  /** Every way a tag can be searched for: as a search is read ("ymca"),
+   * split at every mark ("y m c a", "ac dc"), and each word run together
+   * ("acdc", "jayz"). */
+  function forms(s) {
+    const x = strip(s);
+    const out = new Set([tidy(fold(x)), tidy(x), x.split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]+/gu, "")).filter(Boolean).join(" ")]);
+    out.delete("");
+    return [...out];
+  }
+  /** Every word a tag can be found by. */
+  const words = (s) => [...new Set(forms(s).flatMap((v) => v.split(" ")))];
   function values(t, f) {
     if (f === "labels") return Array.isArray(t.labels) ? t.labels : [];
     if (f === "year") return t.year ? [String(t.year)] : [];
@@ -39,7 +57,7 @@
       const d = { t, fields: {}, words: new Map() };
       const i = docs.length;
       for (const [f, w] of FIELDS) {
-        const vals = values(t, f).map(norm).filter(Boolean);
+        const vals = [...new Set(values(t, f).flatMap(forms))];
         d.fields[f] = vals;
         for (const v of vals) {
           for (const word of v.split(" ")) {
@@ -169,5 +187,5 @@
     return { exact: exact.slice(0, limit), close: close.slice(0, Math.min(limit, 100)) };
   }
 
-  Fatstick.search = { build, search, norm, distance, closeness, FIELDS, WEIGHT };
+  Fatstick.search = { build, search, norm, forms, words, distance, closeness, FIELDS, WEIGHT };
 })(typeof window !== "undefined" ? (window.Fatstick = window.Fatstick || {}) : (globalThis.Fatstick = globalThis.Fatstick || {}));

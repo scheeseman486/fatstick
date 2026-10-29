@@ -858,7 +858,7 @@
       const p = core.pl();
       const inPl = new Set(p ? p.entries.map((e) => e.trackId) : []);
       const toks = SR.norm(q).split(" ").filter(Boolean);
-      const hit = (s) => SR.norm(s).split(" ").some((w) => toks.some((tk) => SR.closeness(tk, w) > 0));
+      const hit = (s) => SR.words(s).some((w) => toks.some((tk) => SR.closeness(tk, w) > 0));
       // The width a result's labels can take (the panel, less its padding and the time).
       const resW = Math.max(120, (document.querySelector(".srch-res") || { clientWidth: 320 }).clientWidth - 80);
       const row = (x, close) => {

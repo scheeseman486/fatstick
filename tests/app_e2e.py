@@ -138,8 +138,12 @@ def main():
     img = os.path.join(work, "stick.img")
     with open(img, "wb") as f:
         f.write(b"\xa5" * (64 << 20))  # old junk where the stick's contents were
+    # A second "device", which phase 1 excludes: it must never be written.
+    spare = os.path.join(work, "spare.img")
+    with open(spare, "wb") as f:
+        f.write(b"\x5a" * (16 << 20))
     env = dict(os.environ, FATSTICK_DATA_DIR=os.path.join(work, "data"), FATSTICK_CACHE_DIR=os.path.join(work, "cache"),
-               FATSTICK_TEST_STICKS=img, FATSTICK_NULL_AUDIO="1")
+               FATSTICK_TEST_STICKS=os.pathsep.join([img, spare]), FATSTICK_NULL_AUDIO="1")
     env.pop("FATSTICK_FFMPEG_DIR", None)  # use the bundled sidecar next to the debug build's sources
 
     info = run_app("phase 1", "app_selftest.js", cfg, env)
@@ -275,6 +279,8 @@ def main():
         record(f"{name}: the labels are in its Grouping tag", grouping == "chill; kitchen", grouping)
         record(f"{name}: the other tags are kept", tags.get("title") in ("Lanterns", "Harbour Song") and tags.get("artist") == "Night Owls" and tags.get("album") == "Lanterns")
     record("files the library didn't edit are byte for byte the same", sums(cfg["untouched"]) == untouched)
+    with open(spare, "rb") as f:
+        record("the excluded image was never written", f.read() == b"\x5a" * (16 << 20))
 
     shutil.rmtree(work, ignore_errors=True)
     passed = sum(ok for _, ok in RESULTS)

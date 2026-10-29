@@ -49,6 +49,9 @@
       cacheInfo: () => invoke("cache_info"),
       clearCache: () => invoke("clear_cache"),
       listSticks: () => invoke("list_sticks"),
+      exclusions: () => invoke("exclusions"),
+      setExcluded: (id, on) => invoke("set_excluded", { id, on }),
+      includeAgain: (entry) => invoke("include_again", { entry }),
       sync: (plan) => invoke("sync", { plan }),
       cancelSync: () => invoke("cancel_sync"),
       play: (args) => invoke("player_play", { args }),
@@ -91,7 +94,19 @@
     const ev = bus();
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const tracks = new Map(D.tracks.map((t) => [t.id, t]));
-    const sticks = D.sticks.map((s) => ({ id: s.id, device: s.device, name: s.name, sizeBytes: s.size_bytes, bus: s.bus, volumes: s.volumes.map((v) => v.summary), image: false, note: s.note || null, serials: [] }));
+    const sticks = D.sticks.map((s) => ({ id: s.id, device: s.device, name: s.name, sizeBytes: s.size_bytes, bus: s.bus, volumes: s.volumes.map((v) => v.summary), image: false, note: s.note || null, serials: [], hwSerial: s.hw_serial || "" }));
+    // Devices left out, as the app keeps them (see app/src-tauri/src/exclude.rs).
+    let excluded = [];
+    const exMatches = (x, d) => {
+      if (x.serial && d.hwSerial) return x.serial === d.hwSerial && x.sizeBytes === d.sizeBytes;
+      return !!x.name && x.name === d.name && x.sizeBytes === d.sizeBytes;
+    };
+    const isOut = (d) => excluded.some((x) => exMatches(x, d));
+    const exView = () => ({
+      devices: sticks.map((d) => ({ ...d, note: null, excluded: isOut(d) })),
+      away: excluded.filter((x) => !sticks.some((d) => exMatches(x, d))),
+      error: null,
+    });
     // Tracks the demo's car stick got at its last sync count as prepared already.
     const synced = new Set(D.stickSets.flatMap((s) => (s.lastSync ? s.lastSync.content.flat() : [])));
     const ready = new Set();
@@ -218,8 +233,22 @@
       },
       async cacheInfo() { return { files: ready.size, bytes: ready.size * 9e6, dir: "" }; },
       async clearCache() { ready.clear(); synced.clear(); return { files: 0, bytes: 0, dir: "" }; },
-      async listSticks() { return { sticks, error: null }; },
+      async listSticks() { return { sticks: sticks.filter((d) => !isOut(d)), error: null }; },
+      async exclusions() { return exView(); },
+      async setExcluded(id, on) {
+        const d = sticks.find((x) => x.id === id);
+        if (!d) throw new Error("That device isn't plugged in any more.");
+        excluded = excluded.filter((x) => !exMatches(x, d));
+        if (on) excluded.push({ serial: d.hwSerial, name: d.name, sizeBytes: d.sizeBytes, image: "" });
+        return exView();
+      },
+      async includeAgain(entry) {
+        excluded = excluded.filter((x) => JSON.stringify(x) !== JSON.stringify(entry));
+        return exView();
+      },
       async sync(plan) {
+        const target = sticks.find((s) => s.id === plan.stickId);
+        if (target && isOut(target)) return { ok: false, cancelled: false, erased: false, error: "That device is excluded, so nothing is written to it. Nothing was written.", notes: [] };
         cancel = false;
         const say = (stage, done, total, message, name = "") => ev.emit("sync-progress", { stage, done, total, name, message });
         const files = plan.folders.flatMap((f) => f.files);

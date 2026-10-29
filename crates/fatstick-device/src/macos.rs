@@ -58,6 +58,14 @@ fn b(d: &plist::Dictionary, k: &str) -> Option<bool> {
     d.get(k).and_then(|v| v.as_boolean())
 }
 
+/// The USB serial number of each disk below a USB device, by BSD name.
+fn usb_serials() -> std::collections::HashMap<String, String> {
+    match Command::new("/usr/sbin/ioreg").args(["-a", "-l", "-r", "-c", "IOUSBHostDevice"]).output() {
+        Ok(out) if out.status.success() => crate::ioreg::serials_by_disk(&out.stdout),
+        _ => Default::default(),
+    }
+}
+
 /// BSD name of the disk the system boots from (never offered).
 fn boot_disk() -> String {
     diskutil(&["info", "-plist", "/"]).ok().and_then(|x| plist_of(&x).ok()).map(|d| s(&d, "ParentWholeDisk")).unwrap_or_default()
@@ -68,6 +76,7 @@ pub fn list_sticks() -> Result<Vec<StickInfo>> {
     let boot = boot_disk();
     let mut out = Vec::new();
     let Some(disks) = top.get("AllDisksAndPartitions").and_then(|v| v.as_array()) else { return Ok(out) };
+    let serials = if disks.is_empty() { Default::default() } else { usb_serials() };
     for d in disks.iter().filter_map(|v| v.as_dictionary()) {
         let id = s(d, "DeviceIdentifier");
         if id.is_empty() || id == boot {
@@ -105,7 +114,7 @@ pub fn list_sticks() -> Result<Vec<StickInfo>> {
             size_bytes: u(&info, "TotalSize").max(u(&info, "Size")).max(u(d, "Size")),
             bus: s(&info, "BusProtocol").to_lowercase(),
             volumes,
-            serial: String::new(),
+            serial: serials.get(&id).cloned().unwrap_or_default(),
         });
     }
     Ok(out)
