@@ -90,6 +90,9 @@ pub fn tags_of(info: &serde_json::Value) -> SongTags {
     SongTags { title, artist, album: s("album"), year }
 }
 
+/// The label on every song added from YouTube.
+pub const LABEL: &str = "youtube";
+
 /// What gets written into the file; `source` says where it came from.
 pub fn tag_edit(t: &SongTags, source: &str) -> TagEdit {
     let some = |s: &str| (!s.is_empty()).then(|| s.to_string());
@@ -99,6 +102,7 @@ pub fn tag_edit(t: &SongTags, source: &str) -> TagEdit {
         album: some(&t.album),
         year: t.year.map(|y| y.to_string()),
         comment: Some(source.to_string()),
+        labels: Some(vec![LABEL.to_string()]),
         ..TagEdit::default()
     }
 }

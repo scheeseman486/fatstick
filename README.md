@@ -85,7 +85,8 @@ GPL version 3 or later.
   change it), named and tagged from what YouTube knows about it: its track,
   artist, album and year for music it recognizes, otherwise the video's title
   without its "(Official Video)", split at " - " into artist and title, or the
-  channel for the artist. The link goes in the Comment tag. Added once, it's that
+  channel for the artist. The link goes in the Comment tag, and it gets the label
+  "youtube", so you can find everything that came from there. Added once, it's that
   track from then on: a video isn't fetched or filed twice. The upload date isn't
   the song's year, so it isn't used as one. What YouTube's terms allow you to
   download is for you to check.

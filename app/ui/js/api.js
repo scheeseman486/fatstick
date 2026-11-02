@@ -533,7 +533,7 @@
         const [artist, title] = [split[0], split.slice(1).join(" - ").replace(/\s*\((Official (Video|Audio)|Lyrics)\)/, "")];
         const t = {
           id: `t-${id}`, path: `${music.root}/${YT.folder}/${artist} - ${title}.opus`, filename: `${artist} - ${title}`, title, artist, album: "", albumartist: "", year: null, track: null, disc: null,
-          genre: "", composer: "", labels: [], codec: "opus", bitrate: 128, peakBitrate: 128, vbr: true, sampleRate: 48000, bits: 0, channels: 2, duration: hit.duration, size: hit.duration * 16000,
+          genre: "", composer: "", labels: ["youtube"], codec: "opus", bitrate: 128, peakBitrate: 128, vbr: true, sampleRate: 48000, bits: 0, channels: 2, duration: hit.duration, size: hit.duration * 16000,
           lufs: null, truePeak: null, cover: false, exists: true, quick: false, drm: false,
         };
         tracks.set(t.id, t);

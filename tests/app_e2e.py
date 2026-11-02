@@ -306,7 +306,7 @@ def main():
         streams = j.get("streams", [])
         record(f"{name}: audio alone, as YouTube sent it (ffprobe)", [s.get("codec_type") for s in streams] == ["audio"] and streams[0].get("codec_name") == "opus", str([(s.get("codec_type"), s.get("codec_name")) for s in streams]))
         tags = {k.lower(): v for k, v in {**j.get("format", {}).get("tags", {}), **(streams[0].get("tags", {}) if streams else {})}.items()}
-        record(f"{name}: tagged, and says where it came from", tags.get("title") and tags.get("artist") and tags.get("comment", "").startswith("https://www.youtube.com/watch?v="), str(tags))
+        record(f"{name}: tagged, and says where it came from", tags.get("title") and tags.get("artist") and tags.get("comment", "").startswith("https://www.youtube.com/watch?v=") and tags.get("grouping") == "youtube", str(tags))
     with open(ytlog) as f:
         asked = [json.loads(l) for l in f]
     fetches = [a for a in asked if "--no-simulate" in a]

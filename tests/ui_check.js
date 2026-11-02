@@ -1571,6 +1571,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('the + button adds it to the library', (await inLib()) === libBefore + 1 && /In your library/.test(await p.locator('#toast').textContent()));
     const kept = await p.evaluate(() => [...Fatstick.app.S.tracks.values()].find((t) => t.path.includes('/YouTube/')));
     check('with a clean title and artist', kept.title === 'Harbour Lights' && kept.artist === 'Lyric Corner', `${kept.artist} / ${kept.title}`);
+    check('and the label "youtube"', JSON.stringify(kept.labels) === '["youtube"]', JSON.stringify(kept.labels));
     check('and it\'s found by the music search', await p.evaluate((id) => Fatstick.app.lib.state.SE !== undefined && Fatstick.app.track(id).exists, kept.id));
     await p.locator('#toast .btn').click();
     await p.locator('.lr.sel').first().waitFor();

@@ -86,6 +86,7 @@
     const second = [...S.tracks.values()].find((t) => t.title === "Second Song");
     check("as a track in the music folder, with clean tags", second && second.path.startsWith(`${cfg.root}/YouTube/`) && second.artist === "Some Channel" && second.exists, JSON.stringify(second));
     check("a toast says so", /In your library: Second Song/.test(toast()), toast());
+    check("it has the label \"youtube\", read back from the file", second && JSON.stringify(second.labels) === '["youtube"]', second && JSON.stringify(second.labels));
     lines.push(`INFO second=${second ? second.path : ""}`);
 
     // Adding to the open playlist: Shift+Enter, as in the music search.

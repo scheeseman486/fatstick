@@ -63,6 +63,7 @@ fn fetches_audio_into_the_store_and_keeps_it_tagged() {
     assert_eq!(tag(&kept, "title"), "First Song");
     assert_eq!(tag(&kept, "artist"), "The Band");
     assert_eq!(tag(&kept, "comment"), "https://www.youtube.com/watch?v=aaaaaaaaaa1");
+    assert_eq!(tag(&kept, "grouping"), "youtube");
     audio_alone(&tools, &kept).unwrap();
     assert_eq!(std::fs::read_dir(&music).unwrap().count(), 1, "no working file left behind");
 
@@ -84,6 +85,7 @@ fn an_ffmpeg_without_ogg_gets_aac_in_a_plain_m4a() {
     assert_eq!(kept.extension().unwrap(), "m4a");
     assert_eq!(tag(&kept, "title"), "Second Song");
     assert_eq!(tag(&kept, "artist"), "Some Channel");
+    assert_eq!(tag(&kept, "grouping"), "youtube");
     let o = Command::new("ffprobe").args(["-v", "error", "-show_entries", "stream=codec_name:format=duration", "-of", "default=nw=1:nk=1"]).arg(&kept).output().unwrap();
     let text = String::from_utf8_lossy(&o.stdout);
     assert!(text.contains("aac"), "{text}");
