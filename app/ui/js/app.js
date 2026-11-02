@@ -1,10 +1,14 @@
 // Fatstick's window. Plain DOM, no framework.
 // State lives in S. Every playlist edit goes through edit(), so it can be
 // undone, and is saved to the library straight away. Rendering is a few
-// functions that rebuild their own area; the stick panel is split into
+// functions that rebuild their own area; the processing panel is split into
 // sections so typing a name template doesn't lose focus. Everything outside
 // the window goes through Fatstick.api: the app's own commands, or a demo version
 // in a plain browser.
+//
+// A "set" in the code (S.sets, stickSet, setId) is what the window calls a
+// setlist: playlists in order, and how they go on a stick. A "stick" (S.sticks,
+// device) is the device itself. The saved data keeps those names.
 "use strict";
 (function () {
   const P = window.Fatstick;
@@ -35,6 +39,13 @@
     bitrateCap: 320, mode: "cbr", sampleRates: [44100, 48000], tags: "id3v23", id3v1: false, cover: "small",
     layout: "folders", fileTemplate: "{n} - [{artist} - ]{title|filename}", folderTemplate: "{n} {playlist}",
     ascii: false, maxLen: 0, trackTagIsPosition: true, numberInTitle: false,
+  };
+
+  /** What the processing panel at the right can do, each with a button at the
+   * top of the window. Other ways of copying (keeping what's on the stick,
+   * into a folder, for a particular player, onto a CD) go here too. */
+  const PROCESSES = {
+    fat: { label: "FAT USB Stick transfer", says: "Write a setlist to a USB stick, in the order cheap players read it" },
   };
 
   const S = {
@@ -72,6 +83,9 @@
     settings: {},
     /** "playlist", or "library" while the library view has the middle of the window. */
     view: "playlist",
+    /** What the processing panel shows (a key of PROCESSES). It's closed (null)
+     * whenever the app starts, and until a button opens it. */
+    processing: null,
     /** The sidebar shows the search panel. */
     searching: false,
     /** The playlist row showing its tags. */
@@ -114,7 +128,7 @@
   });
   /** What a USB stick holds, going by the note its last sync left on it (or,
    * for a stick the OS hasn't mounted, the volume serial that sync recorded):
-   * `{ set, note, ours }`, where `set` is this library's stick (set) on it,
+   * `{ set, note, ours }`, where `set` is this library's setlist on it,
    * if it still has it. Null for a stick Fatstick didn't write. */
   function holder(d) {
     if (!d) return null;
@@ -127,14 +141,14 @@
     }
     return null;
   }
-  /** "Car stick (Road Trip, Kids' car), synced 3 days ago", from a note. */
+  /** "Car mix (Road Trip, Kids' car), synced 3 days ago", from a note. */
   function heldText(hd) {
-    const name = hd.set ? hd.set.name : hd.note ? hd.note.setName : "another stick";
+    const name = hd.set ? hd.set.name : hd.note ? hd.note.setName : "another setlist";
     const pls = hd.note && Array.isArray(hd.note.playlists) ? hd.note.playlists.map((x) => x.name).filter(Boolean) : [];
     const at = hd.note && hd.note.syncedAt ? `, synced ${ago(hd.note.syncedAt)}` : "";
     return `${name}${pls.length ? ` (${pls.join(", ")})` : ""}${at}`;
   }
-  /** Where the holder came from, when it isn't one of this library's sticks. */
+  /** Where the holder came from, when it isn't one of this library's setlists. */
   function heldElsewhere(hd) {
     if (!hd || hd.set) return "";
     return hd.ours ? ", which isn't in your list any more" : ", set up on another computer";
@@ -158,17 +172,17 @@
   // ---- planning: what a sync would write ------------------------------------------
   // A playlist plans to `items` (every entry), `present` (the tracks that go
   // on the stick) and `files` (what the stick gets: one file per track, or
-  // one file for a joined playlist). A stick's list can also hold silence,
+  // one file for a joined playlist). A setlist can also hold silence,
   // which plans to one file of its own in its own folder.
   const isGap = (id) => typeof id === "string" && id.startsWith("gap-");
   /** The track a file's tags come from: none for a joined playlist or silence. */
   const fileTrack = (it) => (it.own ? "" : it.t.id);
   const gapOf = (s, id) => (s.gaps || []).find((g) => g.id === id);
   const setlist = P.setlistSetup({ S, pl, track, R, keyText, saveSetting, api, DEMO, stickSet, isGap, gapOf });
-  /** The setlist of the stick that's chosen (the one in the stick panel, or open in its view). */
+  /** Print the setlist that's chosen (the one in the panel, or open in its view). */
   const printSetlist = () => setlist.open(S.setId);
   const stickView = P.stickViewSetup({ S, pl, stickSet, layoutData, edit, openPlaylist, setView, newId, isGap, gapOf, renderSide, undo, printSetlist: () => setlist.open(S.setId) });
-  /** A stick's list, as playlists: silences become stand-ins with no tracks. */
+  /** A setlist, as playlists: silences become stand-ins with no tracks. */
   function stickLists(s) {
     return s.playlistIds.map((id) => {
       if (!isGap(id)) return pl(id);
@@ -284,7 +298,7 @@
     };
   }
 
-  /** Everything about a stick's settings that changes what a sync writes. */
+  /** Everything about a setlist's settings that changes what a sync writes. */
   function recipeOf(plan) {
     const pr = plan.profile;
     const norm = plan.folders.map((f) => (f.p.norm.on ? `${f.p.norm.target}${f.p.norm.mode}` : "off")).join(",");
@@ -605,7 +619,7 @@
       return h("li", null, h("button", {
         type: "button", class: `side-item${here ? " current" : ""}`, dataset: { pl: p.id },
         "aria-current": here ? "page" : null,
-        title: "Drag onto a stick to put it there",
+        title: "Drag onto a setlist to add it",
         onclick: () => { if (S.view !== "playlist") setView("playlist"); openPlaylist(p.id); },
         ondblclick: () => startRename("playlist", p.id),
         onpointerdown: (e) => { if (e.button === 0 && e.pointerType !== "touch") stickView.startDrag(e, { id: p.id, name: p.name, from: "side" }); },
@@ -626,7 +640,7 @@
         "aria-current": here ? "page" : null,
         onclick: () => openStick(s.id),
         ondblclick: () => startRename("set", s.id),
-        title: "Everything on this stick, in order. Drop a playlist here to put it on.",
+        title: "Everything in this setlist, in order. Drop a playlist here to add it.",
         oncontextmenu: (e) => { e.preventDefault(); setMenu(s, { x: e.clientX, y: e.clientY }); },
       }, h("span", { class: "nm", text: s.name }), flag,
       h("span", { class: "mt", text: `${plural(plan.folders.length, "playlist")}, ${plan.profile.name}` })));
@@ -638,14 +652,14 @@
         h("ul", { id: "side-pls" }, plItems),
         h("button", { type: "button", class: "btn quiet small side-more", text: "Import a playlist file…", onclick: importPlaylist })),
       h("section", null,
-        h("div", { class: "side-h" }, h("h2", { text: "Sticks" }),
-          h("button", { type: "button", class: "btn quiet small icon", title: "New stick", "aria-label": "New stick", onclick: newSet }, icon("plus"))),
+        h("div", { class: "side-h" }, h("h2", { text: "Setlists" }),
+          h("button", { type: "button", class: "btn quiet small icon", title: "New setlist", "aria-label": "New setlist", onclick: newSet }, icon("plus"))),
         h("ul", null, setItems)),
       sideFoot(),
     );
   }
 
-  /** A stick's view in the middle of the window. */
+  /** A setlist's view in the middle of the window. */
   function openStick(id) {
     if (!stickSet(id)) return;
     if (S.setId !== id) { S.setId = id; saveSetting("currentSet", id); }
@@ -693,7 +707,7 @@
     menu(at, [
       { label: "Rename", action: () => startRename("playlist", p.id) },
       { label: "Duplicate", action: () => newPlaylist(`${p.name} copy`, p.entries.map((e) => e.trackId)) },
-      ...(others.length ? ["-", { heading: "Put on a stick" }, ...others.map((s) => ({ label: s.name, action: () => edit(`Put ${p.name} on ${s.name}`, () => { s.playlistIds.push(p.id); }) }))] : []),
+      ...(others.length ? ["-", { heading: "Add to a setlist" }, ...others.map((s) => ({ label: s.name, action: () => edit(`Add ${p.name} to ${s.name}`, () => { s.playlistIds.push(p.id); }) }))] : []),
       "-",
       {
         label: "Remove playlist", disabled: S.playlists.length < 2,
@@ -712,22 +726,22 @@
   function setMenu(s, at) {
     menu(at, [
       { label: "Open", action: () => openStick(s.id) },
-      { label: "Print a setlist…", action: () => setlist.open(s.id) },
+      { label: "Print…", action: () => setlist.open(s.id) },
       "-",
       { label: "Rename", action: () => startRename("set", s.id) },
       {
-        label: "Remove from the list", disabled: S.sets.length < 2,
+        label: "Remove setlist", disabled: S.sets.length < 2,
         action: () => {
-          edit(`Remove ${s.name}`, () => { S.sets = S.sets.filter((x) => x.id !== s.id); if (S.setId === s.id) S.setId = S.sets[0].id; });
-          toast(`Removed ${s.name} from the list. Nothing on the stick changed.`, { label: "Undo", run: undo });
+          edit(`Remove setlist ${s.name}`, () => { S.sets = S.sets.filter((x) => x.id !== s.id); if (S.setId === s.id) S.setId = S.sets[0].id; });
+          toast(`Removed the setlist ${s.name}. Its playlists are untouched, and so is any stick it was synced to.`, { label: "Undo", run: undo });
         },
       },
     ]);
   }
   function newSet() {
     const id = newId("set-");
-    edit("New stick", () => {
-      S.sets.push({ id, name: `Stick ${S.sets.length + 1}`, profileId: S.profiles[0].id, playlistIds: [S.current], stickId: null, label: "" });
+    edit("New setlist", () => {
+      S.sets.push({ id, name: `Setlist ${S.sets.length + 1}`, profileId: S.profiles[0].id, playlistIds: [S.current], stickId: null, label: "" });
       S.setId = id;
     });
     startRename("set", id);
@@ -788,7 +802,7 @@
         h("p", { class: "pl-meta" },
           `${plural(plan.items.length, "track")}, ${length(dur)}`,
           missing ? h("span", { class: "warn", text: `, ${missing} missing` }) : null,
-          s ? `. On ${s.name}${p.join ? ", joined into one track" : ""}.` : `. Not on a stick yet${p.join ? "; it goes on joined into one track" : ""}.`)),
+          s ? `. In ${s.name}${p.join ? ", joined into one track" : ""}.` : `. Not in a setlist yet${p.join ? "; it goes on a stick joined into one track" : ""}.`)),
       h("div", { class: "tools" },
         h("button", { type: "button", class: `btn small${norm.on ? " tool-on" : ""}`, "data-menu-anchor": "", "aria-haspopup": "dialog", onclick: anchor(volumePopover) },
           norm.on ? `Even volume, ${String(norm.target).replace("-", "−")} LUFS` : "Even volume: off"),
@@ -855,7 +869,7 @@
     range.addEventListener("input", () => change((x) => { x.target = Number(range.value); }, "Change the target loudness", true));
     radios.forEach((r, i) => r.addEventListener("change", () => change((x) => { x.mode = MODES[i][0]; }, MODES[i][1])));
     popover(a, h("div", { style: { display: "grid", gap: "10px" } },
-      h("label", { class: "check" }, on, h("span", null, h("strong", { text: "Even out the volume" }), h("br"), h("span", { text: `For ${p.name}, on every stick it goes on.` }))),
+      h("label", { class: "check" }, on, h("span", null, h("strong", { text: "Even out the volume" }), h("br"), h("span", { text: `For ${p.name}, in every setlist it's in.` }))),
       h("p", { text: "This changes the audio on the stick, because cheap players ignore ReplayGain tags. MP3s that are copied get lossless 1.5 dB steps; tracks that are encoded anyway get the exact gain." }),
       h("div", { class: "target" }, range, out),
       warn,
@@ -880,7 +894,7 @@
       show();
     });
     popover(a, h("div", { style: { display: "grid", gap: "10px" } },
-      h("label", { class: "check" }, on, h("span", null, h("strong", { text: "Join into one track on the stick" }), h("br"), h("span", { text: `For ${p.name}, on every stick it goes on.` }))),
+      h("label", { class: "check" }, on, h("span", null, h("strong", { text: "Join into one track on the stick" }), h("br"), h("span", { text: `For ${p.name}, in every setlist it's in.` }))),
       h("p", { text: `The stick gets a single MP3 for this playlist: every track in this order, each with its volume and its start and end settings, encoded at ${listProfile().bitrateCap} kbps. Here it stays a playlist you can edit as usual.` }),
       sum,
     ));
@@ -1747,17 +1761,72 @@
     }
   }
 
-  // ---- rendering: stick panel ----------------------------------------------------------------
+  // ---- rendering: the processing panel ---------------------------------------------------------
   const ST = {};
   function buildStick() {
     const root = $("stick");
+    const title = h("header", { class: "st-top" },
+      h("h2", { id: "proc-title", text: PROCESSES.fat.label }),
+      h("button", {
+        type: "button", class: "btn quiet small icon", id: "proc-close", title: "Close this panel", "aria-label": `Close ${PROCESSES.fat.label}`,
+        onclick: () => { setProcessing(null); $("proc-fat").focus({ preventScroll: true }); },
+      }, icon("close")));
     ST.head = h("section", { class: "st-sec" });
-    ST.folders = h("section", { class: "st-sec", "aria-label": "Playlists on this stick" });
+    ST.folders = h("section", { class: "st-sec", "aria-label": "Playlists in this setlist" });
     ST.profile = h("section", { class: "st-sec" });
     ST.device = h("section", { class: "st-sec" });
     ST.space = h("section", { class: "st-sec" });
     ST.sync = h("div", { class: "sync" });
-    root.replaceChildren(h("div", { class: "st-scroll" }, ST.head, ST.device, ST.folders, ST.profile, ST.space), ST.sync);
+    root.replaceChildren(title, h("div", { class: "st-scroll" }, ST.head, ST.device, ST.folders, ST.profile, ST.space), ST.sync);
+  }
+  /** The buttons at the top that open the panel, one per way of copying. */
+  function buildProcessButtons() {
+    const libBtn = $("lib-btn");
+    for (const [kind, m] of Object.entries(PROCESSES)) {
+      libBtn.before(h("button", {
+        type: "button", class: "ghost-btn", id: `proc-${kind}`, "aria-pressed": "false", "aria-controls": "stick", title: m.says, text: m.label,
+        onclick: () => setProcessing(processShown() === kind ? null : kind),
+      }));
+    }
+  }
+  /** What the panel is showing right now: the library view has the whole
+   * width, so the panel waits behind it. */
+  const processShown = () => (S.view === "library" ? null : S.processing);
+  function renderProcessButtons() {
+    const busy = !!(S.sync && S.sync.running);
+    for (const kind of Object.keys(PROCESSES)) {
+      const b = $(`proc-${kind}`);
+      const on = processShown() === kind;
+      b.setAttribute("aria-pressed", String(on));
+      b.classList.toggle("on", on);
+      b.classList.toggle("busy", busy);
+      b.title = busy ? `Syncing ${stickSet(S.sync.setId)?.name || ""}`.trim() : PROCESSES[kind].says;
+    }
+  }
+  /** Open the panel on one way of copying, or close it (null). A sync goes on
+   * either way, and the panel is kept up to date while it's closed. */
+  let procTimer = null;
+  function setProcessing(kind) {
+    const app = $("app");
+    const panel = $("stick");
+    clearTimeout(procTimer);
+    S.processing = kind;
+    if (kind) {
+      if (S.view === "library") setView("playlist");
+      app.classList.remove("proc-closing");
+      app.classList.add("proc-open");
+      panel.hidden = false;
+      // On a narrow window it opens below the list, out of sight.
+      if (matchMedia("(max-width: 900px)").matches) panel.scrollIntoView({ block: "start" });
+    } else if (app.classList.contains("proc-open")) {
+      const finish = () => { app.classList.remove("proc-open", "proc-closing"); panel.hidden = true; };
+      if (matchMedia("(prefers-reduced-motion: reduce), (max-width: 900px)").matches) finish();
+      else {
+        app.classList.add("proc-closing");
+        procTimer = setTimeout(finish, 180);
+      }
+    }
+    renderProcessButtons();
   }
   function renderAfterProfile() {
     renderList();
@@ -1771,7 +1840,7 @@
     const s = stickSet();
     if (!s) {
       for (const k of ["head", "folders", "profile", "device", "space"]) ST[k].replaceChildren();
-      ST.head.append(h("p", { class: "st-note", text: "Make a stick to choose what goes on it." }), h("button", { type: "button", class: "btn", text: "New stick", onclick: newSet }));
+      ST.head.append(h("p", { class: "st-note", text: "Make a setlist to choose what goes on a stick." }), h("button", { type: "button", class: "btn", text: "New setlist", onclick: newSet }));
       fill(ST.sync, );
       return;
     }
@@ -1782,7 +1851,7 @@
     renderDevices(plan);
     renderSpace(plan);
     renderSyncBar(plan);
-    // The stick's view edits its list itself; the panel keeps to the device and sync.
+    // The setlist's view edits its list itself; the panel keeps to the device and sync.
     ST.folders.hidden = S.view === "stick";
     stickView.render();
   }
@@ -1790,9 +1859,9 @@
   function renderStickHead(plan) {
     const s = plan.s;
     const st = staleness(plan);
-    const sel = h("select", { class: "input", id: "set-select", "aria-label": "Stick" },
+    const sel = h("select", { class: "input", id: "set-select", "aria-label": "Setlist" },
       S.sets.map((x) => h("option", { value: x.id, text: x.name, selected: x.id === s.id })),
-      h("option", { value: "__new", text: "New stick…" }));
+      h("option", { value: "__new", text: "New setlist…" }));
     sel.addEventListener("change", () => {
       if (sel.value === "__new") { newSet(); return; }
       S.setId = sel.value;
@@ -1809,7 +1878,7 @@
         : h("p", { class: "st-status out", text: `Out of date: ${st.parts.join(", ")} since the last sync ${ago(st.at)}.` });
     }
     const pill = st.never ? h("span", { class: "pill", text: "New" }) : st.current ? h("span", { class: "pill ok", text: "Up to date" }) : h("span", { class: "pill out", text: "Out of date" });
-    fill(ST.head, h("div", { class: "st-head" }, sel, pill), status);
+    fill(ST.head, h("h3", { text: "Setlist" }), h("div", { class: "st-head" }, sel, pill), status);
   }
 
   function renderFolders(plan) {
@@ -1836,7 +1905,7 @@
         const a = s.playlistIds;
         [a[i], a[i + d]] = [a[i + d], a[i]];
       });
-      const remove = () => edit(`Take ${what} off ${s.name}`, () => {
+      const remove = () => edit(`Take ${what} out of ${s.name}`, () => {
         s.playlistIds.splice(i, 1);
         if (gap) s.gaps = s.gaps.filter((g) => g.id !== id);
       });
@@ -1858,30 +1927,30 @@
         h("span", { class: "fbtns" },
           h("button", { type: "button", class: "btn quiet small icon", title: "Move up", "aria-label": `Move ${what} up`, disabled: i === 0, onclick: () => mv(-1) }, icon("up")),
           h("button", { type: "button", class: "btn quiet small icon", title: "Move down", "aria-label": `Move ${what} down`, disabled: i === s.playlistIds.length - 1, onclick: () => mv(1) }, icon("down")),
-          h("button", { type: "button", class: "btn quiet small icon", title: "Take off this stick", "aria-label": `Take ${what} off this stick`, onclick: remove }, icon("close"))),
+          h("button", { type: "button", class: "btn quiet small icon", title: "Take out of this setlist", "aria-label": `Take ${what} out of this setlist`, onclick: remove }, icon("close"))),
         metaEl);
     });
     const addable = S.playlists.filter((p) => !s.playlistIds.includes(p.id));
-    const add = h("select", { class: "input", "aria-label": "Add a playlist to this stick" },
+    const add = h("select", { class: "input", "aria-label": "Add a playlist to this setlist" },
       h("option", { value: "", text: "Add a playlist or silence…" }),
       addable.map((p) => h("option", { value: p.id, text: p.name })),
       single ? null : h("option", { value: "__gap", text: "Silence between playlists (30 s)" }));
     add.addEventListener("change", () => {
       if (add.value === "__gap") {
         const id = newId("gap-");
-        edit(`Put silence on ${s.name}`, () => {
+        edit(`Add silence to ${s.name}`, () => {
           s.gaps = [...(s.gaps || []), { id, seconds: 30 }];
           s.playlistIds.push(id);
         });
         return;
       }
       const p = pl(add.value);
-      if (p) edit(`Put ${p.name} on ${s.name}`, () => { s.playlistIds.push(p.id); });
+      if (p) edit(`Add ${p.name} to ${s.name}`, () => { s.playlistIds.push(p.id); });
     });
     const realCount = s.playlistIds.filter((id) => !isGap(id)).length;
     fill(ST.folders,
-      h("h3", null, single ? "Playlist on this stick" : "Playlists on this stick", h("span", { class: "aside", text: single ? "tracks at the top level" : "one folder each, in this order" })),
-      rows.some(Boolean) ? h("ol", { class: "folders" }, rows) : h("p", { class: "st-note", text: "Nothing on this stick yet." }),
+      h("h3", null, single ? "Playlist in this setlist" : "Playlists in this setlist", h("span", { class: "aside", text: single ? "tracks at the top level" : "one folder each, in this order" })),
+      rows.some(Boolean) ? h("ol", { class: "folders" }, rows) : h("p", { class: "st-note", text: "Nothing in this setlist yet." }),
       single && realCount > 1 ? h("p", { class: "st-note warn", text: `${plan.profile.name} writes one playlist per stick, so only the first one goes on.` }) : null,
       single && realCount ? null : add,
     );
@@ -1909,7 +1978,7 @@
     } else if (first) {
       names = h("div", { class: "prof-names" },
         h("p", null, "Files named like ", h("span", { class: "mono", text: first.name })),
-        h("button", { type: "button", class: "btn quiet small", text: "List all", title: "Every folder and file on this stick, in the middle of the window", onclick: () => openStick(s.id) }));
+        h("button", { type: "button", class: "btn quiet small", text: "List all", title: "Every folder and file this setlist puts on a stick, in the middle of the window", onclick: () => openStick(s.id) }));
     }
     fill(ST.profile,
       h("h3", { text: "Player profile" }),
@@ -1934,7 +2003,7 @@
       const hd = holder(d);
       return h("label", { class: `dev${on ? " sel" : ""}` }, input,
         h("span", { class: "dn", text: d.name }), h("span", { class: "ds", text: bytes(d.sizeBytes) }),
-        hd ? h("span", { class: `dholds${hd.set === s ? " own" : ""}`, text: hd.set === s ? `Holds this stick's playlists${hd.note && hd.note.syncedAt ? `, synced ${ago(hd.note.syncedAt)}` : ""}.` : `Holds ${heldText(hd)}${heldElsewhere(hd)}.` }) : null,
+        hd ? h("span", { class: `dholds${hd.set === s ? " own" : ""}`, text: hd.set === s ? `Holds this setlist${hd.note && hd.note.syncedAt ? `, synced ${ago(hd.note.syncedAt)}` : ""}.` : `Holds ${heldText(hd)}${heldElsewhere(hd)}.` }) : null,
         h("span", { class: "don", text: `${d.device ? `${d.device}. ` : ""}Now: ${d.volumes.length ? d.volumes.join("; ") : "blank"}` }));
     });
     const taken = chosen(s) && holder(chosen(s));
@@ -1944,8 +2013,8 @@
     fill(ST.device,
       h("h3", null, "USB stick", h("button", { type: "button", class: "btn quiet small", text: "Look again", onclick: () => refreshSticks(false) })),
       gone ? h("p", { class: "st-note warn", text: other
-        ? `${other.name} isn't the stick this one syncs to (${s.stickModel}, ${bytes(s.stickSize)}). Pick it to sync to it instead.`
-        : "The stick this one syncs to isn't plugged in. Plug it in, or pick another." }) : null,
+        ? `${other.name} isn't the stick this setlist syncs to (${s.stickModel}, ${bytes(s.stickSize)}). Pick it to sync to it instead.`
+        : "The stick this setlist syncs to isn't plugged in. Plug it in, or pick another." }) : null,
       takenOther ? h("p", { class: "st-note warn", id: "holds-other", text: `This stick holds ${heldText(takenOther)}${heldElsewhere(takenOther)}. Syncing ${s.name} to it replaces that.` }) : null,
       items.length ? h("div", { class: "devices", role: "radiogroup", "aria-label": "USB stick" }, items) : h("p", { class: "st-note", text: "No USB stick found. Plug one in; it shows up here." }),
       S.stickError ? h("p", { class: "st-note err", text: `Looking for sticks failed: ${S.stickError}` }) : null,
@@ -2045,7 +2114,7 @@
       kids.push(h("p", { class: "strip-legend" }, h("span", null, h("i"), "Each file in one unbroken run, in playlist order"), h("span", null, h("i", { class: "enc" }), "Encoded")));
       kids.push(lay.fits
         ? h("p", { class: "fit ok" }, h("strong", { text: "Fits. " }), `${bytes(lay.used)} of ${bytes(lay.dataBytes)}, ${bytes(lay.free)} left over.`)
-        : h("p", { class: "fit bad" }, h("strong", { text: "Doesn't fit. " }), `${bytes(lay.used)} needed, the stick holds ${bytes(lay.dataBytes)}. Take a playlist off or pick a bigger stick.`));
+        : h("p", { class: "fit bad" }, h("strong", { text: "Doesn't fit. " }), `${bytes(lay.used)} needed, the stick holds ${bytes(lay.dataBytes)}. Take a playlist out or pick a bigger stick.`));
     }
     const enc = plan.all.filter((it) => it.d.action === "encode");
     const lossy = enc.filter((it) => it.d.lossy).length;
@@ -2093,7 +2162,7 @@
     else if (!lay.fits) reasons.push("It doesn't fit on this stick.");
     if (!plan.all.length) reasons.push("There's nothing to write yet.");
     if (plan.errors.length) reasons.push("Fix the file names in the player profile first.");
-    if (S.sync && S.sync.running) reasons.push(`${stickSet(S.sync.setId)?.name || "Another stick"} is syncing.`);
+    if (S.sync && S.sync.running) reasons.push(`${stickSet(S.sync.setId)?.name || "Another setlist"} is syncing.`);
     const btn = h("button", { type: "button", class: "btn primary", id: "sync-btn", text: "Erase and sync…", disabled: reasons.length > 0, onclick: confirmSync });
     fill(ST.sync,
       plan.dev ? h("p", { class: "erase" }, h("strong", { text: "Syncing erases the stick. " }), `Everything on ${plan.dev.name} is replaced with ${plan.folders.length === 1 ? "this playlist" : `these ${plan.folders.length} playlists`}.`) : null,
@@ -2160,7 +2229,7 @@
   function aosCaption(e) {
     if (!e) return "Hear the gain and bitrate the sync will use.";
     const it = stickItem(S.player.playlistId, e.id);
-    if (!it) return "Not on a stick yet, so nothing changes.";
+    if (!it) return "Not in a setlist yet, so nothing changes.";
     if (!it.recipe) return "";
     const r = it.recipe;
     if (r.kind === "copy") return it.waiting ? "Loudness not measured yet." : "Copied as it is, no change.";
@@ -2240,7 +2309,7 @@
       if (s) {
         const st = staleness(planSet(s));
         sub = st.never ? `${s.name} hasn't been synced yet.` : st.current ? `${s.name} is up to date.` : `${s.name} is out of date: ${st.parts.join(", ")}.`;
-      } else sub = "Put this playlist on a stick to sync it.";
+      } else sub = "Add this playlist to a setlist to sync it.";
     }
     const m = segText(main, 16);
     $("disp-text").textContent = m.padEnd(16, " ");
@@ -2259,11 +2328,12 @@
     renderStick();
     renderPlayer();
     renderDisplay();
+    renderProcessButtons();
     if (S.view === "library") lib.renderView();
   }
 
-  // ---- a stick's layout ---------------------------------------------------------------------
-  // Everything on a stick, in FAT order, for its view (stickview.js).
+  // ---- a setlist's layout -------------------------------------------------------------------
+  // Everything a setlist puts on a stick, in FAT order, for its view (stickview.js).
   function layoutData(setId) {
     const s = stickSet(setId);
     if (!s) return { setId, gone: true };
@@ -2384,7 +2454,7 @@
     const folderTpl = h("input", { class: "input mono", value: pr.folderTemplate, "aria-label": "Folder names" });
 
     // File names: the pattern, with presets and fields to insert, the limits,
-    // and the names it makes for a stick that uses this profile.
+    // and the names it makes for a setlist that uses this profile.
     const tpl = h("input", { class: "input mono", id: "tpl", value: pr.fileTemplate, spellcheck: "false", autocomplete: "off", "aria-label": "File names", "aria-describedby": "tpl-help" });
     tpl.addEventListener("input", () => { pr.fileTemplate = tpl.value; changed(); });
     const presets = h("select", { class: "input", "aria-label": "Name presets" },
@@ -2413,8 +2483,8 @@
     maxLen.addEventListener("change", () => { pr.maxLen = Number(maxLen.value); changed(); });
     const tplMsg = h("p", { class: "st-note", id: "tpl-help" });
     const preview = h("div", { class: "preview" });
-    // The stick being shown if it uses this profile, else another that does,
-    // else the stick's playlists (or the open one) as if it did.
+    // The setlist being shown if it uses this profile, else another that does,
+    // else the setlist's playlists (or the open one) as if it did.
     const previewSet = () => {
       const cur = stickSet();
       if (cur && cur.profileId === id) return cur;
@@ -2463,7 +2533,7 @@
           tplMsg,
           preview),
         h("span", { class: "lbl", text: "Layout" }), h("div", { class: "opts" },
-          radio("layout", "folders", "A folder per playlist, in stick order", "layout"),
+          radio("layout", "folders", "A folder per playlist, in setlist order", "layout"),
           radio("layout", "single", "One playlist per stick, tracks at the top level", "layout")),
         h("span", { class: "lbl", text: "Folder names" }), h("div", { class: "opts" }, folderTpl, h("span", { class: "hint", text: "Used when a stick holds several playlists. {n} is the folder's position, {playlist} its name." })),
       ]],
@@ -2516,7 +2586,7 @@
       });
     });
     const body = [
-      h("p", { text: `Cheap players can't be identified reliably, so a profile describes what yours can play. Used by ${usedBy.length ? usedBy.join(" and ") : "no stick yet"}. Changes apply as you make them.` }),
+      h("p", { text: `Cheap players can't be identified reliably, so a profile describes what yours can play. Used by ${usedBy.length ? usedBy.join(" and ") : "no setlist yet"}. Changes apply as you make them.` }),
       h("div", { class: "form" }, h("span", { class: "lbl", text: "Name" }), name),
       h("div", { class: "tabs", role: "tablist", "aria-label": "Profile settings" }, tabs),
       boxes,
@@ -2781,7 +2851,7 @@
     const s = stickSet(S.sync.setId);
     if (res.ok && res.record) S.syncs[s.id] = res.record;
     if (res.ok) {
-      // Another stick (set) that used this stick has lost it.
+      // Another setlist that used this stick has lost it.
       let lost = false;
       for (const o of S.sets) if (o !== s && o.stickId === s.stickId) { o.stickId = null; lost = true; }
       if (lost) changed();
@@ -2793,6 +2863,7 @@
     } else msg = res.error || "The sync stopped.";
     S.sync = { setId: s.id, done: true, ok: !!res.ok, cancelled: !!res.cancelled, msg, notes: res.notes || [] };
     if (res.ok) toast(`Synced ${s.name}.`);
+    else if (!processShown()) toast(`The sync of ${s.name} stopped.`, { label: "See why", run: () => { selectSet(s.id); setProcessing("fat"); } });
     refreshSticks(true);
     renderAll();
   }
@@ -3036,7 +3107,7 @@
    * different stick in the same slot gets a different key. */
   const stickKey = (d) => JSON.stringify([d.id, d.note ? [d.note.libraryId, d.note.setId, d.note.syncedAt] : null, d.serials || [], d.sizeBytes]);
   /** Sticks just plugged in (or found at startup) that hold one of this
-   * library's sticks (sets): that set follows its stick to wherever it's
+   * library's setlists: that setlist follows its stick to wherever it's
    * plugged in now, and is selected. */
   function recognize(before) {
     let picked = null;
@@ -3053,7 +3124,7 @@
     }
     if (!picked) return false;
     if (!(S.sync && S.sync.running)) selectSet(picked.id);
-    toast(`${picked.name} is plugged in.`);
+    toast(`${picked.name} is plugged in.`, processShown() ? undefined : { label: "Open the transfer", run: () => setProcessing("fat") });
     changed();
     return true;
   }
@@ -3301,7 +3372,7 @@
   function tdragLost() { if (tdrag) endTrackDrag(true); }
 
   // ---- the library view ----------------------------------------------------------------------------
-  /** The middle of the window: a playlist, the library, or a stick. */
+  /** The middle of the window: a playlist, the library, or a setlist. */
   function setView(v) {
     if (v === S.view) { if (v === "library") lib.renderView(); return; }
     S.view = v;
@@ -3317,6 +3388,7 @@
       lib.renderView();
       renderSide();
       renderDisplay();
+      renderProcessButtons();
       const q = $("lib-q");
       if (q && S.music && S.music.root) q.focus({ preventScroll: true });
     } else {
@@ -3516,10 +3588,13 @@
       { label: "Add a folder…", action: () => addFiles(true) },
       { label: "Import a playlist file…", action: importPlaylist },
       { label: "Export this playlist…", action: exportPlaylist, disabled: !pl() },
-      { label: `Print a setlist${stickSet() ? ` of ${stickSet().name}` : ""}…`, key: "Ctrl+P", action: printSetlist, disabled: !stickSet() },
+      { label: "Print a setlist…", key: "Ctrl+P", action: printSetlist, disabled: !stickSet() },
       "-",
       { label: "Search your music", key: "Ctrl+F", action: () => lib.openSearch() },
       { label: S.view === "library" ? "Back to the playlist" : "Music library", action: () => setView(S.view === "library" ? "playlist" : "library") },
+      ...Object.entries(PROCESSES).map(([kind, m]) => (processShown() === kind
+        ? { label: `Close ${m.label}`, action: () => setProcessing(null) }
+        : { label: m.label, action: () => setProcessing(kind) })),
       "-",
       { heading: "Theme" },
       theme("system", "Same as the system"),
@@ -3558,7 +3633,7 @@
     modal({
       title: "About Fatstick",
       body: [
-        h("p", { text: "Writes playlists onto USB sticks in FAT order, the order cheap MP3 players and car stereos actually play." }),
+        h("p", { text: "A music player and playlist organizer. It also writes playlists onto USB sticks in FAT order, the order cheap MP3 players and car stereos actually play." }),
         h("dl", { class: "kv" },
           h("dt", { text: "Version" }), h("dd", { text: a.version }),
           h("dt", { text: "Media engine" }), h("dd", { text: a.ffmpeg || S.ffmpegError || "not found" }),
@@ -3574,6 +3649,7 @@
   // ---- start -------------------------------------------------------------------------------------------
   async function init() {
     buildStick();
+    buildProcessButtons();
     $("app-menu").addEventListener("click", (e) => appMenu(e.currentTarget));
     $("lib-btn").addEventListener("click", () => setView(S.view === "library" ? "playlist" : "library"));
     const list = $("list");
@@ -3628,10 +3704,10 @@
     remember("playlist", S.playlists);
     remember("profile", S.profiles);
     remember("set", S.sets);
-    // First run: the generic profile, one empty playlist and one stick.
+    // First run: the generic profile, one empty playlist and one setlist.
     if (!S.profiles.length) S.profiles.push(clone(GENERIC));
     if (!S.playlists.length) S.playlists.push({ id: newId("p-"), name: "Playlist 1", entries: [], norm: { on: false, target: -18, mode: "track" } });
-    if (!S.sets.length) S.sets.push({ id: newId("set-"), name: "My stick", profileId: S.profiles[0].id, playlistIds: [S.playlists[0].id], stickId: null, label: "" });
+    if (!S.sets.length) S.sets.push({ id: newId("set-"), name: "My setlist", profileId: S.profiles[0].id, playlistIds: [S.playlists[0].id], stickId: null, label: "" });
     for (const r of d.syncs) S.syncs[r.setId] = r;
     S.current = pl(st.currentPlaylist) ? st.currentPlaylist : S.playlists[0].id;
     S.setId = stickSet(st.currentSet) ? st.currentSet : (setsFor(S.current)[0] || S.sets[0]).id;
@@ -3651,7 +3727,7 @@
     persist();
     scheduleWork();
     // For the app's self-test (tests/app_e2e.py) and for poking around in the inspector.
-    P.app = { S, pl, stickSet, track, planSet, buildSyncPlan, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, edgesDialog, seekTo, refreshSticks, holder, selectSet, openStick, layoutData, setView, setlist, lib, toggleTags, ready: true };
+    P.app = { S, setProcessing, pl, stickSet, track, planSet, buildSyncPlan, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, edgesDialog, seekTo, refreshSticks, holder, selectSet, openStick, layoutData, setView, setlist, lib, toggleTags, ready: true };
     if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Fatstick to get it back.");
     if (!DEMO) {
       stickPoll = setInterval(() => { if (!(S.sync && S.sync.running)) refreshSticks(true); }, 3000);

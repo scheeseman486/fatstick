@@ -7,7 +7,7 @@ runs a debug build of the app three times under Xvfb with FATSTICK_SELFTEST:
 1. tests/app_selftest.js drives the window from an empty library to a
    finished sync of two playlists, with silence between them, the first
    track cut and padded and the second playlist joined into one track (see
-   that file), then shows the stick's view.
+   that file), then shows the setlist's view.
 2. tests/app_selftest2.js restarts on the same library and checks that
    everything was kept.
 3. tests/app_selftest3.js chooses the music folder (phase 1's folders and

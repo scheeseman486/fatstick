@@ -1,8 +1,8 @@
-// A stick printed as a setlist: its playlists in order, big titles to read
+// A setlist on paper: its playlists in order, big titles to read
 // from the floor, the details under them a little smaller, black on white
 // only (a laser printer, no colour, no greys), tight margins so more fits on
 // a page. Each playlist shows its songs, or just its name (filler music
-// between sets, say), or is left out; the stick's silences show as lines of
+// between sets, say), or is left out; the setlist's silences show as lines of
 // their own. The dialog has the playlist, page, text and content settings
 // beside a preview of the actual pages; what prints is those pages.
 "use strict";
@@ -32,9 +32,9 @@
   Fatstick.setlistSetup = function (core) {
     const { S, pl, track, R, keyText, saveSetting, api, DEMO, stickSet, isGap, gapOf } = core;
     const o = defaults();
-    // The line under the heading, per playlist or stick ("The Fox, Saturday 9pm").
+    // The line under the heading, per playlist or setlist ("The Fox, Saturday 9pm").
     const subs = {};
-    // For a stick's setlist, how each of its playlists shows: "songs", "name" or "out".
+    // For each setlist, how each of its playlists shows: "songs", "name" or "out".
     const modes = {};
     /** The settings saved last time (read when the app starts). */
     function load(saved) {
@@ -45,7 +45,7 @@
     const keep = () => saveSetting("setlist", { options: o, subs, modes });
     const MODES = [["songs", "Songs"], ["name", "Name only"], ["out", "Leave out"]];
     const GAP_MODES = [["name", "Show"], ["out", "Leave out"]];
-    /** How a stick's playlist (or silence) shows: its songs, its name alone, or not at all. */
+    /** How a setlist's playlist (or silence) shows: its songs, its name alone, or not at all. */
     const modeOf = (setId, id) => {
       const m = modes[setId] && modes[setId][id];
       if (isGap(id)) return m === "out" ? "out" : "name";
@@ -72,7 +72,7 @@
     }
 
     /**
-     * What's on the page, as sections: the stick's playlists in its order,
+     * What's on the page, as sections: the setlist's playlists in its order,
      * each with its songs under its name, or its name alone, and its
      * silences; whatever's left out isn't there.
      */
@@ -211,7 +211,7 @@
     }
     window.addEventListener("afterprint", () => document.documentElement.classList.remove("printing-setlist"));
 
-    /** Everything a stick's pages need. */
+    /** Everything a setlist's pages need. */
     function pageData(setId, heading) {
       const secs = sections(setId);
       const n = secs.reduce((a, x) => a + x.songs.length, 0);
@@ -219,10 +219,10 @@
       return { heading, sub: subs[setId] || "", total: o.total ? `${plural(n, "song")}, ${length(time)}` : "", sections: secs };
     }
 
-    /** The setlist dialog for a stick: settings, and the pages as they'll print. */
+    /** The print dialog for a setlist: settings, and the pages as they'll print. */
     function open(setId) {
       let st = stickSet(setId) || stickSet();
-      if (!st) { toast("Make a stick first: a setlist is printed from a stick's playlists."); return; }
+      if (!st) { toast("Make a setlist first, then print it."); return; }
       let heading = st.name;
       let headingTouched = false;
       const data = () => pageData(st.id, heading);
@@ -260,8 +260,8 @@
       const subIn = h("input", { class: "input", value: subs[st.id] || "", placeholder: "Where and when, say", "aria-label": "Under the heading" });
       subIn.addEventListener("input", () => { if (subIn.value.trim()) subs[st.id] = subIn.value; else delete subs[st.id]; changed(); });
 
-      // The stick, and how each of its playlists and silences shows.
-      const stickSel = h("select", { class: "input", "aria-label": "Stick" }, S.sets.map((x) => h("option", { value: x.id, text: x.name })));
+      // The setlist, and how each of its playlists and silences shows.
+      const stickSel = h("select", { class: "input", "aria-label": "Setlist" }, S.sets.map((x) => h("option", { value: x.id, text: x.name })));
       stickSel.value = st.id;
       const plList = h("div", { class: "sl-pls" });
       function renderPls() {
@@ -282,7 +282,7 @@
                 return h("label", null, input, h("span", { text: t }));
               })));
         });
-        fill(plList, rows.length ? rows : h("p", { class: "st-note", text: "Nothing on this stick yet." }));
+        fill(plList, rows.length ? rows : h("p", { class: "st-note", text: "Nothing in this setlist yet." }));
       }
       stickSel.addEventListener("change", () => {
         st = stickSet(stickSel.value);
@@ -298,7 +298,7 @@
 
       const controls = h("div", { class: "sl-controls" },
         h("fieldset", { class: "sl-group" }, h("legend", { text: "Playlists" }),
-          field("Stick", stickSel),
+          field("Setlist", stickSel),
           plList,
           check("runOn", "Number straight through")),
         h("fieldset", { class: "sl-group" }, h("legend", { text: "Page" }),
@@ -384,7 +384,7 @@
 
     return {
       open, load, preparePrint, paginate, options: o,
-      /** A stick's page data (the tests' way in). */
+      /** A setlist's page data (the tests' way in). */
       data: (setId) => pageData(setId, stickSet(setId).name),
     };
   };

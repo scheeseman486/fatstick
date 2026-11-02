@@ -107,7 +107,7 @@
       away: excluded.filter((x) => !sticks.some((d) => exMatches(x, d))),
       error: null,
     });
-    // Tracks the demo's car stick got at its last sync count as prepared already.
+    // Tracks the demo's car setlist got at its last sync count as prepared already.
     const synced = new Set(D.stickSets.flatMap((s) => (s.lastSync ? s.lastSync.content.flat() : [])));
     const ready = new Set();
     let queue = [];

@@ -51,6 +51,79 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.waitForTimeout(60);
   };
 
+  // 0. The processing panel: closed when the app starts, opened by its button,
+  // and out of the way of the library. Left open for the checks after this.
+  {
+    const panel = p.locator('#stick');
+    const btn = p.locator('#proc-fat');
+    const right = (sel) => p.evaluate((s) => document.querySelector(s).getBoundingClientRect().right, sel);
+    const pressed = async () => (await btn.getAttribute('aria-pressed')) === 'true';
+    const settled = () => p.waitForTimeout(260);
+    check('the processing panel is closed when the app starts', await panel.isHidden());
+    check('its button says what it does', (await btn.textContent()) === 'FAT USB Stick transfer' && !(await pressed()));
+    check('the playlist has the whole width', Math.abs(await right('#main') - await right('#player')) < 2);
+    await p.screenshot({ path: `${out}/panel-closed.png` });
+    const colsClosed = await p.locator('#list-cols > *').count();
+    await btn.click();
+    await settled();
+    const box = await panel.boundingBox();
+    check('the button opens it at the right of the window', await panel.isVisible() && await pressed() && Math.round(box.width) === 344 && Math.abs(box.x + box.width - await right('#player')) < 2, JSON.stringify(box));
+    check('its title names it', (await p.locator('#proc-title').textContent()) === 'FAT USB Stick transfer');
+    check('the setlist, device, profile and sync are all in it', await p.locator('#set-select').isVisible() && await p.locator('#profile-select').isVisible() && await p.locator('#sync-btn').isVisible());
+    check('the playlist makes room beside it', await right('#main') < box.x + 1 && colsClosed >= (await p.locator('#list-cols > *').count()));
+    await p.screenshot({ path: `${out}/panel-open.png` });
+    await p.locator('#proc-close').click();
+    await panel.waitFor({ state: 'hidden' });
+    check('its close button closes it, and the focus goes back to the button', !(await pressed()) && await p.evaluate(() => document.activeElement.id === 'proc-fat'));
+    check('the playlist has the whole width again', Math.abs(await right('#main') - await right('#player')) < 2);
+    await btn.click();
+    await btn.click();
+    await panel.waitFor({ state: 'hidden' });
+    check('the button closes it too', !(await pressed()));
+    await btn.click();
+    await btn.click();
+    await btn.click();
+    await settled();
+    check('quick clicks end up where the last one says', await panel.isVisible() && await pressed());
+    await p.reload();
+    await p.waitForTimeout(600);
+    check('it is closed again after a restart, whatever it was', await panel.isHidden() && !(await pressed()));
+    // From the menu too.
+    await p.locator('#app-menu').click();
+    await p.locator('#menu').getByText('FAT USB Stick transfer').click();
+    await settled();
+    check('the menu opens it', await panel.isVisible() && await pressed());
+    // The library has the whole width, and the panel waits behind it.
+    await p.locator('#lib-btn').click();
+    check('the library view has the whole window', await panel.isHidden() && !(await pressed()) && Math.abs(await right('#libview') - await right('#player')) < 2);
+    await p.locator('#lib-btn').click();
+    await settled();
+    check('back from the library, it is as it was', await panel.isVisible() && await pressed());
+    await p.locator('#lib-btn').click();
+    await btn.click();
+    await settled();
+    check('from the library, the button goes back to the playlist with the panel', await p.locator('#main').isVisible() && await p.locator('#libview').isHidden() && await panel.isVisible() && await pressed());
+    // A stick that's plugged in while it's closed says so, with the way in.
+    await p.locator('#proc-close').click();
+    await panel.waitFor({ state: 'hidden' });
+    await p.evaluate(async () => { const A = Fatstick.app; const was = A.S.sticks; A.S.sticks = []; await A.refreshSticks(true); return was.length; });
+    check('a stick plugged in shows in the sidebar with the panel closed', /plugged in/.test(await p.locator('[data-set="set-car"] .flag').textContent()));
+    await p.locator('#toast').getByRole('button', { name: 'Open the transfer' }).click();
+    await settled();
+    check('and its toast opens the panel', await panel.isVisible() && await pressed());
+    // A narrow window: under the list.
+    await p.setViewportSize({ width: 800, height: 700 });
+    await settled();
+    const nb = await panel.boundingBox();
+    check('in a narrow window it goes under the list, full width', nb.width > 700 && nb.y > (await p.locator('#main').boundingBox()).y);
+    await p.locator('#proc-close').click();
+    await panel.waitFor({ state: 'hidden' });
+    await p.locator('#proc-fat').click();
+    await p.setViewportSize({ width: 1280, height: 800 });
+    await settled();
+    check('and back at the side in a wide one', await panel.isVisible() && Math.round((await panel.boundingBox()).width) === 344);
+  }
+
   const t0 = await titles();
   // 1. Shift-click range, drag the block down.
   await row(2).click();
@@ -110,8 +183,8 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   check('Gym gains 2 tracks', gymBefore.startsWith('12') && gymAfter.startsWith('14'), `${gymBefore} -> ${gymAfter}`);
 
   // 7. File names, in the player profile: typing updates the list of names
-  // and keeps focus; the stick panel shows an example.
-  check('the stick panel shows an example name', /Files named like 01 /.test(await p.locator('.prof-names').textContent()));
+  // and keeps focus; the panel shows an example.
+  check('the panel shows an example name', /Files named like 01 /.test(await p.locator('.prof-names').textContent()));
   await p.getByRole('button', { name: 'Edit…' }).click();
   await p.locator('#tpl').fill('{n} {title|filename}');
   await p.locator('#tpl').type(' x');
@@ -126,7 +199,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   check('preset restores a good template', !(await p.locator('#sync-btn').isDisabled()));
   await p.screenshot({ path: `${out}/profile-names.png` });
   await p.keyboard.press('Escape');
-  check('the stick panel follows', /Files named like 01 - /.test(await p.locator('.prof-names').textContent()));
+  check('the panel follows', /Files named like 01 - /.test(await p.locator('.prof-names').textContent()));
 
   // 8. Volume popover: switching off hides the Gain column.
   check('gain column shown', (await p.locator('#list-cols .h-gain').count()) === 1);
@@ -170,9 +243,9 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   check('it opens on the tab last used', (await p.getByRole('tab', { selected: true }).textContent()) === 'Tags and cover art');
   await p.getByRole('tab', { name: 'Files and folders' }).click();
   await p.keyboard.press('Escape');
-  // "List all" shows the stick in the middle of the window.
+  // "List all" shows the setlist in the middle of the window.
   await p.getByRole('button', { name: 'List all' }).click();
-  check('"List all" shows the stick in the middle of the window', await p.locator('#stickview').isVisible() && (await p.locator('#stickview .lay-folder').count()) === 2);
+  check('"List all" shows the setlist in the middle of the window', await p.locator('#stickview').isVisible() && (await p.locator('#stickview .lay-folder').count()) === 2);
   await p.locator('[data-pl="p-road"]').click();
   check('a playlist on the left goes back to it', await p.locator('#main').isVisible() && await p.locator('#stickview').isHidden());
 
@@ -202,18 +275,18 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   await p.screenshot({ path: `${out}/playing.png` });
   await p.keyboard.press('Space');
 
-  // 13. Sticks that remember what they hold: the Car stick's own stick is
-  // marked in the sidebar and in the stick list; another computer's stick is
-  // named; syncing the Gym clip onto the Car stick's stick needs a tick first.
+  // 13. Sticks that remember what they hold: the Car mix's own stick is
+  // marked in the sidebar and in the panel's list; another computer's stick is
+  // named; syncing the Gym clip onto the Car mix's stick needs a tick first.
   check('the plugged-in stick is marked in the sidebar', /plugged in/.test(await p.locator('[data-set="set-car"] .flag').textContent()));
   const holds = await p.locator('#stick .dev .dholds').allTextContents();
   check('the stick list says what each stick holds',
-    holds.some(t => /^Holds this stick's playlists, synced 3 days ago/.test(t)) && holds.some(t => /^Holds Dad's car \(Road songs\), synced .* ago, set up on another computer\./.test(t)), holds.join(' / '));
+    holds.some(t => /^Holds this setlist, synced 3 days ago/.test(t)) && holds.some(t => /^Holds Dad's car \(Road songs\), synced .* ago, set up on another computer\./.test(t)), holds.join(' / '));
   await p.locator('[data-set="set-gym"]').click();
   await p.locator('#stick .dev input[value="dev-sandisk"]').check();
-  check('picking another stick (set)\'s stick warns', /This stick holds Car stick \(Road Trip, Kids' car\).*Syncing Gym clip to it replaces that/.test(await p.locator('#holds-other').textContent()));
+  check('picking another setlist\'s stick warns', /This stick holds Car mix \(Road Trip, Kids' car\).*Syncing Gym clip to it replaces that/.test(await p.locator('#holds-other').textContent()));
   await p.locator('#sync-btn').click();
-  check('the confirmation asks before replacing it', /Car stick will need a stick of its own/.test(await p.locator('#replace-warning').textContent()) && await p.locator('#modal .btn.primary').isDisabled());
+  check('the confirmation asks before replacing it', /Car mix will need a stick of its own/.test(await p.locator('#replace-warning').textContent()) && await p.locator('#modal .btn.primary').isDisabled());
   await p.locator('#replace-ok').check();
   check('ticking the box allows it', !(await p.locator('#modal .btn.primary').isDisabled()));
   await p.screenshot({ path: `${out}/replace.png` });
@@ -268,7 +341,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   check('a cut track is rendered (encoded) on the stick', JSON.stringify(r2) === JSON.stringify(['render', 2, 1.5, 'encode']), JSON.stringify(r2));
 
   // 15. Silence between playlists, 10 s.
-  await p.locator('#stick select[aria-label="Add a playlist to this stick"]').selectOption('__gap');
+  await p.locator('#stick select[aria-label="Add a playlist to this setlist"]').selectOption('__gap');
   await p.locator('#stick input[aria-label="Seconds of silence"]').fill('10');
   await p.locator('#stick input[aria-label="Seconds of silence"]').press('Enter');
   await p.locator('#stick input[aria-label="Seconds of silence"]').blur();
@@ -287,19 +360,19 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   check('the stick gets one file for it, made of its 12 tracks', JSON.stringify(joinPlan) === JSON.stringify([1, 12, "01 - Kids' car.mp3", 12]), JSON.stringify(joinPlan));
   check("the stick panel counts it as joined", /12 tracks joined into one/.test(await p.locator('#stick .folders').textContent()));
 
-  // 17. The stick's view, from the sidebar: every folder in stick order,
-  // collapsible, for organizing the stick's playlists.
+  // 17. The setlist's view, from the sidebar: every folder in order,
+  // collapsible, for organizing the setlist's playlists.
   const carIds = () => p.evaluate(() => Fatstick.app.stickSet('set-car').playlistIds.slice());
   const folders = () => p.locator('#stickview .lay-folder');
   await p.locator('[data-set="set-car"]').click();
-  check('clicking a stick shows it in the middle of the window', await p.locator('#stickview').isVisible() && await p.locator('#main').isHidden() && (await p.locator('[data-set="set-car"]').getAttribute('aria-current')) === 'page');
+  check('clicking a setlist shows it in the middle of the window', await p.locator('#stickview').isVisible() && await p.locator('#main').isHidden() && (await p.locator('[data-set="set-car"]').getAttribute('aria-current')) === 'page');
   const heads = await p.locator('#stickview .lay-folder > summary, #stickview .lay-sumline').allTextContents();
-  check('it lists the folders in stick order', heads.length === 3 && /^01 Road Trip\//.test(heads[0]) && /12 tracks joined into one file/.test(heads[1]) && /^03 Silence\/s of silence/.test(heads[2]), heads.join(' | '));
+  check('it lists the folders in order', heads.length === 3 && /^01 Road Trip\//.test(heads[0]) && /12 tracks joined into one file/.test(heads[1]) && /^03 Silence\/s of silence/.test(heads[2]), heads.join(' | '));
   check('a joined track lists its tracks with their start times', (await p.locator('#stickview .lay-folder.k-joined .lay-parts li').count()) === 12);
   check('nothing in a playlist is edited here', (await p.locator('#stickview input[type="checkbox"]').count()) === 0);
-  check('the stick panel leaves the list to the view', await p.locator('#stick [aria-label="Playlists on this stick"]').isHidden());
-  check('the display shows the stick', /CAR STICK/.test((await p.locator('#disp-text').textContent()).toUpperCase()) && /DIR/.test(await p.locator('#disp-unit').textContent()));
-  await p.screenshot({ path: `${out}/stick-view.png` });
+  check('the panel leaves the list to the view', await p.locator('#stick [aria-label="Playlists in this setlist"]').isHidden());
+  check('the display shows the setlist', /CAR MIX/.test((await p.locator('#disp-text').textContent()).toUpperCase()) && /DIR/.test(await p.locator('#disp-unit').textContent()));
+  await p.screenshot({ path: `${out}/setlist-view.png` });
   await folders().first().locator('summary .lay-fname').click();
   check('folders collapse', !(await folders().first().evaluate((d) => d.open)));
   // Alt+Down on a handle moves a playlist.
@@ -335,7 +408,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     return badge;
   };
   const badge = await dragPl(p.locator('[data-pl="p-gym"]'), folders().first(), 0.2);
-  check('dragging a playlist from the left puts it where it\'s dropped', (await carIds())[0] === 'p-gym' && /Put Gym here/.test(badge), `${badge}: ${JSON.stringify(await carIds())}`);
+  check('dragging a playlist from the left puts it where it\'s dropped', (await carIds())[0] === 'p-gym' && /Add Gym here/.test(badge), `${badge}: ${JSON.stringify(await carIds())}`);
   check('the drop doesn\'t open the playlist', await p.locator('#stickview').isVisible());
   // ... and the handles move them by dragging too.
   await p.getByRole('button', { name: 'Collapse all' }).click();
@@ -343,15 +416,15 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   check('dragging a handle moves it', (await carIds()).at(-1) === 'p-gym', JSON.stringify(await carIds()));
   await p.keyboard.press('Control+z');
   await p.keyboard.press('Control+z');
-  check('undo puts the stick back as it was', JSON.stringify(await carIds()) === JSON.stringify(ids0), JSON.stringify(await carIds()));
-  // Onto a stick in the sidebar: it goes on the end of that stick.
+  check('undo puts the setlist back as it was', JSON.stringify(await carIds()) === JSON.stringify(ids0), JSON.stringify(await carIds()));
+  // Onto a setlist in the sidebar: it goes on the end of that setlist.
   await dragPl(p.locator('[data-pl="p-sleep"]'), p.locator('[data-set="set-gym"]'), 0.5);
-  check('a playlist dropped on a stick on the left goes on it', await p.evaluate(() => Fatstick.app.stickSet('set-gym').playlistIds.includes('p-sleep')));
+  check('a playlist dropped on a setlist on the left goes in it', await p.evaluate(() => Fatstick.app.stickSet('set-gym').playlistIds.includes('p-sleep')));
   await p.keyboard.press('Control+z');
-  // Taken off, with undo.
+  // Taken out, with undo.
   await folders().nth(1).hover();
-  await folders().nth(1).getByRole('button', { name: /Take .* off this stick/ }).click();
-  check('a playlist can be taken off', (await carIds()).length === 2 && !(await carIds()).includes('p-kids'));
+  await folders().nth(1).getByRole('button', { name: /Take .* out of this setlist/ }).click();
+  check('a playlist can be taken out', (await carIds()).length === 2 && !(await carIds()).includes('p-kids'));
   await p.keyboard.press('Control+z');
   check('and put back with undo', (await carIds()).includes('p-kids'));
   // A change to a playlist shows here too.
@@ -360,17 +433,37 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   await p.locator('#join-on').uncheck();
   await p.keyboard.press('Escape');
   await p.locator('[data-set="set-car"]').click();
-  check('the stick view follows edits made in the playlist', /12 files/.test(await folders().nth(1).locator('summary').textContent()));
+  check('the setlist view follows edits made in the playlist', /12 files/.test(await folders().nth(1).locator('summary').textContent()));
   await p.locator('[data-pl="p-road"]').click();
 
-  // 18. Sync flow.
+  // 18. Sync flow. First one that fails with the panel closed: the toast says
+  // so and shows why.
+  {
+    const realSync = await p.evaluateHandle(() => { const was = Fatstick.api.sync; Fatstick.api.sync = () => new Promise((r) => setTimeout(() => r({ ok: false, error: 'The stick went away.' }), 500)); return was; });
+    await p.locator('#sync-btn').click();
+    await p.locator('#modal .btn.primary').click();
+    await p.locator('#proc-close').click();
+    await p.locator('#stick').waitFor({ state: 'hidden' });
+    await p.locator('#toast').getByRole('button', { name: 'See why' }).click();
+    await p.locator('#stick').waitFor({ state: 'visible' });
+    check('a sync that fails with the panel closed shows why when asked', /The stick went away/.test(await p.locator('.sync-done.bad').textContent()));
+    await p.getByRole('button', { name: 'Done' }).click();
+    await p.evaluate((was) => { Fatstick.api.sync = was; }, realSync);
+  }
   await p.locator('#sync-btn').click();
   check('confirmation dialog', /Erase .* and sync/.test(await p.locator('#modal-title').textContent()));
   await p.screenshot({ path: `${out}/confirm.png` });
   await p.locator('#modal .btn.primary').click();
   await p.waitForTimeout(2500);
   await p.screenshot({ path: `${out}/syncing.png` });
-  await p.waitForSelector('.sync-done', { timeout: 30000 });
+  // It goes on with the panel closed: the button and the display say so.
+  await p.locator('#proc-close').click();
+  await p.locator('#stick').waitFor({ state: 'hidden' });
+  check('a sync goes on with the panel closed, and its button says so', await p.locator('#proc-fat.busy').count() === 1 && /%/.test(await p.locator('#disp-unit').textContent()));
+  await p.waitForSelector('#proc-fat:not(.busy)', { timeout: 30000 });
+  check('its button stops saying so when it ends', /^Synced /.test(await p.locator('#toast').textContent()) && await p.locator('#stick').isHidden());
+  await p.locator('#proc-fat').click();
+  await p.waitForSelector('.sync-done', { timeout: 3000 });
   const done = await p.locator('.sync-done').textContent();
   check('sync finishes', /^Synced\./.test(done), done);
   await p.getByRole('button', { name: 'Done' }).click();
@@ -687,7 +780,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     const car = await p.evaluate(() => { const A = Fatstick.app; const s = A.stickSet(); return { id: s.id, name: s.name, items: s.playlistIds.map((id) => (id.startsWith('gap-') ? null : A.pl(id).name)) }; });
     await p.keyboard.press('Control+p');
     await p.waitForSelector('.sl-thumb .sl-page', { timeout: 5000 });
-    check('Ctrl+P opens the chosen stick\'s setlist with a preview of its pages', (await p.locator('#modal-title').textContent()) === 'Print a setlist' && (await p.locator('.sl-thumb .sl-h1').first().textContent()) === car.name, car.name);
+    check('Ctrl+P opens the chosen setlist with a preview of its pages', (await p.locator('#modal-title').textContent()) === 'Print a setlist' && (await p.locator('.sl-thumb .sl-h1').first().textContent()) === car.name, car.name);
     const named = car.items.filter(Boolean);
     const sets = await p.locator('.sl-thumb .sl-set:not(.gap) .sl-set-name').allTextContents();
     check('each playlist on it is headed by its name, in the stick\'s order', JSON.stringify(sets) === JSON.stringify(named), sets.join(' | '));
@@ -741,12 +834,12 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.screenshot({ path: `${out}/setlist-quarters.png` });
     await p.getByRole('button', { name: 'Back to the defaults' }).click();
     check('back to the defaults: one portrait column again', (await p.locator('.sl-seg:not(.small) input:checked + span').allTextContents()).join(',') === 'Portrait,1,1,Normal');
-    await p.getByRole('button', { name: 'Close' }).click();
-    // From the stick's view too.
+    await p.locator('#modal').getByRole('button', { name: 'Close' }).click();
+    // From the setlist's view too.
     await p.locator('[data-set="set-car"]').click();
-    await p.getByRole('button', { name: 'Print a setlist…' }).click();
-    check('the stick\'s view prints its setlist', (await p.locator('#modal-title').textContent()) === 'Print a setlist' && await p.locator('.sl-thumb').first().isVisible());
-    await p.getByRole('button', { name: 'Close' }).click();
+    await p.locator('#stickview').getByRole('button', { name: 'Print…' }).click();
+    check('the setlist\'s view prints it', (await p.locator('#modal-title').textContent()) === 'Print a setlist' && await p.locator('.sl-thumb').first().isVisible());
+    await p.locator('#modal').getByRole('button', { name: 'Close' }).click();
     await p.locator('[data-pl="p-road"]').click();
   }
 

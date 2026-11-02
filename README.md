@@ -2,11 +2,12 @@
 
 ![Fatstick main window](docs/gui.png)
 
-Puts your playlists onto a USB stick so that cheap MP3 players and car
-stereos play them in playlist order. Those players play files in **FAT
-order**, not by name or tag. FAT order is the order of the entries in each
-folder's table on the FAT volume (what fatsort, YAFS and DriveSort sort). It is
-not stored in the File Allocation Table itself, which only chains clusters.
+A music player and playlist organizer for your own music folder. It also puts
+your playlists onto a USB stick so that cheap MP3 players and car stereos play
+them in playlist order. Those players play files in **FAT order**, not by name
+or tag. FAT order is the order of the entries in each folder's table on the FAT
+volume (what fatsort, YAFS and DriveSort sort). It is not stored in the File
+Allocation Table itself, which only chains clusters.
 
 A desktop app for Linux, Windows and macOS (Tauri v2), free software under the
 GPL version 3 or later.
@@ -67,12 +68,24 @@ GPL version 3 or later.
   "Show in the library" in a track's right-click menu opens the library with
   it selected (or says why it can't: a file outside the music folder).
 
-- **Sticks.** A stick holds one or more playlists, one folder each and in the
-  order you choose, or a single playlist at the top level. It also has a player
-  profile, which sets the bitrate cap, sample rates, tag version, cover art and
-  file names. A Generic profile is built in; make your own for a particular
-  player. The window shows what is on the stick now, what the next sync would
-  write, and whether it fits.
+- **Setlists.** A setlist holds one or more playlists in the order you choose,
+  and says how they go on a stick: one folder each, or a single playlist at the
+  top level. It also has a player profile, which sets the bitrate cap, sample
+  rates, tag version, cover art and file names. A Generic profile is built in;
+  make your own for a particular player.
+- **FAT USB Stick transfer.** The panel at the right of the window is where
+  music leaves the app. It's closed whenever the app starts, and the "FAT USB
+  Stick transfer" button at the top (or the menu) opens and closes it. It shows
+  the setlist, what is on the stick now, what the next sync would write,
+  whether it fits, and the sync itself. A sync carries on with the panel
+  closed: the button shows it's busy and the display counts it up; if it stops,
+  a message offers to show why. A stick you plug in is marked in the sidebar,
+  and its message opens the panel. The library view has the whole window, so
+  the panel waits behind it. Other ways of copying are meant to go in this
+  panel too: keeping what's already on a stick, copying into a folder, a
+  particular player, burning a CD.
+
+  ![The FAT USB Stick transfer panel, open beside a playlist](docs/transfer.png)
 - **Devices left out.** "Exclude devices…" in the menu lists what's plugged
   in; a ticked device (a card reader that's always there, a backup drive)
   isn't shown, isn't read (not even for the note a sync leaves) and can't be
@@ -83,10 +96,10 @@ GPL version 3 or later.
   and size, so it stays left out whatever is written to it. Untick it, or
   "Show it again" once it's unplugged, to bring it back.
 - **Sticks that remember.** Every sync leaves a small hidden note on the stick
-  saying which of your sticks it is, with its profile and playlists. Plug it in
-  again and the app recognizes it, selects it and marks it "plugged in". Syncing
-  a different stick's playlists onto it asks you to confirm first; so does a
-  stick set up on another computer.
+  saying which of your setlists it holds, with its profile and playlists. Plug
+  it in again and the app recognizes it, selects that setlist and marks it
+  "plugged in". Syncing a different setlist onto it asks you to confirm first;
+  so does a stick set up on another computer.
 - **Copy or convert.** An MP3 the player can take is copied as it is.
   Everything else (FLAC, ALAC, WAV, AIFF, AAC, Ogg Vorbis, Opus, WMA, WavPack,
   APE, and MP3s over the cap or at odd sample rates) is encoded with LAME to
@@ -141,41 +154,41 @@ GPL version 3 or later.
   entry as the stick will have it: the silence added before it (when it
   plays from its start), its cut start to its cut end, in its key and with
   its fades, then the silence added after it.
-- **Silence between playlists.** A stick's list can hold stretches of
+- **Silence between playlists.** A setlist can hold stretches of
   silence (30 s unless you change it) between its playlists. Each gets a
   folder of its own holding one silent MP3.
 - **A playlist as one track.** "One track" in a playlist's header joins it
   into a single long MP3 on the stick, in order, with each track's volume
   and start and end settings. In the app it stays a playlist you edit as
   usual; the list shows where each track starts in the joined track.
-- **The stick's view.** Click a stick in the sidebar (or "List all") and the
-  middle of the window shows everything on it, in the order a player reads
-  it: every folder and file, with folders and joined tracks that fold away.
-  It's where the stick's playlists are organized: drag a playlist in from
-  the sidebar (or onto a stick in the sidebar), move one by its handle (or
-  Alt+↑ and Alt+↓ on it), put silence between two (hover between them), and
-  take one off. What's in a playlist is edited in the playlist. Double-click
-  a stick to rename it.
+- **A setlist's view.** Click a setlist in the sidebar (or "List all") and the
+  middle of the window shows everything it puts on a stick, in the order a
+  player reads it: every folder and file, with folders and joined tracks that
+  fold away. It's where the setlist's playlists are organized: drag a playlist
+  in from the sidebar (or onto a setlist in the sidebar), move one by its handle
+  (or Alt+↑ and Alt+↓ on it), put silence between two (hover between them), and
+  take one out. What's in a playlist is edited in the playlist. Double-click
+  a setlist to rename it.
 - **Even volume, per playlist.** Loudness is measured with EBU R128. A copied
   MP3 gets a lossless gain change in 1.5 dB steps (the global gain field of
   each frame, as mp3gain does); an encoded track gets the exact gain. No
   ReplayGain tags: these players ignore them.
 - **Preparation in the background.** Encodes and gain changes are made while
   you edit, into a cache (10 GB by default), so a sync is mostly the write.
-- **Setlists to print.** "Print a setlist…" (in the menu or with Ctrl+P, in
-  a stick's right-click menu, or in the stick's view) lays a stick out for a
+- **Setlists on paper.** "Print a setlist…" in the menu or Ctrl+P ("Print…" in
+  a setlist's right-click menu and in its view) lays a setlist out for a
   music stand or the floor: its playlists in order, each under its name,
   big titles with the artist, length and key shift a little smaller, black
   on white only (nothing grey or coloured, for a laser printer) and tight
   margins. Each playlist shows its songs, or just its name (filler music
-  between sets, in a box), or is left out; the stick's silences are lines
+  between sets, in a box), or is left out; the setlist's silences are lines
   of their own, or left out too. Beside the settings is a preview of the
   actual pages. Page: A4 or Letter, portrait or landscape, one to three
   columns and one to three rows (two by two in landscape is a page in
   quarters), lines between the parts, margins. Text: Barlow Condensed
   (narrow, so long titles fit), Barlow or a serif, title and detail sizes,
   spacing, bold, capitals. On the page: a heading and a line under it ("The
-  Fox, 9pm"; kept for each stick), numbers (each playlist from 1, or
+  Fox, 9pm"; kept for each setlist), numbers (each playlist from 1, or
   straight through), artist, album, length, key shift, the song count and
   total length, page numbers, lines between songs. The settings are
   remembered. Print to paper or to a PDF from the system's print dialog, at
@@ -198,11 +211,11 @@ FAT32 file system itself:
 - one MBR partition (type 0x0C, FAT32 LBA) from 1 MiB to the end of the stick,
   cluster size from the table in Microsoft's FAT specification, first cluster
   aligned to 4 MiB (1 MiB on sticks under 2 GiB);
-- at the top level the volume label, then the playlist folders in stick order
+- at the top level the volume label, then the playlist folders in setlist order
   (or one playlist's tracks themselves), then the hidden note
   `.fatstick.json`;
 - in each folder, `.` and `..`, then one entry per track in playlist order;
-- every track's data in one unbroken run of clusters, back to back in stick
+- every track's data in one unbroken run of clusters, back to back in setlist
   order, straight after the folder tables, with the note's data last;
 - names numbered and modification times spaced 2 s apart, so players that
   sort by name or date agree.
@@ -245,7 +258,7 @@ is what accepts the fingerprint.
 
 Recognizing a stick needs no password: the note is a normal file, read from
 wherever the OS mounted the stick. It names the library that wrote it (a random
-id kept in the library), the stick's id and name, its profile and playlists,
+id kept in the library), the setlist's id and name, its profile and playlists,
 and when it was synced. Players skip it, as it isn't audio. A stick the OS
 hasn't mounted is recognized on Linux by its volume serial number, which the
 library records at each sync. A stick without a note is remembered by its
@@ -257,7 +270,7 @@ now.
 
 | What | Linux | macOS | Windows |
 |------|-------|-------|---------|
-| Library (`library.db`, SQLite: tracks, measurements, playlists, profiles, sticks, past syncs) | `~/.local/share/fatstick` | `~/Library/Application Support/fatstick` | `%APPDATA%\fatstick` |
+| Library (`library.db`, SQLite: tracks, measurements, playlists, profiles, setlists, past syncs) | `~/.local/share/fatstick` | `~/Library/Application Support/fatstick` | `%APPDATA%\fatstick` |
 | Prepared files (safe to clear, from the menu) | `~/.cache/fatstick` | `~/Library/Caches/fatstick` | `%LOCALAPPDATA%\fatstick` |
 
 `FATSTICK_DATA_DIR` and `FATSTICK_CACHE_DIR` override these. `FATSTICK_FFMPEG_DIR` points the
@@ -284,7 +297,7 @@ app/src-tauri             the app: commands, background preparation, sync, stick
 app/ui                    the window: plain HTML/CSS/JS. js/api.js talks to the app (or to demo data in a
                           browser); js/names.js and js/rules.js hold the naming and copy-or-encode rules;
                           js/library.js is the library view, the search panel and the tag editor,
-                          js/search.js the search itself, js/stickview.js a stick's view, and
+                          js/search.js the search itself, js/stickview.js a setlist's view, and
                           js/setlist.js the printed setlist
 packaging/ffmpeg          builds the bundled LGPL ffmpeg and ffprobe, with LAME, from source
 packaging/licenses        LGPL texts and third-party notices, installed with the app
@@ -366,18 +379,18 @@ python3 tests/kernel_stick.py --kroot <kernel dir> --fatstick target/x86_64-unkn
 ```
 
 `tests/app_e2e.py` runs the real app under Xvfb, three times. The first run starts
-from an empty library: it adds two folders of real audio (FLAC, Opus, WAV,
+from an empty library, with the transfer panel closed until its button opens it: it adds two folders of real audio (FLAC, Opus, WAV,
 MP3s at 320 kbps and at 22.05 kHz mono), turns on even volume, cuts and pads
 a track, shifts another 5 semitones up (changing its key live while it
 plays), fades a third in and out with a late fade out (changing the fades
 and their shapes live, and seeking, while it plays), joins the second playlist into one track and puts silence between
 the two, picks a disk image standing in for a stick, syncs through the button
-and its confirmation, shows the stick's view, plays a track, and hears the
+and its confirmation, shows the setlist's view, plays a track, and hears the
 silence being tried in the start and end dialog (with the track's waveform
 read by ffmpeg). It also excludes a second disk image through the menu and
 has a sync aimed at it refused. The second run checks that all of it
-was kept (the excluded image and the repeat mode too), that an edit makes the stick out of date, that the stick is
-recognized from its note, and that syncing another stick's playlists onto it
+was kept (the excluded image and the repeat mode too), that an edit makes the setlist out of date, that the stick is
+recognized from its note, and that syncing another setlist onto it
 asks first. The third chooses a music folder, scans and searches it, writes
 tags into two files as they're edited (no prompts) and renames them from the
 library view, and checks that

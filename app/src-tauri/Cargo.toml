@@ -1,6 +1,6 @@
 [package]
 name = "fatstick"
-description = "Copy a playlist to a FAT32 USB stick in the order cheap players use"
+description = "Music player and playlist organizer that also writes FAT32 USB sticks in the order cheap players use"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"

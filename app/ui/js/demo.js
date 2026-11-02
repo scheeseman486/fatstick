@@ -1,5 +1,5 @@
 // Demo data for the window in a browser: a small library, four playlists,
-// three profiles, two sticks to sync and four USB sticks, two of them written
+// three profiles, two setlists and four USB sticks, two of them written
 // by Fatstick. Tags and lengths are real; paths, sizes and loudness
 // figures are made up but plausible.
 "use strict";
@@ -178,12 +178,12 @@
   ];
 
   const DAY = 86400000;
-  // What each stick held at its last sync: the entry ids, in order.
+  // What each setlist held at its last sync: the entry ids, in order.
   const roadAtSync = playlists[0].entries.filter((e) => !["t15", "t19", "t20"].includes(e.trackId)).map((e) => e.trackId);
   [roadAtSync[3], roadAtSync[4]] = [roadAtSync[4], roadAtSync[3]];
   const stickSets = [
     {
-      id: "set-car", name: "Car stick", profileId: "prof-generic", playlistIds: ["p-road", "p-kids"], stickId: "dev-sandisk", label: "CAR",
+      id: "set-car", name: "Car mix", profileId: "prof-generic", playlistIds: ["p-road", "p-kids"], stickId: "dev-sandisk", label: "CAR",
       lastSync: { at: Date.now() - 3 * DAY, stickId: "dev-sandisk", content: [roadAtSync, playlists[1].entries.map((e) => e.trackId)], recipe: "320|-18|track" },
     },
     {
@@ -196,9 +196,9 @@
     {
       id: "dev-sandisk", device: "/dev/sdb", name: "SanDisk Cruzer Blade", size_bytes: 15_631_122_432, bus: "usb",
       volumes: [{ label: "CAR", fs_type: "vfat", size_bytes: 15_630_073_856, summary: "2 folders, 31 files, 1.4 GB" }],
-      // The note the Car stick's last sync left on it.
+      // The note the Car mix's last sync left on it.
       note: {
-        app: "Fatstick", format: 1, libraryId: "lib-demo", setId: "set-car", setName: "Car stick",
+        app: "Fatstick", format: 1, libraryId: "lib-demo", setId: "set-car", setName: "Car mix",
         profile: { id: "prof-generic", name: "Generic" },
         playlists: [{ id: "p-road", name: "Road Trip", tracks: 19 }, { id: "p-kids", name: "Kids' car", tracks: 12 }],
         files: 31, syncedAt: Date.now() - 3 * DAY,

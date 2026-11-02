@@ -49,15 +49,19 @@
     const measured = await until(() => p.entries.every((e) => A.track(e.trackId).lufs != null), 90000);
     check("loudness measured for every track", !!measured, p.entries.map((e) => A.track(e.trackId).lufs).join(", "));
 
-    // A second folder becomes a second playlist, put on the same stick.
+    // A second folder becomes a second playlist, in the same setlist.
     await A.addPaths([cfg.music2], { kind: "new" });
     check("a second playlist was made", S.playlists.length === 2 && S.playlists[1].entries.length === cfg.titles2.length);
     A.S.current = S.playlists[0].id;
     const set = A.stickSet();
-    const add = await until(() => [...document.querySelectorAll("#stick select")].find((s) => s.getAttribute("aria-label") === "Add a playlist to this stick"));
+    // The transfer panel is closed until its button opens it.
+    check("the processing panel is closed at first", document.getElementById("stick").hidden && !document.getElementById("app").classList.contains("proc-open"));
+    document.getElementById("proc-fat").click();
+    check("its button opens it", !document.getElementById("stick").hidden && document.getElementById("proc-fat").getAttribute("aria-pressed") === "true");
+    const add = await until(() => [...document.querySelectorAll("#stick select")].find((s) => s.getAttribute("aria-label") === "Add a playlist to this setlist"));
     add.value = S.playlists[1].id;
     add.dispatchEvent(new Event("change", { bubbles: true }));
-    check("both playlists are on the stick", set.playlistIds.length === 2);
+    check("both playlists are in the setlist", set.playlistIds.length === 2);
 
     // The first track: 2 s cut from its start and 1 s of silence after it.
     document.querySelector(`[data-pl="${S.playlists[0].id}"]`).click();
@@ -100,7 +104,7 @@
     check("the fourth track fades in over 2 s and out over 3 s, late", e3.fadeIn === 2 && e3.fadeOut === 3 && e3.fadeOutShape === "late" && !e3.fadeInShape, JSON.stringify(e3));
 
     // Three seconds of silence between the two playlists.
-    const add2 = [...document.querySelectorAll("#stick select")].find((x) => x.getAttribute("aria-label") === "Add a playlist to this stick");
+    const add2 = [...document.querySelectorAll("#stick select")].find((x) => x.getAttribute("aria-label") === "Add a playlist to this setlist");
     add2.value = "__gap";
     add2.dispatchEvent(new Event("change", { bubbles: true }));
     (await until(() => document.querySelector('#stick button[aria-label="Move silence up"]'))).click();
@@ -164,7 +168,7 @@
     check("progress went through the write stage", sawWrite, [...stages].join(","));
     check("the stick is up to date afterwards", A.staleness(A.planSet(A.stickSet())).current);
     const known = await until(() => { const hd = A.holder(S.sticks.find((d) => d.image)); return hd && hd.set && hd.set.id === set.id; }, 10000);
-    check("the stick now carries a note naming this stick (set)", !!known);
+    check("the stick now carries a note naming this setlist", !!known);
     lines.push(`INFO names=${JSON.stringify(A.planSet(A.stickSet()).folders.map((f) => [f.folder, f.files.map((it) => it.name)]))}`);
     // A sync aimed at the excluded image is refused by the app itself.
     const aimed = A.buildSyncPlan(A.planSet(A.stickSet()));
@@ -173,11 +177,11 @@
     const refused = await Fatstick.api.sync(aimed);
     check("a sync aimed at an excluded device is refused", !refused.ok && /excluded/.test(refused.error || ""), refused.error);
 
-    // The stick's view, from a click in the sidebar: its folders in order.
+    // The setlist's view, from a click in the sidebar: its folders in order.
     document.querySelector(`[data-set="${set.id}"]`).click();
     const shown = await until(() => !document.getElementById("stickview").hidden && document.querySelectorAll("#stickview .lay-folder").length, 5000);
     const kinds = [...document.querySelectorAll("#stickview .lay-folder")].map((f) => [...f.classList].find((c) => c.startsWith("k-")));
-    check("the stick's view shows what's on it, in order", !!shown && JSON.stringify(kinds) === JSON.stringify(["k-playlist", "k-silence", "k-joined"]) && document.querySelectorAll("#stickview .lay-file").length >= 5, JSON.stringify(kinds));
+    check("the setlist's view shows what's in it, in order", !!shown && JSON.stringify(kinds) === JSON.stringify(["k-playlist", "k-silence", "k-joined"]) && document.querySelectorAll("#stickview .lay-file").length >= 5, JSON.stringify(kinds));
     document.querySelector(`[data-pl="${p.id}"]`).click();
 
     // The player (a silent output in the test): the position moves, then stop.

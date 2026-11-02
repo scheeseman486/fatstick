@@ -1,8 +1,8 @@
-// A stick's view in the main window (click a stick on the left): every
+// A setlist's view in the main window (click a setlist on the left): every
 // folder and file in the order a player reads them, folders and joined
-// tracks collapsible. It's for organizing the stick's playlists: drag them
-// in from the left (onto the view, or onto a stick in the sidebar), move
-// them by their handles, put silence between them, take them off. What's
+// tracks collapsible. It's for organizing the setlist's playlists: drag them
+// in from the left (onto the view, or onto a setlist in the sidebar), move
+// them by their handles, put silence between them, take them out. What's
 // in a playlist is edited in the playlist.
 "use strict";
 (function (Fatstick) {
@@ -11,7 +11,7 @@
   Fatstick.stickViewSetup = function (core) {
     const { S, pl, stickSet, layoutData, edit, newId, isGap, gapOf, renderSide, printSetlist } = core;
     const root = document.getElementById("stickview");
-    // Folders and joined tracks closed by the person, remembered per stick.
+    // Folders and joined tracks closed by the person, remembered per setlist.
     let closed = new Set();
     let shownSet = null;
     const storeKey = (setId) => `fatstick-layout-closed:${setId}`;
@@ -51,23 +51,23 @@
       return row;
     }
 
-    /** A stick's playlists in the order they go on it: put one before `index`. */
+    /** A setlist's playlists in order: put one before `index`. */
     function place(s, id, index, how) {
       const p = isGap(id) ? null : pl(id);
       const what = isGap(id) ? "the silence" : p ? p.name : "it";
       const from = s.playlistIds.indexOf(id);
       if (from >= 0 && (index === from || index === from + 1)) return;
-      edit(from >= 0 ? `Move ${what}` : `Put ${what} on ${s.name}`, () => {
+      edit(from >= 0 ? `Move ${what}` : `Add ${what} to ${s.name}`, () => {
         const a = s.playlistIds;
         let at = index;
         if (from >= 0) { a.splice(from, 1); if (from < at) at--; }
         a.splice(Math.max(0, Math.min(a.length, at)), 0, id);
       });
-      if (how === "side" && from < 0) toast(`Put ${what} on ${s.name}.`);
+      if (how === "side" && from < 0) toast(`Added ${what} to ${s.name}.`);
     }
     function addSilence(s, index) {
       const id = newId("gap-");
-      edit(`Put silence on ${s.name}`, () => {
+      edit(`Add silence to ${s.name}`, () => {
         s.gaps = [...(s.gaps || []), { id, seconds: 30 }];
         s.playlistIds.splice(index, 0, id);
       });
@@ -87,7 +87,7 @@
       if (a && root.contains(a) && a.matches("input")) { deferred = true; return; }
       const s = stickSet();
       if (!s) {
-        fill(root, h("div", { class: "sv-scroll" }, h("p", { class: "st-note", text: "Make a stick on the left to choose what goes on it." })));
+        fill(root, h("div", { class: "sv-scroll" }, h("p", { class: "st-note", text: "Make a setlist on the left to choose what goes on it." })));
         return;
       }
       if (s.id !== shownSet) { shownSet = s.id; load(s.id); }
@@ -97,14 +97,14 @@
       const files = d.folders.reduce((a, f) => a + f.files.length, 0);
       const secs = d.folders.reduce((a, f) => a + f.secs, 0);
       const total = d.folders.reduce((a, f) => a + f.bytes, 0);
-      const where = d.stick ? `On ${d.stick.name}, ${bytes(d.stick.size)}.` : "No USB stick picked.";
+      const where = d.stick ? `Syncs to ${d.stick.name}, ${bytes(d.stick.size)}.` : "No USB stick picked.";
       const space = d.space
         ? `. ${bytes(d.space.used)} of ${bytes(d.space.data)} used${d.space.fits ? "" : ", more than the stick holds"}.`
         : `, about ${bytes(total)}.`;
       const all = (open) => () => {
         for (const el of root.querySelectorAll("details")) el.open = open;
       };
-      const list = h("div", { class: "lay-folders", id: "sv-list", role: "list", "aria-label": `What's on ${s.name}, in order` });
+      const list = h("div", { class: "lay-folders", id: "sv-list", role: "list", "aria-label": `What's in ${s.name}, in order` });
       items.forEach((id, i) => {
         if (!d.single && i > 0) list.append(inserter(s, i));
         list.append(folderBlock(s, d, id, byId.get(id)));
@@ -124,11 +124,11 @@
               d.single ? null : h("button", { type: "button", class: "btn small", id: "sv-silence", title: "Silence at the end; drag it where it goes", onclick: () => addSilence(s, s.playlistIds.length) }, icon("plus"), "Silence"),
               h("button", { type: "button", class: "btn small", text: "Expand all", onclick: all(true) }),
               h("button", { type: "button", class: "btn small", text: "Collapse all", onclick: all(false) }),
-              h("button", { type: "button", class: "btn small", text: "Print a setlist…", title: "The stick's playlists as a setlist on paper (Ctrl+P)", onclick: () => printSetlist() })))),
+              h("button", { type: "button", class: "btn small", text: "Print…", title: "This setlist on paper (Ctrl+P)", onclick: () => printSetlist() })))),
         h("div", { class: "sv-scroll", id: "sv-scroll" },
           d.errors && d.errors.length ? h("p", { class: "st-note err", text: `The file names don't work: ${d.errors[0]}` }) : null,
           items.length ? list : h("div", { class: "sv-empty", id: "sv-list" },
-            h("p", { text: "Nothing on this stick yet. Drag a playlist here from the left." }),
+            h("p", { text: "Nothing in this setlist yet. Drag a playlist here from the left." }),
             h("div", { class: "drop-line sv-drop", id: "sv-drop", hidden: true })),
           d.ignored && d.ignored.length ? h("p", { class: "st-note warn", text: `Not written, as this profile puts one playlist on a stick: ${d.ignored.join(", ")}.` }) : null,
           h("p", { class: "lay-foot", text: "The order here is the order a player reads the stick in: folders, then files, top to bottom. Drag a playlist in from the left, or by its handle to move it." })),
@@ -141,7 +141,7 @@
         h("button", { type: "button", class: "sv-ins-btn", title: "Put silence here, between these playlists", onclick: () => addSilence(s, index) }, icon("plus"), "Silence here"));
     }
 
-    /** One playlist's folder (or silence) on the stick: what's in it, in order. */
+    /** One playlist's folder (or silence) in the setlist: what's in it, in order. */
     function folderBlock(s, d, id, f) {
       const gap = isGap(id) ? gapOf(s, id) : null;
       const p = gap ? null : pl(id);
@@ -165,14 +165,14 @@
       }, icon("grip"));
       grip.addEventListener("pointerdown", (ev) => { if (ev.button === 0) startDrag(ev, { id, name: gap ? "Silence" : p.name, from: "stick" }); });
       const off = h("button", {
-        type: "button", class: "sv-off", title: "Take off this stick", "aria-label": `Take ${what} off this stick`,
+        type: "button", class: "sv-off", title: "Take out of this setlist", "aria-label": `Take ${what} out of this setlist`,
         onclick: (ev) => {
           ev.preventDefault();
-          edit(`Take ${what} off ${s.name}`, () => {
+          edit(`Take ${what} out of ${s.name}`, () => {
             s.playlistIds = s.playlistIds.filter((x) => x !== id);
             if (gap) s.gaps = s.gaps.filter((g) => g.id !== id);
           });
-          toast(gap ? `Took the silence off ${s.name}.` : `Took ${what} off ${s.name}. The playlist itself is still there.`, { label: "Undo", run: core.undo });
+          toast(gap ? `Took the silence out of ${s.name}.` : `Took ${what} out of ${s.name}. The playlist itself is still there.`, { label: "Undo", run: core.undo });
         },
       }, icon("close"));
       const name = f ? (d.single ? "Top level of the stick" : `${f.folder}/`) : gap ? "Silence" : p.name;
@@ -210,7 +210,7 @@
       return det;
     }
 
-    // ---- dragging playlists: from the left, and within the stick ----------------------------
+    // ---- dragging playlists: from the left, and within the setlist --------------------------
     let drag = null;
     let swallowClick = false;
     /** Start (maybe) dragging `item` ({ id, name, from: "side" | "stick" }). */
@@ -228,10 +228,10 @@
       if (side) return { kind: "set", id: side.dataset.set };
       const list = el.closest("#sv-list");
       if (list && !root.hidden) return { kind: "view", index: indexAt(y) };
-      if (el.closest("#stick .folders, #stick [aria-label='Playlists on this stick']")) return { kind: "set", id: S.setId, panel: true };
+      if (el.closest("#stick .folders, #stick [aria-label='Playlists in this setlist']")) return { kind: "set", id: S.setId, panel: true };
       return null;
     }
-    /** Where in the stick's list a drop at `y` goes (an index into its playlistIds). */
+    /** Where in the setlist a drop at `y` goes (an index into its playlistIds). */
     function indexAt(y) {
       const s = stickSet();
       const cards = [...root.querySelectorAll(".lay-folder[data-item]")];
@@ -285,8 +285,8 @@
       badge.classList.toggle("nowhere", !d.target);
       const on = s && s.playlistIds.includes(d.item.id);
       badge.textContent = !d.target ? d.item.name
-        : d.target.kind === "view" ? (d.item.from === "stick" ? `Move ${d.item.name} here` : `Put ${d.item.name} here`)
-          : on ? `${d.item.name} is on ${s.name} already` : `Put ${d.item.name} on ${s.name}`;
+        : d.target.kind === "view" ? (d.item.from === "stick" ? `Move ${d.item.name} here` : `Add ${d.item.name} here`)
+          : on ? `${d.item.name} is in ${s.name} already` : `Add ${d.item.name} to ${s.name}`;
     }
     const $badge = () => document.getElementById("drag-badge");
     /** Near the top or bottom of the view while dragging: scroll it. */
@@ -329,7 +329,7 @@
       if (d.target.kind === "view") { place(stickSet(), d.item.id, d.target.index, d.item.from); return; }
       const s = stickSet(d.target.id);
       if (!s) return;
-      if (s.playlistIds.includes(d.item.id)) { toast(`${d.item.name} is on ${s.name} already.`); return; }
+      if (s.playlistIds.includes(d.item.id)) { toast(`${d.item.name} is in ${s.name} already.`); return; }
       place(s, d.item.id, s.playlistIds.length, "side");
       renderSide();
     }
