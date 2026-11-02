@@ -55,6 +55,7 @@
       sync: (plan) => invoke("sync", { plan }),
       cancelSync: () => invoke("cancel_sync"),
       play: (args) => invoke("player_play", { args }),
+      playParts: (args) => invoke("player_play_parts", { args }),
       pause: () => invoke("player_pause"),
       playerKey: (pitch, keepFormants) => invoke("player_key", { pitch, keepFormants }),
       playerShape: (x) => invoke("player_shape", x),
@@ -315,6 +316,19 @@
         }
         pev("playing");
         return { from: "source", silent: !(t && t.url) };
+      },
+      /** One file of a setlist: silent here, for as long as it would be. */
+      async playParts({ token, from = 0, seconds = 0 }) {
+        stopAudio();
+        Object.assign(P, { token, pos: from, dur: seconds, playing: true });
+        P.timer = setInterval(() => {
+          if (!P.playing) return;
+          P.pos += 0.25;
+          if (P.pos >= P.dur) { stopAudio(); pev("ended"); return; }
+          pev("playing");
+        }, 250);
+        pev("playing");
+        return { from: "source" };
       },
       async playerKey() {},
       async playerShape() {},

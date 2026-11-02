@@ -7,7 +7,9 @@
 //! 32-bit float stereo PCM one after another and streamed, as one WAV stream,
 //! into a single LAME encode. That covers a track cut or padded at its ends,
 //! a stretch of silence between playlists, and a whole playlist joined into
-//! one track, all with the same encoder settings as any other encode.
+//! one track, all with the same encoder settings as any other encode. The
+//! player plays that same stream (`stream`), so a setlist sounds as the stick
+//! will, with nothing between a joined playlist's tracks.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -195,7 +197,7 @@ impl RenderSpec {
         s
     }
 
-    fn check(&self, sources: &[Option<Source>]) -> Result<()> {
+    pub fn check(&self, sources: &[Option<Source>]) -> Result<()> {
         if self.parts.is_empty() {
             return Err(AudioError::Invalid("nothing to render".into()));
         }
@@ -257,17 +259,21 @@ fn silence(out: &mut impl Write, n_frames: usize) -> std::io::Result<()> {
 
 /// A track's audio from `cut_start`, with the last `cut_end` seconds held
 /// back and dropped at the end, so the cut is exact whatever the file's
-/// stated length.
-fn track_audio(tools: &Tools, out: &mut impl Write, path: &Path, p: &RenderPart, rate: u32) -> Result<()> {
+/// stated length. `skip`: seconds of that to leave out at the start, for the
+/// player starting part of the way through (the fades stay where they are).
+fn track_audio(tools: &Tools, out: &mut impl Write, path: &Path, p: &RenderPart, rate: u32, skip: f64) -> Result<()> {
     let mut faded = Faded::new(out, p, rate);
+    faded.at = frames(skip, rate);
+    let from = RenderPart { cut_start: p.cut_start + skip, ..p.clone() };
+    let p = &from;
     if p.pitch != 0.0 {
         // The cut track through the shifter, a block at a time (the same as
         // shifting it whole, in constant memory), the same length out.
         let mut sink = Shifted { out: &mut faded, st: Some(crate::stretch::ExactStream::new(2, rate, crate::stretch::Key { semitones: p.pitch as f32, keep_formants: p.keep_formants })), carry: Vec::new(), buf: Vec::new() };
-        cut_audio(tools, &mut sink, path, p, rate)?;
+        cut_audio(tools, &mut sink, path, p, rate, skip > 0.0)?;
         sink.finish()?;
     } else {
-        cut_audio(tools, &mut faded, path, p, rate)?;
+        cut_audio(tools, &mut faded, path, p, rate, skip > 0.0)?;
     }
     faded.finish()
 }
@@ -339,8 +345,9 @@ impl<W: Write> Write for Faded<'_, W> {
     }
 }
 
-/// The track's audio, cut and with its gain.
-fn cut_audio(tools: &Tools, out: &mut dyn Write, path: &Path, p: &RenderPart, rate: u32) -> Result<()> {
+/// The track's audio, cut and with its gain. `may_be_empty`: starting part of
+/// the way through can be past the last of it.
+fn cut_audio(tools: &Tools, out: &mut dyn Write, path: &Path, p: &RenderPart, rate: u32, may_be_empty: bool) -> Result<()> {
     let mut pcm = PcmStream::start(tools, path, p.cut_start, rate, p.gain_db)?;
     let hold = frames(p.cut_end, rate) * FRAME;
     let mut held: Vec<u8> = Vec::with_capacity(hold + 256 * 1024);
@@ -362,7 +369,7 @@ fn cut_audio(tools: &Tools, out: &mut dyn Write, path: &Path, p: &RenderPart, ra
             held.drain(..pass);
         }
     }
-    if got == 0 {
+    if got == 0 && !may_be_empty {
         return Err(AudioError::Tool(format!("{} gave no audio{}", path.display(), if p.cut_start > 0.0 { " after the cut" } else { "" })));
     }
     Ok(())
@@ -411,6 +418,33 @@ impl<W: Write> Write for Shifted<'_, W> {
     }
 }
 
+/// The parts one after another as 32-bit float stereo PCM at `rate`, with
+/// nothing between them: what the encoder gets, and what the player plays.
+/// `from`: seconds in to start at, which needs `lengths`, the length of each
+/// part's track before its cuts (nothing for silence).
+pub fn stream(tools: &Tools, parts: &[RenderPart], sources: &[Option<Source>], lengths: &[f64], from: f64, rate: u32, out: &mut impl Write) -> Result<()> {
+    let mut left = from.max(0.0);
+    for (i, (p, src)) in parts.iter().zip(sources).enumerate() {
+        let track = p.track_id.as_ref().and(src.as_ref());
+        let audio = if track.is_some() { (lengths.get(i).copied().unwrap_or(0.0) - p.cut_start - p.cut_end).max(0.0) } else { 0.0 };
+        let whole = p.pad_start + audio + p.pad_end;
+        if left > 0.0 && left >= whole {
+            left -= whole;
+            continue;
+        }
+        silence(out, frames(p.pad_start - left, rate))?;
+        left = (left - p.pad_start).max(0.0);
+        if let Some(s) = track {
+            if left <= 0.0 || left < audio {
+                track_audio(tools, out, &s.path, p, rate, left)?;
+            }
+        }
+        silence(out, frames(p.pad_end - (left - audio).max(0.0), rate))?;
+        left = 0.0;
+    }
+    Ok(())
+}
+
 fn once(tools: &Tools, spec: &RenderSpec, sources: &[Option<Source>], dst: &Path, vbr: bool) -> Result<()> {
     let mut c = tools.ffmpeg();
     c.args(["-v", "error", "-y", "-ignore_length", "1", "-f", "wav", "-i", "pipe:0"]);
@@ -432,13 +466,7 @@ fn once(tools: &Tools, spec: &RenderSpec, sources: &[Option<Source>], dst: &Path
         let stdin = child.stdin.take().expect("piped stdin");
         let mut w = std::io::BufWriter::with_capacity(256 * 1024, stdin);
         w.write_all(&wav_header(spec.sample_rate))?;
-        for (p, src) in spec.parts.iter().zip(sources) {
-            silence(&mut w, frames(p.pad_start, spec.sample_rate))?;
-            if let (Some(_), Some(s)) = (&p.track_id, src) {
-                track_audio(tools, &mut w, &s.path, p, spec.sample_rate)?;
-            }
-            silence(&mut w, frames(p.pad_end, spec.sample_rate))?;
-        }
+        stream(tools, &spec.parts, sources, &[], 0.0, spec.sample_rate, &mut w)?;
         w.flush()?;
         Ok(())
     })();

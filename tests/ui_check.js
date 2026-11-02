@@ -1034,6 +1034,168 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.evaluate(() => Fatstick.app.stopPlayback());
   }
 
+  // 32b. A setlist plays from beginning to end: every file in the stick's order,
+  // silence and joined tracks included, each with its changes.
+  {
+    await p.evaluate(() => { const A = Fatstick.app; A.stopPlayback(); A.setProcessing(null); });
+    const A = () => Fatstick.app;
+    // A setlist of its own: a playlist with a cut, padded and faded track, silence, and a joined one.
+    const made = await p.evaluate(() => {
+      const A = Fatstick.app;
+      const S = A.S;
+      const [a, b] = [S.playlists[0], S.playlists[1]];
+      a.entries.slice(0, 2).forEach((e) => { delete e.cutStart; delete e.cutEnd; delete e.padStart; delete e.padEnd; delete e.pitch; delete e.fadeIn; delete e.fadeOut; });
+      Object.assign(a.entries[1], { cutStart: 2, padEnd: 1.5, pitch: 3, keepFormants: true, fadeIn: 4 });
+      b.join = true;
+      const set = S.sets.find((x) => x.id === 'set-car');
+      set.gaps = [{ id: 'gap-test', seconds: 7 }];
+      set.playlistIds = [a.id, 'gap-test', b.id];
+      return { a: a.id, b: b.id, aFiles: A.planSet(set).folders[0].files.length, parts: b.entries.length };
+    });
+    await p.locator('[data-set="set-car"]').click();
+    await p.getByRole('button', { name: 'Expand all' }).click();
+    const files = () => p.evaluate(() => Fatstick.app.setFilesOf(Fatstick.app.stickSet('set-car')).map((x) => x.it.entry.id));
+    const order = await files();
+    check('a setlist plays what the stick gets: playlist, silence, joined', order.length === made.aFiles + 2 && order[made.aFiles] === 'gap-test:silence' && order[made.aFiles + 1] === `${made.b}:joined`, order.slice(-3).join(' | '));
+    // What's sent for a file is what a sync renders it from.
+    const sent = await p.evaluate(() => {
+      const api = Fatstick.api;
+      window.__played = [];
+      const real = api.playParts;
+      api.playParts = (a) => { window.__played.push(a); return real.call(api, a); };
+      return true;
+    });
+    const btn = p.locator('#sv-play');
+    check('its view has a Play button', (await btn.textContent()).trim() === 'Play' && sent);
+    await btn.click();
+    const pl = () => p.evaluate(() => { const P = Fatstick.app.S.player; return { set: P.set && P.set.id, file: P.set && P.set.file, index: P.set && P.set.index, playing: P.playing, entry: P.entryId, pos: P.pos, dur: P.dur }; });
+    let now = await pl();
+    check('Play starts it at its first file', now.set === 'set-car' && now.index === 0 && now.file === order[0] && now.playing);
+    check('the button can pause it', (await btn.textContent()).trim() === 'Pause');
+    check('the row playing is marked', (await p.locator(`#stickview .lay-file.sv-now[data-file="${order[0]}"]`).count()) === 1 && (await p.locator('#stickview .lay-file.sv-now').count()) === 1);
+    check('the player bar says where it is', new RegExp(`Car mix, 1 of ${order.length}\\.`).test(await p.locator('#player .np-s').textContent()));
+    check('so does the display', /^PLAY 01-/.test((await p.locator('#disp-text').textContent()).trim()));
+    await p.screenshot({ path: `${out}/setlist-playing.png` });
+    await p.locator('#sv-play').click();
+    check('pause', !(await pl()).playing && (await btn.textContent()).trim() === 'Go on');
+    await p.locator('#sv-play').click();
+    check('and go on, in the same file', (await pl()).playing && (await pl()).file === order[0]);
+    // Next: the second file has its changes.
+    await p.locator('#player button[aria-label="Next"]').click();
+    now = await pl();
+    check('next goes to the next file', now.file === order[1] && now.index === 1);
+    const second = await p.evaluate(() => window.__played.at(-1));
+    const part2 = second.parts[0];
+    check('with its cut, silence, key, fade and volume', second.parts.length === 1 && part2.cutStart === 2 && part2.padEnd === 1.5 && part2.pitch === 3 && part2.fadeIn === 4 && typeof part2.gainDb === 'number', JSON.stringify(part2));
+    const expected = await p.evaluate(() => { const A = Fatstick.app; const it = A.setFilesOf(A.stickSet('set-car'))[1].it; return { secs: it.secs, recipe: it.recipe }; });
+    check('its length is as the stick will have it', Math.abs(now.dur - expected.secs) < 0.01, `${now.dur} ${expected.secs}`);
+    check('and the same parts a sync renders it from', JSON.stringify(expected.recipe.parts[0]) === JSON.stringify(part2), JSON.stringify(expected.recipe.parts[0]));
+    await p.locator('#player button[aria-label="Previous"]').click();
+    check('previous goes back a file', (await pl()).file === order[0]);
+    await p.locator('#player button[aria-label="Next"]').click();
+    // Ends by itself, in order: seek near the end of each file up to the silence.
+    const runOut = async () => { await p.evaluate(() => { const A = Fatstick.app; A.seekTo(Math.max(0, A.S.player.dur - 0.3)); }); await p.waitForTimeout(700); };
+    await runOut();
+    check('at the end of a file it goes on to the next by itself', (await pl()).index === 2);
+    // Jump to the last file of the first playlist by double-click, then run on.
+    const lastOfFirst = order[made.aFiles - 1];
+    await p.locator(`#stickview [data-file="${lastOfFirst}"]`).first().scrollIntoViewIfNeeded();
+    await p.locator(`#stickview [data-file="${lastOfFirst}"] .lay-name`).first().dblclick();
+    await p.waitForTimeout(100);
+    check('double-clicking a file starts there', (await pl()).file === lastOfFirst);
+    await runOut();
+    now = await pl();
+    check('the silence plays as a file of its own', now.file === 'gap-test:silence' && Math.abs(now.dur - 7) < 0.01 && now.entry === null && now.playing);
+    const gapSent = await p.evaluate(() => window.__played.at(-1));
+    check('with nothing but silence in it', gapSent.parts.length === 1 && gapSent.parts[0].trackId === null && gapSent.parts[0].padStart === 7, JSON.stringify(gapSent.parts));
+    check('and says so', /^SILENCE /.test((await p.locator('#disp-text').textContent()).trim()) && (await p.locator('#player .np-t').textContent()) === 'Silence' && (await p.locator('#stickview .lay-line.sv-now').count()) === 1);
+    await p.waitForTimeout(600);
+    const moved = (await pl()).pos;
+    check('its position moves', moved >= 0.25, String(moved));
+    await runOut();
+    now = await pl();
+    check('then the joined playlist, as one file', now.file === `${made.b}:joined` && now.index === order.length - 1);
+    const joinSent = await p.evaluate(() => window.__played.at(-1));
+    check('made of all its tracks, in order', joinSent.parts.length === made.parts && joinSent.parts.every((x) => x.trackId), String(joinSent.parts.length));
+    const join = await p.evaluate(() => { const A = Fatstick.app; const it = A.S.player.set.item; return { secs: it.secs, at: it.parts.map((x) => x.at), ids: it.parts.map((x) => x.entry.id) }; });
+    check('its length is all of theirs', Math.abs((await pl()).dur - join.secs) < 0.01);
+    check('the player names the track in it, and its playlist', /as one track/.test(await p.locator('#player .np-s').textContent()) && (await pl()).entry === join.ids[0]);
+    await p.evaluate((sec) => Fatstick.app.seekTo(sec), join.at[2] + 1);
+    await p.waitForTimeout(100);
+    check('the position says which track it is', (await pl()).entry === join.ids[2] && (await p.locator(`#stickview .lay-parts li.sv-now[data-part="${join.ids[2]}"]`).count()) === 1);
+    // Double-clicking a track in the joined file starts the file at that track.
+    await p.locator(`#stickview [data-part="${join.ids[1]}"] .nm`).dblclick();
+    await p.waitForTimeout(100);
+    now = await pl();
+    check('double-clicking a track in it starts there', now.file === `${made.b}:joined` && now.entry === join.ids[1] && Math.abs(now.pos - join.at[1]) < 0.6, JSON.stringify(now));
+    // The last file ends the setlist, unless it repeats.
+    await runOut();
+    await p.waitForTimeout(300);
+    check('after the last file it stops', (await pl()).set === null && !(await pl()).playing && (await btn.textContent()).trim() === 'Play');
+    await p.keyboard.press('Space');
+    await p.waitForTimeout(100);
+    check('Space in its view starts it', (await pl()).set === 'set-car' && (await pl()).index === 0);
+    await p.evaluate((i) => Fatstick.app.playSetlist('set-car', i), order.length - 1);
+    await p.evaluate(() => { Fatstick.app.S.player.repeat = 'all'; });
+    await runOut();
+    await p.waitForTimeout(300);
+    check('repeating the setlist goes back to its first file', (await pl()).index === 0 && (await pl()).set === 'set-car');
+    await p.evaluate(() => { Fatstick.app.S.player.repeat = 'one'; });
+    await p.locator('#player button[aria-label="Next"]').click();
+    const oneFile = (await pl()).file;
+    await runOut();
+    check('repeating one plays the same file again', (await pl()).file === oneFile);
+    await p.evaluate(() => { Fatstick.app.S.player.repeat = 'off'; });
+    // An edit counts from the next file; one taken out doesn't lose the place.
+    await p.evaluate((i) => Fatstick.app.playSetlist('set-car', i), made.aFiles);
+    await p.evaluate(() => { const s = Fatstick.app.stickSet('set-car'); s.playlistIds = s.playlistIds.filter((x) => x !== 'gap-test'); });
+    await runOut();
+    await p.waitForTimeout(200);
+    check('a file taken out while it plays: on to what followed it', (await pl()).file === `${made.b}:joined`);
+    await p.evaluate(() => { const s = Fatstick.app.stickSet('set-car'); s.playlistIds = [s.playlistIds[0], 'gap-test', s.playlistIds[1]]; });
+    // Elsewhere: the row in a playlist is marked, and playing something else takes over.
+    await p.evaluate(() => Fatstick.app.playSetlist('set-car', 0));
+    await p.locator(`[data-pl="${made.a}"]`).click();
+    check('its track is marked in its playlist too', (await p.locator('#list .row.playing').count()) === 1);
+    check('the bar goes on saying it\'s the setlist', /Car mix, 1 of/.test(await p.locator('#player .np-s').textContent()));
+    await row(3).dblclick();
+    await p.waitForTimeout(100);
+    check('playing a track in a playlist takes over', (await pl()).set === null && (await pl()).playing);
+    await p.evaluate(() => Fatstick.app.stopPlayback());
+    // The sidebar's menu plays one too.
+    await p.locator('[data-set="set-car"]').click({ button: 'right' });
+    await p.getByRole('menuitem', { name: 'Play', exact: true }).click();
+    check('a setlist\'s right-click menu plays it', (await pl()).set === 'set-car');
+    await p.evaluate(() => Fatstick.app.stopPlayback());
+    // A profile with one playlist per stick plays just that.
+    const single = await p.evaluate(() => {
+      const A = Fatstick.app;
+      const s = A.stickSet('set-car');
+      const pr = A.S.profiles.find((x) => x.id === s.profileId);
+      const was = pr.layout;
+      pr.layout = 'single';
+      const f = A.setFilesOf(s).map((x) => x.it.entry.id);
+      pr.layout = was;
+      return f;
+    });
+    check('a profile with one playlist per stick plays that one, no silence', single.length === made.aFiles && !single.includes('gap-test:silence'));
+    // A dialog's preview takes over from the setlist, and live changes never reach its stream.
+    await p.evaluate(() => Fatstick.app.playSetlist('set-car', 0));
+    const shapeSent = await p.evaluate(() => { window.__shape = 0; const api = Fatstick.api; const real = api.playerShape; api.playerShape = (...a) => { window.__shape++; return real.apply(api, a); }; return true; });
+    await p.locator(`[data-pl="${made.a}"]`).click();
+    await row(0).click();
+    await p.keyboard.press('f');
+    await p.locator('#modal input[type="range"]').first().fill('5');
+    await p.waitForTimeout(100);
+    check('a dialog\'s slider leaves a setlist playing alone', (await p.evaluate(() => window.__shape)) === 0 && shapeSent && (await pl()).set === 'set-car');
+    await p.keyboard.press('Escape');
+    await p.evaluate(() => { const A = Fatstick.app; A.stopPlayback(); delete Fatstick.api.playParts; });
+    await p.reload();
+    await p.waitForTimeout(600);
+    await p.evaluate(() => Fatstick.app.setProcessing('fat'));
+    await p.waitForTimeout(260);
+  }
+
   // 33. "Show in the library" from a playlist's track: the library, with it selected.
   // (The panel closed: the library's table has the room for all its columns.)
   await p.evaluate(() => Fatstick.app.setProcessing(null));

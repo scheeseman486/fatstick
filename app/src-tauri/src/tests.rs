@@ -364,6 +364,61 @@ fn player_plays_seeks_and_ends() {
     }
     let took = start.elapsed().as_secs_f64();
     assert!((2.3..3.6).contains(&took), "with the silences: {took}");
+    // A setlist's file made as it plays: silence, a cut track, another joined on,
+    // more silence. The position runs through all of it and it ends once.
+    let part = |id: Option<&str>| fatstick_audio::render::RenderPart { track_id: id.map(String::from), ..Default::default() };
+    let src = Some(fatstick_audio::render::Source { path: f.clone(), content_key: String::new() });
+    let job = || crate::player::Parts {
+        parts: vec![
+            fatstick_audio::render::RenderPart { pad_start: 0.4, cut_start: 1.5, ..part(Some("a")) },
+            fatstick_audio::render::RenderPart { pad_end: 0.3, cut_end: 1.2, ..part(Some("a")) },
+        ],
+        sources: vec![src.clone(), src.clone()],
+        lengths: vec![2.0, 2.0],
+    };
+    p.send(crate::player::Cmd::PlayParts { parts: job(), from: 0.0, duration: 2.0, token: "s1".into() });
+    let start = std::time::Instant::now();
+    let (mut last, mut ends) = (0.0f64, 0);
+    loop {
+        let e = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        if e.token != "s1" {
+            continue;
+        }
+        assert!(e.state != "error", "{:?}", e.error);
+        assert!(e.pos >= last - 0.001, "the position only goes forward: {} after {last}", e.pos);
+        last = e.pos;
+        if e.state == "ended" {
+            ends += 1;
+            break;
+        }
+    }
+    let took = start.elapsed().as_secs_f64();
+    assert_eq!(ends, 1);
+    assert!((1.9..3.2).contains(&took), "0.4 + 0.5 + 0.8 + 0.3 s in real time: {took}");
+    assert!((last - 2.0).abs() < 0.25, "the position reaches the end: {last}");
+    // Seeking in it, and past the silence: what's left is what plays.
+    p.send(crate::player::Cmd::PlayParts { parts: job(), from: 0.0, duration: 2.0, token: "s2".into() });
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    p.send(crate::player::Cmd::Seek(1.6));
+    let start = std::time::Instant::now();
+    loop {
+        let e = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        if e.token == "s2" && e.state == "ended" {
+            break;
+        }
+    }
+    assert!(start.elapsed().as_secs_f64() < 1.2, "from 1.6 of 2 s");
+    // A stretch of silence alone.
+    p.send(crate::player::Cmd::PlayParts { parts: crate::player::Parts { parts: vec![fatstick_audio::render::RenderPart { pad_start: 0.5, ..part(None) }], sources: vec![None], lengths: vec![0.0] }, from: 0.0, duration: 0.5, token: "s3".into() });
+    let start = std::time::Instant::now();
+    loop {
+        let e = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        if e.token == "s3" && e.state == "ended" {
+            break;
+        }
+    }
+    let took = start.elapsed().as_secs_f64();
+    assert!((0.4..1.2).contains(&took), "silence takes its time: {took}");
     p.send(crate::player::Cmd::Stop);
 }
 

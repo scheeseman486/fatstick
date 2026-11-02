@@ -254,6 +254,24 @@
     [...document.querySelectorAll("#modal .btn")].find((b) => b.textContent === "Cancel").click();
     check("Cancel leaves the entry's start and end", !p.entries[0].padStart && p.entries[0].cutStart === 2 && !S.player.entryId);
     A.stopPlayback();
+    // The whole setlist from beginning to end, through the real player: every
+    // file in the stick's order, the cut, shifted and faded tracks, the silence
+    // and the joined playlist, each made as it plays.
+    const order = A.setFilesOf(set).map((x) => x.it.entry.id);
+    check("the setlist plays what the stick got", order.some((x) => /:silence$/.test(x)) && /:joined$/.test(order[order.length - 1]), order.join(" | "));
+    await A.playSetlist(set.id);
+    const seen = [];
+    for (let i = 0; i < order.length; i++) {
+      if (!(await until(() => S.player.set && S.player.set.index === i, 20000))) break;
+      seen.push(S.player.set.file);
+      const started = S.player.pos;
+      const moved = await until(() => S.player.pos > started + 0.15 && S.player.playing, 10000);
+      check(`file ${i + 1} of the setlist plays: ${S.player.set ? S.player.set.file : "?"}`, !!moved, `at ${S.player.pos} of ${S.player.dur}`);
+      // On from near its end: its last moments, then the next by itself.
+      A.seekTo(Math.max(0, S.player.dur - 0.5));
+    }
+    check("every file played, in order", JSON.stringify(seen) === JSON.stringify(order), seen.join(" | "));
+    check("then it stopped", !!(await until(() => !S.player.set && !S.player.playing, 15000)));
     // Repeat playlist, to see it kept after a restart.
     document.getElementById("repeat").click();
     document.getElementById("repeat").click();

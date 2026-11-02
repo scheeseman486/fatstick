@@ -219,6 +219,76 @@ fn render_cuts_pads_and_joins() {
 }
 
 #[test]
+fn the_stream_the_player_plays_is_the_render_from_any_place() {
+    let Some(t) = tools() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let p = |n: &str| dir.path().join(n);
+    ff(&["-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-ac", "2", "-c:a", "flac", &p("a.flac").display().to_string()]);
+    ff(&["-f", "lavfi", "-i", "sine=frequency=660:duration=2", "-ac", "2", "-c:a", "flac", &p("b.flac").display().to_string()]);
+    let src = |n: &str| Some(Source { path: p(n), content_key: String::new() });
+    let part = |id: &str| RenderPart { track_id: Some(id.into()), ..Default::default() };
+    const RATE: u32 = 48000;
+    let play = |parts: &[RenderPart], sources: &[Option<Source>], lengths: &[f64], from: f64| {
+        let mut out = Vec::new();
+        render::stream(&t, parts, sources, lengths, from, RATE, &mut out).unwrap();
+        out.chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect::<Vec<f32>>()
+    };
+    let secs = |s: &[f32]| s.len() as f64 / (2.0 * RATE as f64);
+    let level = |s: &[f32], a: f64, b: f64| {
+        let (i, j) = ((a * RATE as f64) as usize * 2, ((b * RATE as f64) as usize * 2).min(s.len()));
+        (s[i..j].iter().map(|x| (*x as f64).powi(2)).sum::<f64>() / (j - i).max(1) as f64).sqrt()
+    };
+
+    // A joined playlist with silence: 1 s, then 0.5 cut from 3 (2.5), then 2, then 0.5:
+    // 6 s to the frame, with nothing lost or added where the tracks meet.
+    let parts = [
+        RenderPart { pad_start: 1.0, cut_start: 0.5, gain_db: -6.0, ..part("a") },
+        RenderPart { pad_end: 0.5, ..part("b") },
+    ];
+    let sources = [src("a.flac"), src("b.flac")];
+    let lengths = [3.0, 2.0];
+    let all = play(&parts, &sources, &lengths, 0.0);
+    assert!((secs(&all) - 6.0).abs() < 0.002, "6 s: {}", secs(&all));
+    assert!(level(&all, 0.0, 0.95) < 1e-5, "the silence before");
+    let a = level(&all, 1.1, 3.4);
+    let b = level(&all, 3.6, 5.4);
+    assert!(a > 0.02 && (a / b - 0.5).abs() < 0.05, "-6 dB on the first: {a} against {b}");
+    let hz = |s: &[f32], from: f64, to: f64| {
+        let (i, j) = ((from * RATE as f64) as usize * 2, (to * RATE as f64) as usize * 2);
+        let crossings = s[i..j].chunks_exact(2).map(|f| f[0]).collect::<Vec<_>>().windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
+        crossings as f64 / (to - from)
+    };
+    assert!((hz(&all, 1.5, 3.0) - 440.0).abs() < 10.0 && (hz(&all, 3.8, 5.2) - 660.0).abs() < 10.0, "the first track, then the second");
+    // No hole where they meet: the level never drops around the join at 3.5 s.
+    for k in 0..8 {
+        let at = 3.46 + k as f64 * 0.01;
+        assert!(level(&all, at, at + 0.01) > 0.02, "a hole at {at}: {}", level(&all, at, at + 0.01));
+    }
+    assert!(level(&all, 5.55, 6.0) < 1e-5, "the silence after");
+
+    // Starting part of the way through gives the rest, wherever that lands.
+    for (from, what) in [(0.4, "in the silence before"), (2.0, "in the first track"), (4.0, "in the second"), (5.7, "in the silence after")] {
+        let rest = play(&parts, &sources, &lengths, from);
+        assert!((secs(&rest) - (6.0 - from)).abs() < 0.05, "from {from} ({what}): {}", secs(&rest));
+    }
+    let rest = play(&parts, &sources, &lengths, 4.0);
+    assert!((hz(&rest, 0.2, 1.2) - 660.0).abs() < 10.0, "from 4 s it's the second track");
+    assert!(play(&parts, &sources, &lengths, 6.0).len() < 2000, "from the end, next to nothing");
+
+    // Fades stay where they are when it starts inside one: half way through a
+    // 2 s fade in is half as loud (smooth), not silent.
+    let faded = [RenderPart { fade_in: 2.0, ..part("a") }];
+    let from_middle = play(&faded, &sources[..1], &[3.0], 1.0);
+    let start = level(&from_middle, 0.0, 0.05);
+    let full = level(&from_middle, 1.5, 1.9);
+    assert!((start / full - 0.5).abs() < 0.12, "half way up the fade: {start} of {full}");
+
+    // Silence alone, as long as asked.
+    let gap = play(&[RenderPart { pad_start: 1.5, ..Default::default() }], &[None], &[], 0.0);
+    assert!((secs(&gap) - 1.5).abs() < 0.001 && gap.iter().all(|x| *x == 0.0));
+}
+
+#[test]
 fn tags_written_into_library_files() {
     let Some(t) = tools() else { return };
     let dir = tempfile::tempdir().unwrap();

@@ -3,7 +3,8 @@
 // tracks collapsible. It's for organizing the setlist's playlists: drag them
 // in from the left (onto the view, or onto a setlist in the sidebar), move
 // them by their handles, put silence between them, take them out. What's
-// in a playlist is edited in the playlist.
+// in a playlist is edited in the playlist. It plays too, from its Play button
+// or from a file double-clicked, and shows what's playing.
 "use strict";
 (function (Fatstick) {
   const { h, fill, icon, clock, length, bytes, plural, toast } = Fatstick.ui;
@@ -30,7 +31,7 @@
       if (f.edges) subs.push(f.edges);
       for (const n of f.notes || []) subs.push(n);
       for (let i = 0; i < subs.length; i++) subs[i] = subs[i].charAt(0).toUpperCase() + subs[i].slice(1);
-      const row = h("li", { class: "lay-file" },
+      const row = h("li", { class: "lay-file", dataset: { file: f.id } },
         h("span", { class: "lay-n", text: String(f.n).padStart(2, "0") }),
         h("span", { class: "lay-name" }, h("span", { class: "nm", text: f.name }), subs.length ? h("span", { class: "sub", text: subs.join(". ") }) : null),
         h("span", { class: "lay-len", text: clock(f.secs) }),
@@ -41,7 +42,7 @@
       const key = `${folderKey}/${f.name}`;
       const inner = h("details", { class: "lay-parts", open: !closed.has(key) || null },
         h("summary", { text: `${plural(f.parts.length, "track")} inside, in this order` }),
-        h("ol", null, f.parts.map((x) => h("li", null,
+        h("ol", null, f.parts.map((x) => h("li", { dataset: { part: x.id } },
           h("span", { class: "lay-at", text: clock(x.at) }),
           h("span", { class: "lay-name" }, h("span", { class: "nm", text: x.title }),
             h("span", { class: "sub", text: [x.artist, x.gain ? `Gain ${x.gain}` : "", x.edges].filter(Boolean).join(". ") })),
@@ -81,6 +82,35 @@
     // Not while the seconds of a silence are being typed: after.
     let deferred = false;
     root.addEventListener("focusout", () => { if (deferred) { deferred = false; setTimeout(render, 0); } });
+    // Double-click a file, or a track in a joined one, to play the setlist from there.
+    root.addEventListener("dblclick", (ev) => {
+      if (ev.target.closest("input, button, summary")) return;
+      const row = ev.target.closest("[data-file]");
+      if (!row) return;
+      const part = ev.target.closest("[data-part]");
+      window.getSelection()?.removeAllRanges();
+      core.playSetlistFile(row.dataset.file, part ? part.dataset.part : null);
+    });
+    /** What's playing, if it's this setlist: its row, followed as it moves on. */
+    let followed = null;
+    function markPlaying() {
+      if (root.hidden) return;
+      const pp = S.player;
+      const sp = pp.set && pp.set.id === shownSet ? pp.set : null;
+      const btn = root.querySelector("#sv-play");
+      if (btn) fill(btn, icon(sp && pp.playing ? "pause" : "play"), sp ? (pp.playing ? "Pause" : "Go on") : "Play");
+      for (const el of root.querySelectorAll(".sv-now")) el.classList.remove("sv-now");
+      if (!sp) { followed = null; return; }
+      const row = root.querySelector(`[data-file="${CSS.escape(sp.file)}"]`);
+      const part = sp.item.joined && pp.entryId ? root.querySelector(`[data-part="${CSS.escape(pp.entryId)}"]`) : null;
+      for (const el of [row, part, row && row.closest(".lay-folder")]) if (el) el.classList.add("sv-now");
+      const at = `${sp.file}/${pp.entryId}`;
+      if (at !== followed) {
+        followed = at;
+        const el = part || row;
+        if (el && el.offsetParent) el.scrollIntoView({ block: "nearest" });
+      }
+    }
     function render() {
       if (root.hidden) return;
       const a = document.activeElement;
@@ -121,6 +151,7 @@
           h("div", { class: "lay-bar" },
             h("p", { class: `lay-sum${d.space && !d.space.fits ? " bad" : ""}`, text: `${plural(d.folders.length, d.single ? "playlist" : "folder")}, ${plural(files, "file")}, ${length(secs)}${space}` }),
             h("span", { class: "tools" },
+              h("button", { type: "button", class: "btn small", id: "sv-play", disabled: !files, title: "Play this setlist from beginning to end, as the stick will have it. Double-click a file to start there.", onclick: () => core.toggleSetlist(s.id) }, icon("play"), "Play"),
               d.single ? null : h("button", { type: "button", class: "btn small", id: "sv-silence", title: "Silence at the end; drag it where it goes", onclick: () => addSilence(s, s.playlistIds.length) }, icon("plus"), "Silence"),
               h("button", { type: "button", class: "btn small", text: "Expand all", onclick: all(true) }),
               h("button", { type: "button", class: "btn small", text: "Collapse all", onclick: all(false) }),
@@ -141,6 +172,7 @@
           h("p", { class: "lay-foot", text: "The order here is the order a player reads the stick in: folders, then files, top to bottom. Drag a playlist in from the left, or by its handle to move it." })),
       );
       core.renderProcessButtons();
+      markPlaying();
     }
 
     /** Between two folders: silence here (shown on hover). */
@@ -198,7 +230,7 @@
           secs.addEventListener("keydown", (ev) => { if (ev.key === "Enter") secs.blur(); });
           meta = h("span", { class: "lay-fmeta gap-meta" }, secs, h("span", { text: `s of silence${f ? `, ${bytes(f.bytes)}` : ""}` }));
         } else meta = h("span", { class: "lay-fmeta", text: "Not written: this profile puts one playlist on a stick" });
-        return h("div", { class: `lay-folder lay-line k-${gap ? "silence" : "off"}`, role: "listitem", dataset: { item: id } },
+        return h("div", { class: `lay-folder lay-line k-${gap ? "silence" : "off"}`, role: "listitem", dataset: { item: id, ...(f ? { file: f.files[0].id } : {}) } },
           h("div", { class: "lay-sumline" }, grip, h("span", { class: "lay-fname", text: name }), meta, off));
       }
       const key = id; // the playlist, whatever its folder's number
@@ -345,6 +377,6 @@
     function onCancel(ev) { if (drag && ev.pointerId === drag.pointerId) finish(false); }
     window.addEventListener("click", (ev) => { if (swallowClick) { ev.stopPropagation(); ev.preventDefault(); swallowClick = false; } }, true);
 
-    return { render, startDrag, dragging: () => !!(drag && drag.started) };
+    return { render, markPlaying, startDrag, dragging: () => !!(drag && drag.started) };
   };
 })(window.Fatstick = window.Fatstick || {});

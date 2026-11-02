@@ -516,6 +516,59 @@ fn player_play(st: State<AppState>, args: PlayArgs) -> Res<Playing> {
     Ok(Playing { from: from.into() })
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlayPartsArgs {
+    token: String,
+    #[serde(default)]
+    from: f64,
+    /// What the file is made of: the same parts a render takes.
+    parts: Vec<fatstick_audio::render::RenderPart>,
+    /// "As on the stick": the recipe whose prepared file plays instead, when it's ready.
+    #[serde(default)]
+    recipe: Option<Recipe>,
+    #[serde(default)]
+    track_id: String,
+}
+
+/// One file of a setlist, as the stick will have it: a track, a joined playlist
+/// or silence. It's made as it plays, unless the prepared file is asked for and
+/// is ready, so nothing has to be prepared first.
+#[tauri::command]
+fn player_play_parts(st: State<AppState>, args: PlayPartsArgs) -> Res<Playing> {
+    if let Some(p) = args.recipe.as_ref().and_then(|r| work::cached_for(&st.lib, &st.cache, &args.track_id, r)) {
+        let duration = fatstick_audio::mp3::scan(&p).ok().flatten().map(|i| i.duration).unwrap_or(0.0);
+        st.player.send(player::Cmd::Play { path: p, from: args.from, gain_db: 0.0, duration, token: args.token, key: None, shape: player::Shape::default() });
+        return Ok(Playing { from: "cache".into() });
+    }
+    let (mut sources, mut lengths, mut duration) = (Vec::new(), Vec::new(), 0.0);
+    {
+        let lib = st.lib.lock().unwrap();
+        for p in &args.parts {
+            let mut length = 0.0;
+            let mut audio = 0.0;
+            sources.push(match &p.track_id {
+                None => None,
+                Some(id) => {
+                    let t = lib.track(id).map_err(err)?.ok_or("That track isn't in the library.")?;
+                    if !t.exists {
+                        return Err(format!("{} isn't there any more.", t.path));
+                    }
+                    length = t.duration;
+                    audio = (t.duration - p.cut_start - p.cut_end).max(0.0);
+                    Some(fatstick_audio::render::Source { path: PathBuf::from(&t.path), content_key: String::new() })
+                }
+            });
+            lengths.push(length);
+            duration += p.pad_start + audio + p.pad_end;
+        }
+    }
+    let spec = fatstick_audio::render::RenderSpec { cap: 320, vbr: false, sample_rate: 44100, parts: args.parts };
+    spec.check(&sources).map_err(err)?;
+    st.player.send(player::Cmd::PlayParts { parts: player::Parts { parts: spec.parts, sources, lengths }, from: args.from, duration, token: args.token });
+    Ok(Playing { from: "source".into() })
+}
+
 /// The start and end, and fade sliders, live: other cuts, fades and silences
 /// for what's playing. The window passes the track's length.
 #[tauri::command]
@@ -759,6 +812,7 @@ fn main() {
             sync,
             cancel_sync,
             player_play,
+            player_play_parts,
             player_pause,
             player_key,
             player_shape,

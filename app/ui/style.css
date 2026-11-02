@@ -920,6 +920,10 @@ html.framed .player { padding-inline: 2px; }
 .lay-len, .lay-size { text-align: right; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .lay-how { font-size: 12px; color: var(--ink-2); white-space: nowrap; }
 .lay-how.enc { color: var(--accent-text); }
+/* What's playing, when this setlist is. */
+.lay-file.sv-now, .lay-line.sv-now { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.lay-file.sv-now > .lay-name .nm, .lay-parts li.sv-now .nm, .lay-line.sv-now .lay-fname, .lay-folder.sv-now > summary .lay-fname { color: var(--accent-text); }
+.lay-parts li.sv-now .nm { font-weight: 600; }
 .lay-parts { grid-column: 2 / -1; margin-top: 6px; }
 .lay-parts > summary { font-size: 12.5px; color: var(--ink-2); }
 .lay-parts ol { list-style: none; margin: 6px 0 2px; padding: 0; display: grid; gap: 4px; }

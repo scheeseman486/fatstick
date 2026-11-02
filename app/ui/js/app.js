@@ -99,9 +99,10 @@
     libProgress: null,
     /** Bumped whenever a track changes, so search indexes know to rebuild. */
     tracksVersion: 0,
-    /** What plays: a playlist's entry (`entryId`, `playlistId`), or one
-     * song from the library on its own (`trackId`), which plays once. */
-    player: { entryId: null, playlistId: null, trackId: null, token: null, playing: false, pos: 0, dur: 0, asOnStick: false, volume: 0.8, silent: false, error: null, from: "source", repeat: "off" },
+    /** What plays: a playlist's entry (`entryId`, `playlistId`), or one song
+     * from the library on its own (`trackId`), which plays once, or a setlist
+     * (`set`), file by file; its `entryId` is the track in the file, if any. */
+    player: { entryId: null, playlistId: null, trackId: null, token: null, playing: false, pos: 0, dur: 0, asOnStick: false, volume: 0.8, silent: false, error: null, from: "source", repeat: "off", set: null },
   };
   const hostTheme = document.documentElement.getAttribute("data-theme");
 
@@ -186,7 +187,7 @@
   const setlist = P.setlistSetup({ S, pl, track, R, keyText, saveSetting, api, DEMO, stickSet, isGap, gapOf });
   /** Print the setlist that's chosen (the one in the panel, or open in its view). */
   const printSetlist = () => setlist.open(S.setId);
-  const stickView = P.stickViewSetup({ S, pl, stickSet, layoutData, edit, openPlaylist, setView, newId, isGap, gapOf, renderSide, undo, printSetlist: () => setlist.open(S.setId), transfers: TRANSFERS, setProcessing, renderProcessButtons });
+  const stickView = P.stickViewSetup({ S, pl, stickSet, layoutData, edit, openPlaylist, setView, newId, isGap, gapOf, renderSide, undo, printSetlist: () => setlist.open(S.setId), transfers: TRANSFERS, setProcessing, renderProcessButtons, toggleSetlist, playSetlistFile });
   /** A setlist, as playlists: silences become stand-ins with no tracks. */
   function stickLists(s) {
     return s.playlistIds.map((id) => {
@@ -731,6 +732,7 @@
   }
   function setMenu(s, at) {
     menu(at, [
+      { label: "Play", action: () => playSetlist(s.id), disabled: !planSet(s).all.length },
       { label: "Open", action: () => openStick(s.id) },
       { label: "Print…", action: () => setlist.open(s.id) },
       "-",
@@ -1009,7 +1011,8 @@
    */
   function previewer(p, es, changes) {
     const pp = S.player;
-    const playingHere = () => !!pp.entryId && pp.playlistId === p.id && es.some((e) => e.id === pp.entryId);
+    // A setlist playing has it all in its stream: only "Hear" takes over.
+    const playingHere = () => !pp.set && !!pp.entryId && pp.playlistId === p.id && es.some((e) => e.id === pp.entryId);
     const current = () => p.entries.find((x) => x.id === pp.entryId);
     const wasPlaying = playingHere();
     let startedHere = false;
@@ -1328,7 +1331,7 @@
     let keep = k0.keepFormants;
     const value = () => Math.round((semis + cents / 100) * 100) / 100;
     const pp = S.player;
-    const playingHere = () => !!pp.entryId && pp.playlistId === p.id && es.some((e) => e.id === pp.entryId);
+    const playingHere = () => !pp.set && !!pp.entryId && pp.playlistId === p.id && es.some((e) => e.id === pp.entryId);
     const wasPlaying = playingHere();
     let startedHere = false;
     let fromSource = playingHere() && pp.from !== "cache";
@@ -2195,14 +2198,17 @@
     saveSetting("repeat", pp.repeat);
     renderPlayer();
     renderDisplay();
-    toast(`${REPEAT[pp.repeat].label}: ${REPEAT[pp.repeat].says}.`);
+    const said = `${REPEAT[pp.repeat].label}: ${REPEAT[pp.repeat].says}.`;
+    toast(pp.set ? said.replace(/playlist/g, "setlist") : said);
   }
   function renderPlayer() {
     const pp = S.player;
+    const sp = pp.set;
     const p = pp.entryId ? pl(pp.playlistId) : null;
     const e = p ? p.entries.find((x) => x.id === pp.entryId) : null;
-    const t = e ? track(e.trackId) : pp.trackId ? track(pp.trackId) : null;
+    const t = sp && sp.item.gap ? { title: "Silence", artist: "" } : e ? track(e.trackId) : pp.trackId ? track(pp.trackId) : null;
     const one = !!pp.trackId;
+    const inSet = (x) => (sp ? x.replace("playlist", "setlist") : x);
     const idx = p && e ? p.entries.indexOf(e) : -1;
     const playBtn = h("button", { type: "button", class: "pbtn play", "aria-label": pp.playing ? "Pause" : "Play", title: pp.playing ? "Pause (Space)" : "Play (Space)", onclick: togglePlay }, icon(pp.playing ? "pause" : "play"));
     const seek = h("input", { type: "range", min: "0", max: String(Math.max(1, Math.round(pp.dur || 1))), step: "1", value: String(Math.round(pp.pos)), "aria-label": "Position", disabled: !t, id: "seek" });
@@ -2210,13 +2216,18 @@
     const aos = h("input", { type: "checkbox", checked: pp.asOnStick, id: "aos", disabled: one });
     aos.addEventListener("change", () => {
       pp.asOnStick = aos.checked;
-      if (pp.entryId) playEntry(pp.entryId, pp.playlistId, pp.pos);
+      if (sp) stepSetlist(0, false, pp.pos);
+      else if (pp.entryId) playEntry(pp.entryId, pp.playlistId, pp.pos);
       else renderPlayer();
     });
     const vol = h("input", { type: "range", min: "0", max: "1", step: "0.01", value: String(pp.volume), "aria-label": "Volume", id: "vol" });
     vol.addEventListener("input", () => { pp.volume = Number(vol.value); api.volume(pp.volume).catch(() => {}); saveSetting("volume", String(pp.volume)); });
     let sub = "Double-click a track, or press Enter, to hear it.";
-    if (t && one) sub = `${t.artist || "No artist tag"}. From the library, on its own.${pp.silent ? " Demo track, no sound." : ""}`;
+    if (t && sp) {
+      const place = `${sp.name}, ${sp.index + 1} of ${sp.count}.`;
+      sub = sp.item.gap ? `${clock(sp.item.secs)} of silence. ${place}`
+        : `${t.artist || "No artist tag"}. ${sp.item.joined ? `${sp.playlist.name} as one track. ` : ""}${place}${e && R.hasKey(e) ? ` Key ${keyText(R.key(e).pitch)}.` : ""}${pp.silent ? " Demo, no sound." : ""}`;
+    } else if (t && one) sub = `${t.artist || "No artist tag"}. From the library, on its own.${pp.silent ? " Demo track, no sound." : ""}`;
     else if (t) sub = `${t.artist || "No artist tag"}. ${p.name}, ${idx + 1} of ${p.entries.length}.${R.hasKey(e) ? ` Key ${keyText(R.key(e).pitch)}.` : ""}${pp.silent ? " Demo track, no sound." : ""}`;
     fill($("player"), 
       h("div", { class: "pad" },
@@ -2225,8 +2236,8 @@
         h("button", { type: "button", class: "pbtn", "aria-label": "Next", title: one ? "A song from the library plays on its own" : "Next", disabled: !t || one, onclick: () => nextTrack(false) }, icon("next")),
         h("button", {
           type: "button", class: `pbtn repeat${pp.repeat !== "off" ? " on" : ""}`, id: "repeat",
-          "aria-label": `Repeat: ${REPEAT[pp.repeat].label}`, "aria-pressed": String(pp.repeat !== "off"),
-          title: one ? "A song from the library plays once" : `${REPEAT[pp.repeat].label}: ${REPEAT[pp.repeat].says}. Click for ${REPEAT[REPEAT[pp.repeat].next].label.toLowerCase()} (R).`,
+          "aria-label": `Repeat: ${inSet(REPEAT[pp.repeat].label)}`, "aria-pressed": String(pp.repeat !== "off"),
+          title: one ? "A song from the library plays once" : `${inSet(REPEAT[pp.repeat].label)}: ${inSet(REPEAT[pp.repeat].says)}. Click for ${inSet(REPEAT[REPEAT[pp.repeat].next].label).toLowerCase()} (R).`,
           disabled: one, onclick: stepRepeat,
         }, icon(REPEAT[pp.repeat].icon))),
       h("div", { class: "np" }, h("div", { class: "np-t", text: t ? t.title || t.filename : "Nothing playing" }), h("div", { class: "np-s", text: sub })),
@@ -2237,6 +2248,13 @@
   }
 
   function aosCaption(e) {
+    const sp = S.player.set;
+    if (sp) {
+      if (sp.item.gap) return "Silence between playlists.";
+      if (!S.player.asOnStick) return "With its cuts, fades, key and volume.";
+      if (!sp.item.key) return "Copied as it is, with its volume.";
+      return S.player.from === "cache" ? "Playing the prepared file." : "Not prepared yet, so it's made as it plays.";
+    }
     if (!e) return "Hear the gain and bitrate the sync will use.";
     const it = stickItem(S.player.playlistId, e.id);
     if (!it) return "Not in a setlist yet, so nothing changes.";
@@ -2251,6 +2269,11 @@
 
   function tickPlayerUI() {
     const pp = S.player;
+    // In a joined file, the position says which of its tracks this is.
+    if (pp.set && pp.set.item.joined) {
+      const x = partAt(pp.set.item, pp.pos);
+      if (x.entry.id !== pp.entryId) { pp.entryId = x.entry.id; renderPlayer(); markPlaying(); }
+    }
     const pos = $("t-pos");
     if (pos) pos.textContent = clock(pp.pos);
     const sk = $("seek");
@@ -2279,6 +2302,15 @@
       count = String(Math.floor(S.sync.pct));
       unit = "%";
       sub = S.sync.msg;
+    } else if (pp.set) {
+      const sp = pp.set;
+      const e = pp.entryId && pl(pp.playlistId) ? pl(pp.playlistId).entries.find((x) => x.id === pp.entryId) : null;
+      const t = e ? track(e.trackId) : null;
+      const w = Math.max(2, String(sp.count).length);
+      main = `${!pp.playing ? "PAUSE" : sp.item.gap ? "SILENCE" : "PLAY"} ${pad2(sp.index + 1, w)}-${pad2(sp.count, w)}`;
+      time = clock(pp.pos);
+      unit = pp.repeat === "one" ? "RPT1" : pp.repeat === "all" ? "RPT" : "";
+      sub = sp.item.gap ? `Silence, in ${sp.name}.` : `${t ? `${t.title || t.filename}${t.artist ? `, ${t.artist}` : ""}. ` : ""}${sp.name}.`;
     } else if (pp.trackId) {
       const t = track(pp.trackId);
       main = `${pp.playing ? "PLAY" : "PAUSE"} ${t.title || t.filename}`;
@@ -2370,10 +2402,10 @@
         bytes: f.files.reduce((a, it) => a + it.bytes, 0),
         skipped: f.items.filter((it) => it.d.action === "skip").map((it) => `${it.t.title || it.t.filename} (${it.d.reason.toLowerCase()})`),
         files: f.files.map((it, i) => ({
-          n: i + 1, name: it.name, notes: it.notes || [], kind: it.gap ? "silence" : it.joined ? "joined" : "track",
+          id: it.entry.id, n: i + 1, name: it.name, notes: it.notes || [], kind: it.gap ? "silence" : it.joined ? "joined" : "track",
           title: it.t.title || it.t.filename, artist: it.t.artist || "", secs: it.secs || 0, bytes: it.bytes, how: how(it),
           gain: it.joined ? "" : gain(it), edges: it.joined || it.gap ? "" : ends(it.entry),
-          parts: it.joined ? it.parts.map((x) => ({ title: x.t.title || x.t.filename, artist: x.t.artist || "", at: x.at, secs: x.secs, gain: gain(x), edges: ends(x.entry) })) : null,
+          parts: it.joined ? it.parts.map((x) => ({ id: x.entry.id, title: x.t.title || x.t.filename, artist: x.t.artist || "", at: x.at, secs: x.secs, gain: gain(x), edges: ends(x.entry) })) : null,
         })),
       })),
     };
@@ -2891,7 +2923,7 @@
   }
   function stopPlayback() {
     api.stop().catch(() => {});
-    Object.assign(S.player, { entryId: null, playlistId: null, trackId: null, token: null, playing: false, pos: 0, dur: 0, silent: false, error: null });
+    Object.assign(S.player, { entryId: null, playlistId: null, trackId: null, token: null, playing: false, pos: 0, dur: 0, silent: false, error: null, set: null });
     renderPlayer();
     markPlaying();
     renderDisplay();
@@ -2903,7 +2935,7 @@
     const t = track(trackId);
     if (!t.exists) { toast(`${t.title || t.filename} can't play: its file isn't there.`); return; }
     const token = `track-${trackId}-${++playCount}`;
-    Object.assign(S.player, { entryId: null, playlistId: null, trackId, token, playing: true, pos: from, dur: t.duration, error: null, silent: DEMO && !t.url, from: "source" });
+    Object.assign(S.player, { entryId: null, playlistId: null, trackId, token, playing: true, pos: from, dur: t.duration, error: null, silent: DEMO && !t.url, from: "source", set: null });
     renderPlayer();
     markPlaying();
     renderDisplay();
@@ -2938,7 +2970,7 @@
         args.gainDb = it.recipe.kind === "gain" ? it.recipe.steps * R.STEP : it.recipe.gainDb || 0;
       }
     }
-    Object.assign(S.player, { entryId, playlistId: plId, trackId: null, token: entryId, playing: true, pos: from, dur: t.duration, error: null, silent: DEMO && !t.url, from: "source" });
+    Object.assign(S.player, { entryId, playlistId: plId, trackId: null, token: entryId, playing: true, pos: from, dur: t.duration, error: null, silent: DEMO && !t.url, from: "source", set: null });
     renderPlayer();
     markPlaying();
     renderDisplay();
@@ -2950,13 +2982,82 @@
       stopPlayback();
     }
   }
+
+  // ---- playing a setlist ---------------------------------------------------------------------
+  // From beginning to end, file by file in the order a player reads the stick:
+  // what the next sync would write, so the layout decides (a profile with one
+  // playlist per stick plays that one). Each file is made as it plays from the
+  // same parts a sync renders it from, with its cuts, silences, fades, key and
+  // volume; a joined playlist is one file, with nothing between its tracks, and
+  // silence is a file of its own. The plan is made again at each file, so an
+  // edit counts from the next one.
+  const setFilesOf = (s) => planSet(s).folders.flatMap((f) => f.files.map((it) => ({ it, f })));
+  /** The track of a joined file playing at `pos` seconds into it. */
+  function partAt(it, pos) {
+    let now = it.parts[0];
+    for (const x of it.parts) if (x.at <= pos + 0.01) now = x;
+    return now;
+  }
+  const partsOf = (it) => (it.gap ? it.recipe.parts : (it.joined ? it.parts : [it]).map((x) => R.part(x.t, x.entry, x.g)));
+  async function playSetlist(setId, index = 0, from = 0) {
+    const s = stickSet(setId);
+    const files = s ? setFilesOf(s) : [];
+    const here = files[index];
+    if (!here) { toast(s ? `There's nothing to play in ${s.name} yet.` : "That setlist has gone."); return; }
+    const { it, f } = here;
+    const token = `set-${setId}-${++playCount}`;
+    const now = it.gap ? null : it.joined ? partAt(it, from) : it;
+    Object.assign(S.player, {
+      entryId: now ? now.entry.id : null, playlistId: now ? f.p.id : null, trackId: null, token, playing: true, pos: from, dur: it.secs, error: null, silent: DEMO, from: "source",
+      set: { id: setId, name: s.name, index, count: files.length, file: it.entry.id, item: it, playlist: f.p },
+    });
+    renderPlayer();
+    markPlaying();
+    renderDisplay();
+    try {
+      const prepared = S.player.asOnStick && it.recipe ? { recipe: it.recipe, trackId: it.t.id } : {};
+      const r = await api.playParts({ token, from, parts: partsOf(it), seconds: it.secs, ...prepared });
+      if (S.player.token === token) { S.player.from = r.from; renderPlayer(); }
+    } catch (err) {
+      toast(String(err));
+      if (S.player.token === token) stopPlayback();
+    }
+  }
+  /** On by `d` files from the one playing (0: again). */
+  function stepSetlist(d, auto, from = 0) {
+    const pp = S.player;
+    const sp = pp.set;
+    const s = stickSet(sp.id);
+    const files = s ? setFilesOf(s) : [];
+    const at = files.findIndex((x) => x.it.entry.id === sp.file);
+    // Taken out since it started: what followed it now has its place.
+    const j = at >= 0 ? at + d : sp.index + (d < 0 ? -1 : 0);
+    if (j >= 0 && j < files.length) return playSetlist(sp.id, j, from);
+    if (d > 0 && pp.repeat === "all" && files.length) return playSetlist(sp.id, 0);
+    if (d < 0) return seekTo(0);
+    if (auto || !files.length) stopPlayback();
+  }
+  /** The setlist's Play button: start it, or pause and go on. */
+  function toggleSetlist(setId) {
+    if (S.player.set && S.player.set.id === setId) togglePlay();
+    else playSetlist(setId);
+  }
+  /** A file (and in a joined one, a track) double-clicked in the open setlist. */
+  function playSetlistFile(fileId, partId) {
+    const files = setFilesOf(stickSet());
+    const i = files.findIndex((x) => x.it.entry.id === fileId);
+    if (i < 0) return;
+    const part = partId && files[i].it.joined ? files[i].it.parts.find((x) => x.entry.id === partId) : null;
+    playSetlist(S.setId, i, part ? part.at : 0);
+  }
+
   function onPlayer(ev) {
     const pp = S.player;
     if (!pp.token || ev.token !== pp.token) return;
     // A song from the library is one and done; a playlist goes on.
     if (ev.state === "ended") {
       if (pp.trackId) stopPlayback();
-      else if (pp.repeat === "one") playEntry(pp.entryId, pp.playlistId);
+      else if (pp.repeat === "one") { if (pp.set) stepSetlist(0, true); else playEntry(pp.entryId, pp.playlistId); }
       else nextTrack(true);
       return;
     }
@@ -2971,8 +3072,9 @@
   }
   function togglePlay() {
     const pp = S.player;
-    if (!pp.entryId && !pp.trackId) {
+    if (!pp.entryId && !pp.trackId && !pp.set) {
       if (S.view === "library") { const id = lib.trackToPlay(); if (id) playTrack(id); return; }
+      if (S.view === "stick") { if (stickSet()) playSetlist(S.setId); return; }
       const first = S.focus || pl().entries.find((e) => track(e.trackId).exists)?.id;
       if (first) playEntry(first);
       return;
@@ -2986,6 +3088,7 @@
   function nextTrack(auto) {
     const pp = S.player;
     if (pp.trackId) return stopPlayback();
+    if (pp.set) return stepSetlist(1, auto);
     const p = pl(pp.playlistId);
     if (!p) return stopPlayback();
     const i = p.entries.findIndex((e) => e.id === pp.entryId);
@@ -3002,6 +3105,7 @@
   function prevTrack() {
     const pp = S.player;
     if (pp.pos > 3 || pp.trackId) return seekTo(0);
+    if (pp.set) return stepSetlist(-1);
     const p = pl(pp.playlistId);
     const i = p.entries.findIndex((e) => e.id === pp.entryId);
     for (let k = i - 1; k >= 0; k--) {
@@ -3017,6 +3121,7 @@
   function markPlaying() {
     if (S.player.playlistId === S.current || !S.player.entryId) renderList();
     lib.markPlaying();
+    stickView.markPlaying();
   }
 
   // ---- adding files ------------------------------------------------------------------------------
@@ -3734,7 +3839,7 @@
     persist();
     scheduleWork();
     // For the app's self-test (tests/app_e2e.py) and for poking around in the inspector.
-    P.app = { S, setProcessing, pl, stickSet, track, planSet, buildSyncPlan, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, edgesDialog, seekTo, refreshSticks, holder, selectSet, openStick, layoutData, setView, setlist, lib, toggleTags, ready: true };
+    P.app = { S, setProcessing, playSetlist, setFilesOf, pl, stickSet, track, planSet, buildSyncPlan, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, edgesDialog, seekTo, refreshSticks, holder, selectSet, openStick, layoutData, setView, setlist, lib, toggleTags, ready: true };
     if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Fatstick to get it back.");
     if (!DEMO) {
       stickPoll = setInterval(() => { if (!(S.sync && S.sync.running)) refreshSticks(true); }, 3000);

@@ -11,12 +11,18 @@
 //! heard at once (the key after the shifter's tenth of a second). A plain
 //! track skips all of it.
 //!
+//! A setlist plays file by file as the stick will have them: each file's parts
+//! (a track with its cuts, fades, key, gain and silences; a whole joined
+//! playlist; a stretch of silence) come from the renderer as one stream, the
+//! one the encoder gets, into the same buffer. Nothing is left to do after the
+//! buffer, and there's nothing between a joined playlist's tracks.
+//!
 //! The device lives on its own thread (cpal streams aren't Send everywhere);
 //! the UI talks to it with commands and hears back through `player` events
 //! about ten times a second.
 
 use std::collections::VecDeque;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
@@ -25,7 +31,7 @@ use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use fatstick_audio::decode::PcmStream;
-use fatstick_audio::render::FadeShape;
+use fatstick_audio::render::{self, FadeShape, RenderPart, Source};
 use fatstick_audio::stretch::{Key, Shifter};
 use fatstick_audio::Tools;
 use serde::Serialize;
@@ -70,8 +76,24 @@ impl Shape {
     }
 }
 
+/// One stick file as the renderer makes it, and how long each part's track is.
+pub struct Parts {
+    pub parts: Vec<RenderPart>,
+    pub sources: Vec<Option<Source>>,
+    pub lengths: Vec<f64>,
+}
+
+/// What's playing, for starting it again from another place.
+#[derive(Clone)]
+enum Playing {
+    File { path: PathBuf, gain_db: f64 },
+    Parts(Arc<Parts>),
+}
+
 pub enum Cmd {
     Play { path: PathBuf, from: f64, gain_db: f64, duration: f64, token: String, key: Option<Key>, shape: Shape },
+    /// A stick file made as it plays, `duration` long in all.
+    PlayParts { parts: Parts, from: f64, duration: f64, token: String },
     /// Another start, end and fades for what's playing (live, from the fade sliders).
     Shape(Shape),
     /// Another key for what's playing (live, from the key slider), or none.
@@ -334,6 +356,54 @@ fn spawn_decoder(tools: Tools, shared: Arc<Shared>, path: PathBuf, from: f64, ga
     });
 }
 
+/// Takes the renderer's PCM into the buffer, at the pace the device plays it.
+/// When the player has moved on, the write fails and the render stops.
+struct Sink<'a> {
+    shared: &'a Shared,
+    generation: u64,
+    high: usize,
+    carry: Vec<u8>,
+}
+
+impl Write for Sink<'_> {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        let moved_on = || std::io::Error::new(std::io::ErrorKind::BrokenPipe, "the player moved on");
+        self.carry.extend_from_slice(data);
+        let whole = self.carry.len() / 4 * 4;
+        let samples: Vec<f32> = self.carry[..whole].chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect();
+        self.carry.drain(..whole);
+        loop {
+            let mut buf = self.shared.buf.lock().unwrap();
+            if self.shared.generation.load(Ordering::SeqCst) != self.generation {
+                return Err(moved_on());
+            }
+            if buf.len() <= self.high {
+                buf.extend(samples);
+                return Ok(data.len());
+            }
+            drop(buf);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn spawn_parts(tools: Tools, shared: Arc<Shared>, job: Arc<Parts>, from: f64, rate: u32, err_tx: Sender<String>) {
+    let generation = shared.generation.load(Ordering::SeqCst);
+    std::thread::spawn(move || {
+        let mut sink = Sink { shared: &shared, generation, high: rate as usize * 2 * 2, carry: Vec::new() };
+        let r = render::stream(&tools, &job.parts, &job.sources, &job.lengths, from, rate, &mut sink);
+        if shared.generation.load(Ordering::SeqCst) == generation {
+            if let Err(e) = r {
+                let _ = err_tx.send(e.to_string());
+            }
+            shared.eof.store(true, Ordering::SeqCst);
+        }
+    });
+}
+
 #[derive(Clone)]
 pub struct Player {
     tx: Sender<Cmd>,
@@ -368,7 +438,7 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
     });
     let mut output: Option<(Output, u32)> = None;
     let (err_tx, err_rx) = channel::<String>();
-    let mut current: Option<(PathBuf, f64, String)> = None; // path, gain, token
+    let mut current: Option<(Playing, String)> = None;
     let mut base = 0.0f64;
     let dur = std::cell::Cell::new(0.0f64);
     let mut state = "stopped".to_string();
@@ -413,7 +483,7 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
         };
         let rate = output.as_ref().map(|o| o.1).unwrap_or(44100);
         let pos = base + shared.frames.load(Ordering::Relaxed) as f64 / rate as f64;
-        let token = current.as_ref().map(|c| c.2.clone()).unwrap_or_default();
+        let token = current.as_ref().map(|c| c.1.clone()).unwrap_or_default();
         let ev = |state: &str, pos: f64, error: Option<String>, token: &str| PlayerEvent { state: state.into(), token: token.into(), pos, dur: dur.get(), error };
         match cmd {
             Some(Cmd::Play { path, from, gain_db, duration, token, key, shape }) => {
@@ -442,8 +512,40 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
                 shared.base.store(from.to_bits(), Ordering::SeqCst);
                 base = from;
                 dur.set(duration);
-                current = Some((path.clone(), gain_db, token.clone()));
+                current = Some((Playing::File { path: path.clone(), gain_db }, token.clone()));
                 spawn_decoder(t, shared.clone(), path, from, gain_db, rate, err_tx.clone());
+                shared.playing.store(true, Ordering::SeqCst);
+                state = "playing".into();
+                emit(ev(&state, from, None, &token));
+            }
+            Some(Cmd::PlayParts { parts, from, duration, token }) => {
+                let Some(t) = tools.clone() else {
+                    emit(ev("error", 0.0, Some("ffmpeg isn't available, so nothing can play.".into()), &token));
+                    continue;
+                };
+                if output.is_none() {
+                    match open_output(&shared) {
+                        Ok(o) => output = Some(o),
+                        Err(e) => {
+                            emit(ev("error", 0.0, Some(e), &token));
+                            continue;
+                        }
+                    }
+                }
+                reset(&shared);
+                while err_rx.try_recv().is_ok() {}
+                let rate = output.as_ref().unwrap().1;
+                // Everything is in the stream: nothing to do after the buffer.
+                set_key(&shared, None, rate, true);
+                *shared.shape.lock().unwrap() = Shape::default();
+                let from = from.max(0.0);
+                shared.rate.store(rate, Ordering::SeqCst);
+                shared.base.store(from.to_bits(), Ordering::SeqCst);
+                base = from;
+                dur.set(duration);
+                let job = Arc::new(parts);
+                current = Some((Playing::Parts(job.clone()), token.clone()));
+                spawn_parts(t, shared.clone(), job, from, rate, err_tx.clone());
                 shared.playing.store(true, Ordering::SeqCst);
                 state = "playing".into();
                 emit(ev(&state, from, None, &token));
@@ -463,13 +565,16 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
                 }
             }
             Some(Cmd::Seek(to)) => {
-                if let (Some((path, gain, tok)), Some(t), Some((_, rate))) = (current.clone(), tools.clone(), output.as_ref()) {
+                if let (Some((what, tok)), Some(t), Some((_, rate))) = (current.clone(), tools.clone(), output.as_ref()) {
                     reset(&shared);
                     let shape = *shared.shape.lock().unwrap();
                     base = to.max(shape.start).clamp(0.0, dur.get().max(to));
                     lead_in(&shared, &shape, base, *rate);
                     shared.base.store(base.to_bits(), Ordering::SeqCst);
-                    spawn_decoder(t, shared.clone(), path, base, gain, *rate, err_tx.clone());
+                    match what {
+                        Playing::File { path, gain_db } => spawn_decoder(t, shared.clone(), path, base, gain_db, *rate, err_tx.clone()),
+                        Playing::Parts(job) => spawn_parts(t, shared.clone(), job, base, *rate, err_tx.clone()),
+                    }
                     emit(ev(&state, base, None, &tok));
                 }
             }

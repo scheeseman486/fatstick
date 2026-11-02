@@ -203,6 +203,21 @@ GPL version 3 or later.
   total length, page numbers, lines between songs. The settings are
   remembered. Print to paper or to a PDF from the system's print dialog, at
   100% size on the same paper.
+- **Playing a setlist.** "Play" in a setlist's view (or its right-click menu, or
+  Space there with nothing playing) plays it from beginning to end, the way a
+  player reads the stick: every file in order, with its cuts, added silences,
+  fades, key and even volume; a joined playlist as one file, with nothing between
+  its tracks; the stretches of silence for as long as they are. A profile with
+  one playlist per stick plays that one. Double-click a file (or a track in a
+  joined one) to start there; the row playing is marked and followed. Next and
+  previous go by file, as on a player, and the repeat button repeats a file or
+  the whole setlist. Nothing has to be prepared first: each file is made as it
+  plays, by the same code a sync uses. "As on the stick" plays the prepared file
+  where there is one. Between files there's a moment's pause, as on a player. An
+  edit counts from the next file.
+
+  ![A setlist playing, with the file playing marked](docs/setlist.png)
+
 - **The player.** Listen to a playlist as it is, or "as on the stick", with
   the gain and bitrate the sync will use. The repeat button (or R) steps
   through play & stop (to the end of the playlist), repeat one song and
@@ -395,7 +410,8 @@ a track, shifts another 5 semitones up (changing its key live while it
 plays), fades a third in and out with a late fade out (changing the fades
 and their shapes live, and seeking, while it plays), joins the second playlist into one track and puts silence between
 the two, picks a disk image standing in for a stick, syncs through the button
-and its confirmation, shows the setlist's view, plays a track, and hears the
+and its confirmation, shows the setlist's view, plays a track and then the whole
+setlist through the player, file by file, and hears the
 silence being tried in the start and end dialog (with the track's waveform
 read by ffmpeg). It also excludes a second disk image through the menu and
 has a sync aimed at it refused. The second run checks that all of it
@@ -424,7 +440,8 @@ Working, and tested on disk images; not yet tried on real hardware.
   simulated pull at every write point, and on four virtual sticks read back
   by the real Linux vfat driver.
 - The whole app is tested end to end on Linux, on disk images, with a silent
-  audio output.
+  audio output. What a setlist plays is checked sample by sample in the stream
+  the player takes, not by ear.
 - Not yet run: real USB sticks (the OS broker and disk-level code, meaning
   unmount, raw whole-disk access, power-off and eject, compiles for all three
   systems), a real sound card, and the app on Windows and macOS. The Windows
