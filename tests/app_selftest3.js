@@ -102,7 +102,7 @@
     // Tags for two tracks: a genre, a label added and one taken off.
     clickRow(rowOf("Lanterns"));
     clickRow(rowOf("Harbour Song"), { ctrlKey: true });
-    $("#proc-tags").click();
+    $("#lib-tags").click();
     check("two tracks selected, in the Tags panel", $$(".lr.sel").length === 2 && /2 tracks/.test($(".st-tags .ted-head h3").textContent));
     const genre = $('.st-tags input[id^="ted-genre"]');
     typeIn(genre, "Night Folk");

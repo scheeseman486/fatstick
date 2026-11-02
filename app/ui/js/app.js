@@ -41,14 +41,16 @@
     ascii: false, maxLen: 0, trackTagIsPosition: true, numberInTitle: false,
   };
 
-  /** What the processing panel at the right can do, each with a button at the
-   * top of the window. It shows one at a time, beside any view. Other ways of
-   * copying (keeping what's on the stick, into a folder, for a particular
-   * player, onto a CD) go here too. */
+  /** What the processing panel at the right can do, one at a time, beside any
+   * view. Each is opened from what it works on: "Edit tags" on a track, and the
+   * ways of copying from the Transfer section of an open setlist (stickview.js).
+   * Others (keeping what's on the stick, into a folder, for a particular
+   * player, onto a CD) go here too, marked `transfer`. */
   const PROCESSES = {
-    tags: { label: "Tags", says: "See and change the tags of the selected tracks" },
-    fat: { label: "FAT USB Stick transfer", says: "Write a setlist to a USB stick, in the order cheap players read it" },
+    tags: { label: "Tags" },
+    fat: { label: "FAT USB Stick transfer", says: "Write this setlist to a USB stick, in the order cheap players read it", transfer: true },
   };
+  const TRANSFERS = Object.entries(PROCESSES).filter(([, m]) => m.transfer);
 
   const S = {
     tracks: new Map(),
@@ -86,7 +88,7 @@
     /** "playlist", or "library" while the library view has the middle of the window. */
     view: "playlist",
     /** What the processing panel shows (a key of PROCESSES). It's closed (null)
-     * whenever the app starts, and until a button opens it. */
+     * whenever the app starts, until something opens it. */
     processing: null,
     /** The sidebar shows the search panel. */
     searching: false,
@@ -184,7 +186,7 @@
   const setlist = P.setlistSetup({ S, pl, track, R, keyText, saveSetting, api, DEMO, stickSet, isGap, gapOf });
   /** Print the setlist that's chosen (the one in the panel, or open in its view). */
   const printSetlist = () => setlist.open(S.setId);
-  const stickView = P.stickViewSetup({ S, pl, stickSet, layoutData, edit, openPlaylist, setView, newId, isGap, gapOf, renderSide, undo, printSetlist: () => setlist.open(S.setId) });
+  const stickView = P.stickViewSetup({ S, pl, stickSet, layoutData, edit, openPlaylist, setView, newId, isGap, gapOf, renderSide, undo, printSetlist: () => setlist.open(S.setId), transfers: TRANSFERS, setProcessing, renderProcessButtons });
   /** A setlist, as playlists: silences become stand-ins with no tracks. */
   function stickLists(s) {
     return s.playlistIds.map((id) => {
@@ -1773,7 +1775,13 @@
     ST.title = h("h2", { id: "proc-title" });
     ST.close = h("button", {
       type: "button", class: "btn quiet small icon", id: "proc-close", title: "Close this panel",
-      onclick: () => { const was = S.processing; setProcessing(null); $(`proc-${was}`).focus({ preventScroll: true }); },
+      // The focus goes back to what opened it: the setlist's button, or the tracks selected.
+      onclick: () => {
+        const b = $(`proc-${S.processing}`);
+        setProcessing(null);
+        if (b && b.offsetParent) b.focus({ preventScroll: true });
+        else lib.focusSelection();
+      },
     }, icon("close"));
     ST.head = h("section", { class: "st-sec" });
     ST.folders = h("section", { class: "st-sec", "aria-label": "Playlists in this setlist" });
@@ -1786,26 +1794,18 @@
     ST.bodies = { tags: [lib.tagsBox], fat: [scroll, ST.sync] };
     root.replaceChildren(h("header", { class: "st-top" }, ST.title, ST.close), lib.tagsBox, scroll, ST.sync);
   }
-  /** The buttons at the top that open the panel, one per way of copying. */
-  function buildProcessButtons() {
-    const libBtn = $("lib-btn");
-    for (const [kind, m] of Object.entries(PROCESSES)) {
-      libBtn.before(h("button", {
-        type: "button", class: "ghost-btn", id: `proc-${kind}`, "aria-pressed": "false", "aria-controls": "stick", title: m.says, text: m.label,
-        onclick: () => setProcessing(S.processing === kind ? null : kind),
-      }));
-    }
-  }
+  /** The open setlist's Transfer section: which is showing, and which is busy. */
   function renderProcessButtons() {
     const syncing = !!(S.sync && S.sync.running);
-    for (const kind of Object.keys(PROCESSES)) {
+    for (const [kind, m] of TRANSFERS) {
       const b = $(`proc-${kind}`);
+      if (!b) continue;
       const on = S.processing === kind;
       const busy = kind === "fat" && syncing;
       b.setAttribute("aria-pressed", String(on));
-      b.classList.toggle("on", on);
+      b.classList.toggle("tool-on", on);
       b.classList.toggle("busy", busy);
-      b.title = busy ? `Syncing ${stickSet(S.sync.setId)?.name || ""}`.trim() : PROCESSES[kind].says;
+      b.title = busy ? `Syncing ${stickSet(S.sync.setId)?.name || ""}`.trim() : m.says;
     }
   }
   /** Open the panel on one of the things it does, or close it (null). A sync
@@ -3603,9 +3603,6 @@
       "-",
       { label: "Search your music", key: "Ctrl+F", action: () => lib.openSearch() },
       { label: S.view === "library" ? "Back to the playlist" : "Music library", action: () => setView(S.view === "library" ? "playlist" : "library") },
-      ...Object.entries(PROCESSES).map(([kind, m]) => (S.processing === kind
-        ? { label: `Close ${m.label}`, action: () => setProcessing(null) }
-        : { label: m.label, action: () => setProcessing(kind) })),
       "-",
       { heading: "Theme" },
       theme("system", "Same as the system"),
@@ -3660,7 +3657,6 @@
   // ---- start -------------------------------------------------------------------------------------------
   async function init() {
     buildStick();
-    buildProcessButtons();
     $("app-menu").addEventListener("click", (e) => appMenu(e.currentTarget));
     $("lib-btn").addEventListener("click", () => setView(S.view === "library" ? "playlist" : "library"));
     const list = $("list");

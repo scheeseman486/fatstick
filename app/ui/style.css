@@ -96,7 +96,7 @@ html.framed .top { padding-inline: 2px; }
 .ghost-btn:disabled { opacity: 0.5; cursor: default; }
 .ghost-btn.on { background: var(--chassis-ink); border-color: var(--chassis-ink); color: var(--chassis); }
 /* Something is being written, whether or not its panel is open. */
-.ghost-btn.busy::before {
+.btn.busy::before {
   content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px;
   border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin 0.8s linear infinite;
 }
@@ -938,6 +938,9 @@ html.framed .player { padding-inline: 2px; }
 .stickview[hidden] { display: none; }
 .sv-head { display: grid; gap: 3px; padding: 14px 20px 10px; border-bottom: 1px solid var(--rule); background: var(--sheet); }
 .sv-head .lay-title h1 { font-size: 22px; }
+/* The ways of getting a setlist out of the app. */
+.sv-transfer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 7px; padding-top: 9px; border-top: 1px solid var(--rule); }
+.sv-transfer h2 { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
 .sv-scroll { overflow: auto; min-height: 0; padding: 12px 20px 24px; overscroll-behavior: contain; display: grid; align-content: start; gap: 10px; }
 #sv-list { position: relative; }
 .lay-folders .sv-insert + .lay-folder, .lay-folders .lay-folder + .sv-insert { margin-top: -8px; }

@@ -5,10 +5,10 @@
 //   artists, albums, decades, and what's missing), the tracks as a table to
 //   filter and sort and select. File names can be cleaned up from the tags,
 //   after a preview. Drag tracks onto a playlist on the left.
-// * The tag editor (the Tags button, top right) is the panel at the right of
-//   the window, in any view: it shows what's selected in a playlist, the
-//   library or the search results, and writes changes into the files as
-//   they're entered.
+// * The tag editor ("Edit tags" on a track) is the panel at the right of the
+//   window, in any view: it shows what's selected in a playlist, the library
+//   or the search results, and writes changes into the files as they're
+//   entered.
 // * The search panel (the search button, bottom left) widens the sidebar:
 //   type a title, an artist, a label or anything else; exact matches come
 //   first, then a divider, then close ones. Drag songs into the playlist.
@@ -1491,6 +1491,11 @@
             : root() && t.exists && !inMusic(t) ? h("span", { class: "tags-why", text: "Not in your music folder" }) : null);
       },
       tagsBox, openTags, renderTags: renderEditor,
+      /** The Tags panel closed: back to the list its tracks are selected in. */
+      focusSelection() {
+        const el = S.view === "library" ? V.scroll : S.searching && tagSource === "search" && SE.sel.size ? SE.list : S.view === "playlist" ? $("list") : null;
+        if (el) el.focus({ preventScroll: true });
+      },
       /** The panel changed: "Edit tags" under the table is only for when it's elsewhere. */
       panelChanged() { if (S.view === "library" && V.root && root()) renderLibFoot(); },
       /** The playlist's selection changed. */

@@ -42,8 +42,9 @@ GPL version 3 or later.
   One a playlist still has stays there, where Locate can find its file
   again; if a file comes back, the next scan lists it again. A track's
   labels that don't fit its row show as "+2": hover it for all of them.
-- **Tags, and labels of your own.** The "Tags" button at the top opens the tag
-  editor in the panel at the right, beside whatever you're looking at. It shows
+- **Tags, and labels of your own.** "Edit tags" on a track (in its right-click
+  menu, under its row in a playlist, or under the library's table) opens the tag
+  editor in the panel at the right, beside whatever you're looking at. It follows
   the tracks selected in a playlist, the library or the search results (several
   at once: "Various" fields stay as they are unless you type over them). A file
   outside your music folder shows its tags without letting them change. Labels are your own free-form tags ("road
@@ -80,19 +81,21 @@ GPL version 3 or later.
   top level. It also has a player profile, which sets the bitrate cap, sample
   rates, tag version, cover art and file names. A Generic profile is built in;
   make your own for a particular player.
-- **The panel at the right.** Tools that work on your music, one at a time:
-  "Tags" and "FAT USB Stick transfer", from their buttons at the top (or the
-  menu). It's closed whenever the app starts, sits beside any view once open,
-  and stays open as you move between them.
-- **FAT USB Stick transfer.** Where music leaves the app. It shows the setlist, what is on the stick now, what the next sync would write,
+- **The panel at the right.** Tools that work on your music, one at a time, each
+  opened from what it works on: the tag editor from "Edit tags" on a track, and
+  "FAT USB Stick transfer" from an open setlist. It's closed whenever the app
+  starts, sits beside any view once open, and stays open as you move between
+  them until you close it.
+- **FAT USB Stick transfer.** Where music leaves the app: open a setlist, and its
+  "Transfer this setlist" section has the button. The panel shows the setlist, what is on the stick now, what the next sync would write,
   whether it fits, and the sync itself. A sync carries on with the panel
-  closed: the button shows it's busy and the display counts it up; if it stops,
+  closed: the display counts it up and the button shows it's busy; if it stops,
   a message offers to show why. A stick you plug in is marked in the sidebar,
-  and its message opens the panel. Other ways of copying are meant to go in this
-  panel too: keeping what's already on a stick, copying into a folder, a
+  and its message opens the panel. Other ways of copying are meant to go in that
+  section too: keeping what's already on a stick, copying into a folder, a
   particular player, burning a CD.
 
-  ![The FAT USB Stick transfer panel, open beside a playlist](docs/transfer.png)
+  ![A setlist open, with the FAT USB Stick transfer panel beside it](docs/transfer.png)
 - **Devices left out.** "Exclude devices…" in the menu lists what's plugged
   in; a ticked device (a card reader that's always there, a backup drive)
   isn't shown, isn't read (not even for the note a sync leaves) and can't be
@@ -386,7 +389,7 @@ python3 tests/kernel_stick.py --kroot <kernel dir> --fatstick target/x86_64-unkn
 ```
 
 `tests/app_e2e.py` runs the real app under Xvfb, three times. The first run starts
-from an empty library, with the transfer panel closed until its button opens it: it adds two folders of real audio (FLAC, Opus, WAV,
+from an empty library, with the transfer panel closed until a setlist's button opens it: it adds two folders of real audio (FLAC, Opus, WAV,
 MP3s at 320 kbps and at 22.05 kHz mono), turns on even volume, cuts and pads
 a track, shifts another 5 semitones up (changing its key live while it
 plays), fades a third in and out with a late fade out (changing the fades

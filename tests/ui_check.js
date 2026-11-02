@@ -51,31 +51,42 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.waitForTimeout(60);
   };
 
-  // 0. The processing panel: closed when the app starts, opened by its buttons,
-  // beside any view. Left open on the transfer for the checks after this.
+  // 0. The processing panel: closed when the app starts, beside any view once
+  // open. An open setlist opens the transfer and a track the tags; nothing at the
+  // top of the window does. Left on the transfer for the checks after this.
   {
     const panel = p.locator('#stick');
     const btn = p.locator('#proc-fat');
+    const car = p.locator('[data-set="set-car"]');
+    const road = p.locator('[data-pl="p-road"]');
+    const title = () => p.locator('#proc-title').textContent();
     const right = (sel) => p.evaluate((s) => document.querySelector(s).getBoundingClientRect().right, sel);
     const pressed = async () => (await btn.getAttribute('aria-pressed')) === 'true';
     const settled = () => p.waitForTimeout(260);
     check('the processing panel is closed when the app starts', await panel.isHidden());
-    check('its button says what it does', (await btn.textContent()) === 'FAT USB Stick transfer' && !(await pressed()));
+    check('nothing at the top of the window opens it', (await p.locator('.top-tools button').allTextContents()).join() === 'Library,Menu');
+    await p.locator('#app-menu').click();
+    check('and nothing in the menu', (await p.locator('#menu').getByText('FAT USB Stick transfer').count()) === 0 && (await p.locator('#menu').getByText('Tags', { exact: true }).count()) === 0);
+    await p.keyboard.press('Escape');
     check('the playlist has the whole width', Math.abs(await right('#main') - await right('#player')) < 2);
     await p.screenshot({ path: `${out}/panel-closed.png` });
     const colsClosed = await p.locator('#list-cols > *').count();
+    // An open setlist has a section for getting it out of the app.
+    check('a playlist has no transfer button', (await btn.count()) === 0);
+    await car.click();
+    check('an open setlist has a section for transferring it', await p.locator('.sv-transfer').isVisible() && /Transfer this setlist/.test(await p.locator('.sv-transfer').textContent()));
+    check('with the FAT USB Stick transfer in it', (await p.locator('.sv-transfer #proc-fat').textContent()) === 'FAT USB Stick transfer' && !(await pressed()));
     await btn.click();
     await settled();
     const box = await panel.boundingBox();
-    check('the button opens it at the right of the window', await panel.isVisible() && await pressed() && Math.round(box.width) === 344 && Math.abs(box.x + box.width - await right('#player')) < 2, JSON.stringify(box));
-    check('its title names it', (await p.locator('#proc-title').textContent()) === 'FAT USB Stick transfer');
+    check('the button opens the panel at the right of the window', await panel.isVisible() && await pressed() && Math.round(box.width) === 344 && Math.abs(box.x + box.width - await right('#player')) < 2, JSON.stringify(box));
+    check('its title names it', (await title()) === 'FAT USB Stick transfer');
     check('the setlist, device, profile and sync are all in it', await p.locator('#set-select').isVisible() && await p.locator('#profile-select').isVisible() && await p.locator('#sync-btn').isVisible());
-    check('the playlist makes room beside it', await right('#main') < box.x + 1 && colsClosed >= (await p.locator('#list-cols > *').count()));
     await p.screenshot({ path: `${out}/panel-open.png` });
     await p.locator('#proc-close').click();
     await panel.waitFor({ state: 'hidden' });
     check('its close button closes it, and the focus goes back to the button', !(await pressed()) && await p.evaluate(() => document.activeElement.id === 'proc-fat'));
-    check('the playlist has the whole width again', Math.abs(await right('#main') - await right('#player')) < 2);
+    check('the setlist has the whole width again', Math.abs(await right('#stickview') - await right('#player')) < 2);
     await btn.click();
     await btn.click();
     await panel.waitFor({ state: 'hidden' });
@@ -87,43 +98,46 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('quick clicks end up where the last one says', await panel.isVisible() && await pressed());
     await p.reload();
     await p.waitForTimeout(600);
-    check('it is closed again after a restart, whatever it was', await panel.isHidden() && !(await pressed()));
-    // From the menu too.
-    await p.locator('#app-menu').click();
-    await p.locator('#menu').getByText('FAT USB Stick transfer').click();
+    check('it is closed again after a restart, whatever it was', await panel.isHidden());
+    // It stays open from view to view until it's closed.
+    await car.click();
+    await btn.click();
     await settled();
-    check('the menu opens it', await panel.isVisible() && await pressed());
-    // It stays beside the library, and the library has the room when it's closed.
+    await road.click();
+    await settled();
+    check('it stays open going to a playlist, which makes room', await panel.isVisible() && await right('#main') < (await panel.boundingBox()).x + 1 && colsClosed >= (await p.locator('#list-cols > *').count()));
     await p.locator('#lib-btn').click();
     await settled();
-    check('it stays open beside the library', await panel.isVisible() && await pressed() && await right('#libview') <= (await panel.boundingBox()).x + 1);
+    check('and beside the library', await panel.isVisible() && await right('#libview') <= (await panel.boundingBox()).x + 1);
+    await p.locator('#lib-btn').click();
+    await settled();
+    check('back from the library, it is as it was', await panel.isVisible() && (await title()) === 'FAT USB Stick transfer');
     await p.locator('#proc-close').click();
     await panel.waitFor({ state: 'hidden' });
-    check('closed, the library has the whole window', Math.abs(await right('#libview') - await right('#player')) < 2);
-    await btn.click();
-    await settled();
-    check('and it opens in the library, without leaving it', await panel.isVisible() && await p.locator('#libview').isVisible());
     await p.locator('#lib-btn').click();
-    await settled();
-    check('back from the library, it is as it was', await panel.isVisible() && await pressed());
-    // Tags, in the same panel: one thing at a time.
-    const tagsBtn = p.locator('#proc-tags');
-    check('a Tags button sits beside it', (await tagsBtn.textContent()) === 'Tags' && (await tagsBtn.getAttribute('aria-pressed')) === 'false');
-    await tagsBtn.click();
-    check('it switches the panel over, without closing it', (await p.locator('#proc-title').textContent()) === 'Tags' && await p.locator('.st-tags').isVisible() && await p.locator('#sync-btn').isHidden() && (await tagsBtn.getAttribute('aria-pressed')) === 'true' && !(await pressed()));
+    check('closed, the library has the whole window', Math.abs(await right('#libview') - await right('#player')) < 2);
+    await p.locator('#lib-btn').click();
+    // Tags, in the same panel: they're about a track, so a track opens them.
+    await row(0).click({ button: 'right' });
+    await p.getByRole('menuitem', { name: 'Edit tags' }).click();
+    check('"Edit tags" opens the panel on the tags', (await title()) === 'Tags' && await p.locator('.st-tags').isVisible() && await p.locator('#sync-btn').isHidden());
     await settled();
     check('it fits its column, nothing cut off', Math.round((await panel.boundingBox()).width) === 304 && await panel.evaluate((x) => x.scrollWidth <= x.clientWidth));
+    await p.locator('#list').focus();
+    await p.keyboard.press('Escape');
     check('with nothing selected it says what to do', /Select a track in a playlist or the library/.test(await p.locator('.st-tags').textContent()));
+    await car.click();
     await btn.click();
-    check('and back', (await p.locator('#proc-title').textContent()) === 'FAT USB Stick transfer' && await p.locator('#sync-btn').isVisible() && await p.locator('.st-tags').isHidden() && (await tagsBtn.getAttribute('aria-pressed')) === 'false' && await pressed());
+    check('the setlist\'s button switches it over, without closing it', (await title()) === 'FAT USB Stick transfer' && await p.locator('#sync-btn').isVisible() && await p.locator('.st-tags').isHidden() && await pressed());
+    await road.click();
     // A stick that's plugged in while it's closed says so, with the way in.
     await p.locator('#proc-close').click();
     await panel.waitFor({ state: 'hidden' });
-    await p.evaluate(async () => { const A = Fatstick.app; const was = A.S.sticks; A.S.sticks = []; await A.refreshSticks(true); return was.length; });
+    await p.evaluate(async () => { const A = Fatstick.app; A.S.sticks = []; await A.refreshSticks(true); });
     check('a stick plugged in shows in the sidebar with the panel closed', /plugged in/.test(await p.locator('[data-set="set-car"] .flag').textContent()));
     await p.locator('#toast').getByRole('button', { name: 'Open the transfer' }).click();
     await settled();
-    check('and its toast opens the panel', await panel.isVisible() && await pressed());
+    check('and its toast opens the panel', await panel.isVisible() && (await title()) === 'FAT USB Stick transfer');
     // A narrow window: under the list.
     await p.setViewportSize({ width: 800, height: 700 });
     await settled();
@@ -131,8 +145,8 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('in a narrow window it goes under the list, full width', nb.width > 700 && nb.y > (await p.locator('#main').boundingBox()).y);
     await p.locator('#proc-close').click();
     await panel.waitFor({ state: 'hidden' });
-    await p.locator('#proc-fat').click();
     await p.setViewportSize({ width: 1280, height: 800 });
+    await p.evaluate(() => Fatstick.app.setProcessing('fat'));
     await settled();
     check('and back at the side in a wide one', await panel.isVisible() && Math.round((await panel.boundingBox()).width) === 344);
   }
@@ -469,10 +483,12 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   await p.locator('#modal .btn.primary').click();
   await p.waitForTimeout(2500);
   await p.screenshot({ path: `${out}/syncing.png` });
-  // It goes on with the panel closed: the button and the display say so.
+  // It goes on with the panel closed: the display and the open setlist say so.
   await p.locator('#proc-close').click();
   await p.locator('#stick').waitFor({ state: 'hidden' });
-  check('a sync goes on with the panel closed, and its button says so', await p.locator('#proc-fat.busy').count() === 1 && /%/.test(await p.locator('#disp-unit').textContent()));
+  check('a sync goes on with the panel closed, and the display says so', /%/.test(await p.locator('#disp-unit').textContent()));
+  await p.locator('[data-set="set-car"]').click();
+  check('and so does the setlist\'s button', (await p.locator('#proc-fat.busy').count()) === 1);
   await p.waitForSelector('#proc-fat:not(.busy)', { timeout: 30000 });
   check('its button stops saying so when it ends', /^Synced /.test(await p.locator('#toast').textContent()) && await p.locator('#stick').isHidden());
   await p.locator('#proc-fat').click();
@@ -482,6 +498,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   await p.getByRole('button', { name: 'Done' }).click();
   check('stick is up to date afterwards', /Up to date/.test(await p.locator('.st-status').textContent()));
   await p.screenshot({ path: `${out}/synced.png` });
+  await p.locator('[data-pl="p-road"]').click();
 
   {
     // 19. A playlist row shows its tags when clicked, and hides them again.
@@ -566,7 +583,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     const tagsBefore = await tagsOf(selIds);
     const toastSays = (re) => p.waitForFunction((src) => new RegExp(src).test(document.getElementById('toast').textContent), re.source, { timeout: 5000 }).catch(() => {});
     const settled = (re) => p.waitForFunction((src) => new RegExp(src).test(document.querySelector('.st-tags .ted-status').textContent), re.source, { timeout: 5000 }).catch(() => {});
-    await p.locator('#proc-tags').click();
+    await p.locator('#lib-tags').click();
     check('the Tags panel shows what\'s selected in the library', /2 tracks/.test(await p.locator('.st-tags .ted-head h3').textContent()));
     check('the editor says edits save as they are made', /saved into the files as you make them/.test(await p.locator('.st-tags .ted-status').textContent()));
     await p.locator('.st-tags input[id^="ted-genre"]').fill('Kids');
@@ -637,6 +654,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('the Tags panel stays open going back to a playlist', await p.locator('.st-tags').isVisible() && (await p.locator('#proc-title').textContent()) === 'Tags');
     await p.locator('#proc-close').click();
     await p.locator('#stick').waitFor({ state: 'hidden' });
+    check('closing it puts the focus back on the list', await p.evaluate(() => document.activeElement.id === 'list'));
     const first = (await titles())[0];
     await row(0).click({ button: 'right' });
     await p.getByRole('menuitem', { name: 'Edit tags' }).click();
@@ -719,8 +737,10 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
       check('a file outside the music folder shows its tags, and says why they can\'t change', await tTitle.isDisabled() && /Only files in your music folder/.test(await p.locator('.st-tags .ted-note').textContent()));
     }
     // The transfer again, for what follows.
+    await p.locator('[data-set="set-car"]').click();
     await p.locator('#proc-fat').click();
-    check('the transfer is one click away', await p.locator('#sync-btn').isVisible());
+    await p.locator('[data-pl="p-road"]').click();
+    check('the transfer stays open going back to the playlist', await p.locator('#sync-btn').isVisible());
     await row(0).click();
     check('and clicking a row shows its tags under it again', (await p.locator('#list .row-tags').count()) <= 1);
 

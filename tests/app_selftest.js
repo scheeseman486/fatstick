@@ -54,10 +54,12 @@
     check("a second playlist was made", S.playlists.length === 2 && S.playlists[1].entries.length === cfg.titles2.length);
     A.S.current = S.playlists[0].id;
     const set = A.stickSet();
-    // The transfer panel is closed until its button opens it.
+    // The transfer panel is closed until an open setlist's button opens it.
     check("the processing panel is closed at first", document.getElementById("stick").hidden && !document.getElementById("app").classList.contains("proc-open"));
-    document.getElementById("proc-fat").click();
-    check("its button opens it", !document.getElementById("stick").hidden && document.getElementById("proc-fat").getAttribute("aria-pressed") === "true");
+    A.openStick(set.id);
+    (await until(() => document.getElementById("proc-fat"))).click();
+    check("the setlist's button opens it", !document.getElementById("stick").hidden && document.getElementById("proc-fat").getAttribute("aria-pressed") === "true");
+    A.setView("playlist");
     const add = await until(() => [...document.querySelectorAll("#stick select")].find((s) => s.getAttribute("aria-label") === "Add a playlist to this setlist"));
     add.value = S.playlists[1].id;
     add.dispatchEvent(new Event("change", { bubbles: true }));

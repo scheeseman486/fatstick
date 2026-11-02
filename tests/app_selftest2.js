@@ -29,7 +29,9 @@
     const S = A.S;
     const $sync = () => document.getElementById("sync-btn");
     check("the processing panel is closed again after a restart", document.getElementById("stick").hidden);
-    document.getElementById("proc-fat").click();
+    A.openStick(S.setId);
+    (await until(() => document.getElementById("proc-fat"))).click();
+    A.setView("playlist");
     check("both playlists were kept", S.playlists.length === 2 && S.playlists[0].entries.length === cfg.titles.length && S.playlists[1].entries.length === cfg.titles2.length);
     const p = S.playlists[0];
     check("the volume setting was kept", p.norm.on === true);

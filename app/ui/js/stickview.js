@@ -124,7 +124,14 @@
               d.single ? null : h("button", { type: "button", class: "btn small", id: "sv-silence", title: "Silence at the end; drag it where it goes", onclick: () => addSilence(s, s.playlistIds.length) }, icon("plus"), "Silence"),
               h("button", { type: "button", class: "btn small", text: "Expand all", onclick: all(true) }),
               h("button", { type: "button", class: "btn small", text: "Collapse all", onclick: all(false) }),
-              h("button", { type: "button", class: "btn small", text: "Print…", title: "This setlist on paper (Ctrl+P)", onclick: () => printSetlist() })))),
+              h("button", { type: "button", class: "btn small", text: "Print…", title: "This setlist on paper (Ctrl+P)", onclick: () => printSetlist() }))),
+          // Ways of getting this setlist out of the app, each opening the panel at the right.
+          h("section", { class: "sv-transfer", "aria-labelledby": "sv-transfer-h" },
+            h("h2", { id: "sv-transfer-h", text: "Transfer this setlist" }),
+            h("div", { class: "tools" }, core.transfers.map(([kind, m]) => h("button", {
+              type: "button", class: "btn small", id: `proc-${kind}`, "aria-pressed": "false", "aria-controls": "stick", text: m.label,
+              onclick: () => core.setProcessing(S.processing === kind ? null : kind),
+            }))))),
         h("div", { class: "sv-scroll", id: "sv-scroll" },
           d.errors && d.errors.length ? h("p", { class: "st-note err", text: `The file names don't work: ${d.errors[0]}` }) : null,
           items.length ? list : h("div", { class: "sv-empty", id: "sv-list" },
@@ -133,6 +140,7 @@
           d.ignored && d.ignored.length ? h("p", { class: "st-note warn", text: `Not written, as this profile puts one playlist on a stick: ${d.ignored.join(", ")}.` }) : null,
           h("p", { class: "lay-foot", text: "The order here is the order a player reads the stick in: folders, then files, top to bottom. Drag a playlist in from the left, or by its handle to move it." })),
       );
+      core.renderProcessButtons();
     }
 
     /** Between two folders: silence here (shown on hover). */
