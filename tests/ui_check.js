@@ -1346,6 +1346,171 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('nor in a playlist or the library', (await p.locator('.row[title]').count()) === 0 && await p.evaluate(() => { Fatstick.app.setView('library'); const n = document.querySelectorAll('.lr[title]').length; Fatstick.app.setView('playlist'); return n === 0; }));
   }
 
+  // 36. YouTube: the other side of the search panel. All made up here; tests/app_e2e.py runs the real side.
+  {
+    await p.evaluate(() => Fatstick.app.setView('playlist'));
+    await p.locator('[data-pl="p-road"]').click();
+    const entries = () => p.evaluate(() => Fatstick.app.pl().entries.length);
+    const inLib = () => p.evaluate(() => [...Fatstick.app.S.tracks.values()].filter((t) => t.path && t.path.includes('/YouTube/')).length);
+    await p.keyboard.press('Control+Shift+F');
+    check('Ctrl+Shift+F opens the search on YouTube', (await p.locator('#srch-tab-youtube').getAttribute('aria-selected')) === 'true' && await p.locator('#yt-in').isVisible());
+    await p.locator('.yt-setup').waitFor();
+    check('with nothing set up, it says what it needs and how big it is', /yt-dlp/.test(await p.locator('.yt-setup').textContent()) && /about 85 MB/.test(await p.locator('#yt-get').textContent()));
+    check('and searching waits for that', await p.locator('#yt-in').isDisabled());
+    await p.locator('#yt-get').click();
+    await p.locator('.yt-prog').waitFor();
+    await p.waitForFunction(() => /Getting yt-dlp: \d+ MB of \d+ MB/.test(document.querySelector('.yt-prog').textContent));
+    check('getting them shows how far along it is', true);
+    await p.locator('.yt-prog .btn').click();
+    await p.locator('#yt-get').waitFor();
+    check('it can be cancelled, and asked for again', await p.locator('#yt-in').isDisabled() && (await p.locator('.yt-err').count()) === 0);
+    await p.locator('#yt-get').click();
+    await p.locator('#yt-in:not([disabled])').waitFor({ timeout: 8000 });
+    check('then searching is open', /Only the audio is ever fetched/.test(await p.locator('.srch-scope').textContent()) && /yt-dlp 2026\.10\.26, Deno 2\.9\.6/.test(await p.locator('.yt-foot').textContent()));
+
+    // Searching: on Enter, not on every letter.
+    const yin = p.locator('#yt-in');
+    await yin.fill('Harbour Lights');
+    await p.waitForTimeout(500);
+    check('typing alone doesn\'t search', (await p.locator('.yr').count()) === 0);
+    await yin.press('Enter');
+    check('Enter does, and says so', /Searching YouTube/.test(await p.locator('.srch-scope').textContent()));
+    await p.locator('.yr').first().waitFor();
+    check('the results come with channel, views and length', (await p.locator('.yr').count()) === 25 && /The Night Shift, 48M views/.test(await p.locator('.yr').nth(1).textContent()) && /3:51/.test(await p.locator('.yr').nth(1).textContent()));
+    await p.locator('.yt-more').click();
+    await p.waitForFunction(() => document.querySelectorAll('.yr').length === 40);
+    check('"Show more" asks for more', /40 results/.test(await p.locator('.srch-scope').textContent()));
+    await yin.fill('nothing at all');
+    await yin.press('Enter');
+    await p.waitForFunction(() => /Nothing on YouTube/.test(document.querySelector('.srch-scope').textContent));
+    check('nothing found says so', (await p.locator('.yr').count()) === 0);
+    await yin.fill('fail please');
+    await yin.press('Enter');
+    await p.locator('.yt-err').waitFor();
+    check('a failed search says why', /Couldn't reach YouTube/.test(await p.locator('.yt-err').textContent()));
+    await yin.fill('Harbour Lights');
+    await yin.press('Enter');
+    await p.waitForFunction(() => document.querySelectorAll('.yr').length === 25);
+
+    // Hearing one: fetched, then played. It isn't in the library for that.
+    const row = (i) => p.locator('.yr').nth(i);
+    const libBefore = await inLib();
+    await row(1).dblclick();
+    await row(1).locator('.yr-pct').waitFor();
+    check('a song on its way shows its progress', /%|…/.test(await row(1).locator('.yr-pct').textContent()));
+    await p.waitForFunction(() => Fatstick.app.S.player.trackId && Fatstick.app.S.player.trackId.startsWith('yt:'), null, { timeout: 5000 });
+    check('double-clicking fetches it and plays it', await row(1).locator('.eq').isVisible() && /Harbour Lights \(Official Video\)/.test(await p.locator('.np-t').textContent()) && /From YouTube/.test(await p.locator('.np-s').textContent()));
+    check('the display says where it\'s from', /From YouTube/.test(await p.locator('#disp-sub').textContent()));
+    check('and hearing it adds nothing to the library', (await inLib()) === libBefore && (await row(1).locator('.sr-in').count()) === 0);
+    // A song started while another is on its way isn't cut in on.
+    await row(2).dblclick();
+    await p.waitForTimeout(40);
+    await p.evaluate(() => { const A = Fatstick.app; A.playTrack(A.pl().entries[0].trackId); });
+    const other = await p.evaluate(() => Fatstick.app.S.player.trackId);
+    await p.waitForTimeout(1300);
+    check('what was started in the meantime goes on playing', (await p.evaluate(() => Fatstick.app.S.player.trackId)) === other);
+    await p.evaluate(() => Fatstick.app.stopPlayback());
+
+    // Stopping one on its way.
+    await row(4).locator('.yr-add').click();
+    await row(4).locator('.yr-pct').waitFor();
+    await row(4).locator('.yr-act button').click();
+    await row(4).locator('.yr-add').waitFor({ timeout: 3000 });
+    check('a song on its way can be stopped', (await row(4).locator('.sr-in').count()) === 0 && (await inLib()) === libBefore);
+
+    // The + button: into the library.
+    await row(3).locator('.yr-add').click();
+    await row(3).locator('.sr-in').waitFor({ timeout: 5000 });
+    check('the + button adds it to the library', (await inLib()) === libBefore + 1 && /In your library/.test(await p.locator('#toast').textContent()));
+    const kept = await p.evaluate(() => [...Fatstick.app.S.tracks.values()].find((t) => t.path.includes('/YouTube/')));
+    check('with a clean title and artist', kept.title === 'Harbour Lights' && kept.artist === 'Lyric Corner', `${kept.artist} / ${kept.title}`);
+    check('and it\'s found by the music search', await p.evaluate((id) => Fatstick.app.lib.state.SE !== undefined && Fatstick.app.track(id).exists, kept.id));
+    await p.locator('#toast .btn').click();
+    await p.locator('.lr.sel').first().waitFor();
+    check('"Show" opens the library on it', /Harbour Lights/.test(await p.locator('.lr.sel').first().textContent()));
+    await p.evaluate(() => Fatstick.app.setView('playlist'));
+    await p.keyboard.press('Control+Shift+F');
+    await row(0).waitFor();
+    await p.waitForTimeout(300); // the sidebar widens, and titles wrap differently
+
+    // A drag into the list: at that place, once it has arrived.
+    const n0 = await entries();
+    const from = await row(5).boundingBox();
+    const place = await p.locator('#list .row').nth(2).boundingBox();
+    await p.mouse.move(from.x + 40, from.y + 12);
+    await p.mouse.down();
+    await p.mouse.move(from.x + 90, from.y + 20, { steps: 3 });
+    await p.mouse.move(place.x + 200, place.y + 2, { steps: 6 });
+    check('a song dragged out of the results says where it\'s going', /Add Harbour Lights - Piano Cover here/.test(await p.locator('#drag-badge').textContent()), await p.locator('#drag-badge').textContent());
+    await p.mouse.up();
+    await p.waitForFunction((n) => Fatstick.app.pl().entries.length === n + 1, n0, { timeout: 5000 });
+    const placed = await p.evaluate(() => { const A = Fatstick.app; return A.pl().entries.findIndex((e) => A.track(e.trackId).path.includes('/YouTube/')); });
+    check('it goes into the playlist there when it has arrived', placed === 2, `at ${placed}`);
+    check('and the list\'s Undo takes it out', /Added 1 track/.test(await p.locator('#toast').textContent()));
+    await p.locator('#toast .btn').click();
+    check('(Undo)', (await entries()) === n0);
+
+    // Keys, several at once, the menu.
+    await row(6).click();
+    await row(7).click({ modifiers: ['Shift'] });
+    check('rows select like the music search\'s', (await p.locator('.yr.sel').count()) === 2);
+    await p.locator('.yt-res').press('Shift+Enter');
+    await p.waitForFunction((n) => Fatstick.app.pl().entries.length === n + 2, n0, { timeout: 6000 });
+    check('Shift+Enter adds what\'s selected to the open playlist', true);
+    await row(0).click({ button: 'right' });
+    const items = await p.getByRole('menuitem').allTextContents();
+    check('the right-click menu has the rest', ['Play', 'Add to Road Trip', 'New playlist from these', 'Add to the library', 'Copy the link'].every((x) => items.some((i) => i.includes(x))), items.join(' | '));
+    await p.keyboard.press('Escape');
+    // Added once: the same track from then on.
+    const sameN = await inLib();
+    await yin.fill('Harbour Lights');
+    await yin.press('Enter');
+    await p.waitForTimeout(600);
+    check('a new search still marks what\'s in the library', (await row(3).locator('.sr-in').count()) === 1);
+    await row(3).click();
+    await p.locator('.yt-res').press('Shift+Enter');
+    await p.waitForTimeout(250);
+    check('adding it again doesn\'t make another file', (await inLib()) === sameN);
+
+    // No music folder yet: it asks for one.
+    await p.evaluate(() => { Fatstick.app.S.music = { ...Fatstick.app.S.music, root: null }; });
+    await row(0).locator('.yr-add').click();
+    await row(0).locator('.sr-in').waitFor({ timeout: 5000 });
+    check('with no music folder, it asks for one first', await p.evaluate(() => Fatstick.app.S.music.root === '~/Music'));
+
+    // The tabs, and Escape.
+    await p.locator('#srch-tab-music').click();
+    check('the Your music tab goes back to the music search', await p.locator('#srch-in').isVisible() && await p.locator('#yt-in').isHidden());
+    await p.locator('#srch-in').fill('Harbour');
+    await p.waitForTimeout(200);
+    check('where a song added from YouTube is found', (await p.locator('.sr:not(.yr)').count()) > 0);
+    await p.locator('#srch-in').fill('');
+    await p.locator('#srch-tab-youtube').click();
+    check('and YouTube\'s results are still there', (await p.locator('.yr').count()) === 25 && (await yin.inputValue()) === 'Harbour Lights');
+    await p.keyboard.press('Control+f');
+    check('Ctrl+F is always your music', await p.locator('#srch-in').isVisible());
+    await p.locator('#srch-tab-youtube').click();
+    await yin.press('Escape');
+    check('Escape clears the box', (await yin.inputValue()) === '');
+    await yin.press('Escape');
+    check('and then closes the search', await p.evaluate(() => !Fatstick.app.S.searching));
+    await p.locator('#srch-btn').click();
+    check('the search button comes back to where you were', await yin.isVisible());
+    if (process.argv[2]) {
+      await yin.fill('Harbour Lights');
+      await yin.press('Enter');
+      await p.waitForFunction(() => /25 results/.test(document.querySelector('.srch-scope').textContent));
+      await row(1).dblclick();
+      await p.waitForFunction(() => Fatstick.app.S.player.trackId && Fatstick.app.S.player.playing, null, { timeout: 5000 });
+      await row(2).locator('.yr-add').click();
+      await p.waitForTimeout(350);
+      await p.mouse.move(700, 450);
+      await p.screenshot({ path: path.join(out, 'youtube.png') });
+    }
+    await p.evaluate(() => { Fatstick.app.stopPlayback(); Fatstick.app.lib.closeSearch(); });
+    check('tracks from YouTube have no tooltips on their rows either', (await p.locator('.sr[title]').count()) === 0);
+  }
+
   check('no console errors', errs.length === 0, errs.join(' / '));
   await b.close();
   server.close();

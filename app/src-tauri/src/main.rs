@@ -11,6 +11,7 @@ mod player;
 mod sticks;
 mod sync;
 mod work;
+mod youtube;
 #[cfg(test)]
 mod tests;
 
@@ -37,6 +38,7 @@ struct AppState {
     music: Arc<folder::MusicFolder>,
     /// The devices left out, as saved (see `exclude`).
     excluded: Arc<Mutex<Vec<exclude::Excluded>>>,
+    youtube: Arc<youtube::Youtube>,
 }
 
 type Res<T> = Result<T, String>;
@@ -78,11 +80,11 @@ struct InitView {
 #[tauri::command]
 fn init(st: State<AppState>) -> Res<InitView> {
     let lib = st.lib.lock().unwrap();
-    // Every setting the window saved (the excluded devices are kept on
-    // this side, and the library's id is given on its own).
+    // Every setting the window saved (the excluded devices and the songs kept
+    // from YouTube are kept on this side, and the library's id is given on its own).
     let mut settings = serde_json::Map::new();
     for (k, v) in lib.settings().map_err(err)? {
-        if k != exclude::SETTING && k != "libraryId" {
+        if k != exclude::SETTING && k != youtube::KEPT && k != "libraryId" {
             settings.insert(k, v.into());
         }
     }
@@ -114,7 +116,7 @@ fn save_docs(st: State<AppState>, kind: String, put: Vec<serde_json::Value>, del
 
 #[tauri::command]
 fn set_setting(st: State<AppState>, key: String, value: String) -> Res<()> {
-    if key == exclude::SETTING || key == "libraryId" {
+    if key == exclude::SETTING || key == youtube::KEPT || key == "libraryId" {
         return Err(format!("{key} isn't set this way"));
     }
     st.lib.lock().unwrap().set_setting(&key, &value).map_err(err)
@@ -272,6 +274,7 @@ fn cache_info(st: State<AppState>) -> fatstick_audio::cache::CacheStats {
 #[tauri::command]
 fn clear_cache(st: State<AppState>) -> fatstick_audio::cache::CacheStats {
     st.cache.clear();
+    st.youtube.clear();
     st.cache.stats()
 }
 
@@ -695,6 +698,83 @@ async fn library_rename(st: State<'_, AppState>, jobs: Vec<folder::RenameJob>) -
     tauri::async_runtime::spawn_blocking(move || folder::rename(&music, &jobs)).await.map_err(err)
 }
 
+// ---- YouTube -------------------------------------------------------------------------------
+// Everything here starts yt-dlp or waits on the network: all off the window's thread.
+
+async fn off_thread<T: Send + 'static>(job: impl FnOnce() -> Res<T> + Send + 'static) -> Res<T> {
+    tauri::async_runtime::spawn_blocking(job).await.map_err(err)?
+}
+
+#[tauri::command]
+async fn youtube_status(st: State<'_, AppState>) -> Res<youtube::Status> {
+    let y = st.youtube.clone();
+    off_thread(move || Ok(y.status())).await
+}
+
+/// Get yt-dlp and Deno, whichever is missing. Only ever from the person's click.
+#[tauri::command]
+async fn youtube_setup(st: State<'_, AppState>) -> Res<youtube::Status> {
+    let y = st.youtube.clone();
+    off_thread(move || y.set_up()).await
+}
+
+#[tauri::command]
+fn youtube_cancel_setup(st: State<AppState>) {
+    st.youtube.cancel_setup();
+}
+
+#[derive(Serialize)]
+struct Updated {
+    changed: bool,
+    status: youtube::Status,
+}
+
+#[tauri::command]
+async fn youtube_update(st: State<'_, AppState>) -> Res<Updated> {
+    let y = st.youtube.clone();
+    off_thread(move || y.update().map(|(changed, status)| Updated { changed, status })).await
+}
+
+#[tauri::command]
+async fn youtube_search(st: State<'_, AppState>, query: String, limit: usize) -> Res<Vec<youtube::HitView>> {
+    let y = st.youtube.clone();
+    off_thread(move || y.search(&query, limit)).await
+}
+
+/// A song's audio, fetched into the cache. Audio only: see `fatstick_youtube`.
+#[tauri::command]
+async fn youtube_fetch(st: State<'_, AppState>, id: String) -> Res<fatstick_youtube::Fetched> {
+    let y = st.youtube.clone();
+    off_thread(move || y.fetch(&id)).await
+}
+
+#[tauri::command]
+fn youtube_cancel(st: State<AppState>, id: String) {
+    st.youtube.cancel(&id);
+}
+
+/// Hear a fetched song, as it is, without keeping it.
+#[tauri::command]
+fn youtube_play(st: State<AppState>, id: String, token: String, from: f64) -> Res<Playing> {
+    let f = st.youtube.store.get(&id).ok_or("That song isn't here any more. Try it again.")?;
+    let path = st.youtube.store.path_of(&f);
+    st.player.send(player::Cmd::Play { path, from, gain_db: 0.0, duration: f.duration, token, key: None, shape: player::Shape::default() });
+    Ok(Playing { from: "source".into() })
+}
+
+/// Into the library: tagged and copied into the music folder.
+#[tauri::command]
+async fn youtube_keep(st: State<'_, AppState>, id: String) -> Res<Track> {
+    let y = st.youtube.clone();
+    off_thread(move || y.keep(&id)).await
+}
+
+#[tauri::command]
+async fn youtube_set_folder(st: State<'_, AppState>, path: String) -> Res<youtube::Status> {
+    let y = st.youtube.clone();
+    off_thread(move || y.set_folder(Path::new(&path))).await
+}
+
 // ---- stick layout windows -------------------------------------------------------------------
 
 /// Printing (a setlist): through the webview, as window.print() does nothing
@@ -791,6 +871,10 @@ fn main() {
             let music = folder::MusicFolder::start(lib.clone(), tools.clone(), move |name, v| {
                 let _ = h.emit(name, v);
             });
+            let h = app.handle().clone();
+            let youtube = youtube::Youtube::new(lib.clone(), tools.clone(), music.clone(), &data_dir, cache.dir(), move |name, v| {
+                let _ = h.emit(name, v);
+            });
             app.manage(AppState {
                 lib: lib.clone(),
                 tools: tools.clone(),
@@ -803,6 +887,7 @@ fn main() {
                 data_dir: data_dir.clone(),
                 music,
                 excluded: Arc::new(Mutex::new(exclude::load(&lib.lock().unwrap()))),
+                youtube,
             });
             Ok(())
         })
@@ -844,6 +929,16 @@ fn main() {
             player_stop,
             player_volume,
             about,
+            youtube_status,
+            youtube_setup,
+            youtube_cancel_setup,
+            youtube_update,
+            youtube_search,
+            youtube_fetch,
+            youtube_cancel,
+            youtube_play,
+            youtube_keep,
+            youtube_set_folder,
             selftest_report,
         ])
         .run(tauri::generate_context!())

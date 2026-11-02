@@ -49,6 +49,8 @@ pub struct TagEdit {
     pub disc: Option<String>,
     #[serde(default)]
     pub labels: Option<Vec<String>>,
+    #[serde(default)]
+    pub comment: Option<String>,
 }
 
 impl TagEdit {
@@ -107,6 +109,7 @@ fn apply(tag: &mut Tag, e: &TagEdit, numbers: (Option<Option<u32>>, Option<Optio
     text(tag, ItemKey::AlbumArtist, &e.albumartist);
     text(tag, ItemKey::Genre, &e.genre);
     text(tag, ItemKey::Composer, &e.composer);
+    text(tag, ItemKey::Comment, &e.comment);
     if let Some(l) = &e.labels {
         text(tag, ItemKey::ContentGroup, &Some(join_labels(l)));
     }

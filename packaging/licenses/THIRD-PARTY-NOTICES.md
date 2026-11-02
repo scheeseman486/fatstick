@@ -12,8 +12,9 @@ or later (see `COPYING`). It ships with the following parts made by others.
 - Built by `packaging/ffmpeg/build-ffmpeg.sh` in the Fatstick source,
   which fetches the exact sources and holds the full configure line: an
   audio-only build with decoders for MP3, FLAC, ALAC, WAV, AIFF, AAC, Vorbis,
-  Opus, WMA, WavPack and APE, the libmp3lame encoder, and the aresample,
-  volume and ebur128 filters.
+  Opus, WMA, WavPack and APE, the libmp3lame encoder, the aresample, volume and
+  ebur128 filters, and the Ogg and M4A muxers that put audio from YouTube into
+  files without re-encoding it.
 - FFmpeg runs as a separate program; Fatstick starts it and reads its
   output. You may replace the bundled `ffmpeg` and `ffprobe` with your own
   build: set `FATSTICK_FFMPEG_DIR` to the folder holding them.
@@ -34,6 +35,16 @@ For three years from the date you received a copy of Fatstick, the
 source code of the exact FFmpeg and LAME versions above is available from the
 same place you got Fatstick: every release carries the source archives
 alongside the installers. The build script fetches them too.
+
+## yt-dlp and Deno (not included)
+
+Fatstick doesn't ship these. Asked to, it fetches them from their own releases
+into its data folder, for searching YouTube and fetching audio from it, and runs
+them as separate programs. You can use your own copies instead.
+
+- yt-dlp, from <https://github.com/yt-dlp/yt-dlp>: the Unlicense; its standalone
+  builds include other parts under their own licences (see its `THIRD_PARTY_LICENSES`).
+- Deno, from <https://github.com/denoland/deno>: MIT.
 
 ## Fonts (in the window)
 

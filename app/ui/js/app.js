@@ -90,8 +90,11 @@
     /** What the processing panel shows (a key of PROCESSES). It's closed (null)
      * whenever the app starts, until something opens it. */
     processing: null,
-    /** The sidebar shows the search panel. */
+    /** The sidebar shows the search panel, on your music or on YouTube. */
     searching: false,
+    searchSource: "music",
+    /** Songs from YouTube that aren't in the library: for the player, as "yt:<video id>". */
+    previews: new Map(),
     /** The playlist row showing its tags. */
     expanded: null,
     /** The music folder and its scan, and the scan's progress. */
@@ -114,7 +117,7 @@
   const stickSet = (id = S.setId) => S.sets.find((s) => s.id === id);
   const prof = (id) => S.profiles.find((p) => p.id === id) || S.profiles[0] || GENERIC;
   const unknownTrack = (id) => ({ id, path: "", filename: "(a track the library lost)", title: "", artist: "", album: "", codec: "", exists: false, duration: 0, size: 0 });
-  const track = (id) => S.tracks.get(id) || unknownTrack(id);
+  const track = (id) => S.tracks.get(id) || S.previews.get(id) || unknownTrack(id);
   const device = (id) => S.sticks.find((s) => s.id === id);
   /** A track from the library, new or changed. */
   function putTrack(t) {
@@ -132,9 +135,10 @@
     lib.refresh();
   }
   const lib = P.librarySetup({
-    S, api, DEMO, track, pl, collator, insertTracks, newPlaylist, putTracks, renderSide, renderDisplay, saveSetting, setView, startTrackDrag, playTrack, setProcessing,
+    S, api, DEMO, track, pl, collator, insertTracks, newPlaylist, putTracks, renderSide, renderDisplay, saveSetting, setView, startTrackDrag, playTrack, setProcessing, searchTabs,
     selectedTrackIds: () => (pl() ? selectedInOrder().map((e) => e.trackId) : []),
   });
+  const yt = P.youtubeSetup({ S, api, lib, pl, insertTracks, putTracks, renderSide, setView, playTrack, searchTabs });
   /** What a USB stick holds, going by the note its last sync left on it (or,
    * for a stick the OS hasn't mounted, the volume serial that sync recorded):
    * `{ set, note, ours }`, where `set` is this library's setlist on it,
@@ -617,14 +621,22 @@
     return h("div", { class: "side-foot" },
       h("button", {
         type: "button", class: `srch-btn${S.searching ? " on" : ""}`, id: "srch-btn", "aria-pressed": String(S.searching),
-        title: S.searching ? "Close the search (Esc)" : "Search your music (Ctrl+F)",
-        onclick: () => (S.searching ? lib.closeSearch() : lib.openSearch()),
+        title: S.searching ? "Close the search (Esc)" : "Search your music (Ctrl+F) or YouTube (Ctrl+Shift+F)",
+        onclick: () => (S.searching ? lib.closeSearch() : S.searchSource === "youtube" ? yt.open() : lib.openSearch()),
       }, icon("search"), h("span", { text: S.searching ? "Close search" : "Search" })));
+  }
+  /** The search panel's two sides. */
+  function searchTabs() {
+    const tab = (key, label, open) => h("button", {
+      type: "button", role: "tab", class: "srch-tab", id: `srch-tab-${key}`, "aria-selected": String(S.searchSource === key), text: label,
+      onclick: () => { if (S.searchSource !== key) open(); },
+    });
+    return [tab("music", "Your music", () => lib.openSearch()), tab("youtube", "YouTube", () => yt.open())];
   }
   function renderSide() {
     if (S.renaming) return;
     const side = $("side");
-    if (S.searching) { lib.renderSearch(side, sideFoot()); return; }
+    if (S.searching) { (S.searchSource === "youtube" ? yt : lib).renderSearch(side, sideFoot()); return; }
     const plItems = S.playlists.map((p) => {
       const ts = p.entries.map((e) => track(e.trackId));
       const dur = ts.reduce((a, t) => a + (t.exists ? t.duration || 0 : 0), 0);
@@ -2234,7 +2246,7 @@
       const place = `${sp.name}, ${sp.index + 1} of ${sp.count}.`;
       sub = sp.item.gap ? `${clock(sp.item.secs)} of silence. ${place}`
         : `${t.artist || "No artist tag"}. ${sp.item.joined ? `${sp.playlist.name} as one track. ` : ""}${place}${e && R.hasKey(e) ? ` Key ${keyText(R.key(e).pitch)}.` : ""}${pp.silent ? " Demo, no sound." : ""}`;
-    } else if (t && one) sub = `${t.artist || "No artist tag"}. From the library, on its own.${pp.silent ? " Demo track, no sound." : ""}`;
+    } else if (t && one) sub = `${t.artist || "No artist tag"}. ${pp.trackId.startsWith("yt:") ? "From YouTube." : "From the library, on its own."}${pp.silent ? " Demo track, no sound." : ""}`;
     else if (t) sub = `${t.artist || "No artist tag"}. ${p.name}, ${idx + 1} of ${p.entries.length}.${R.hasKey(e) ? ` Key ${keyText(R.key(e).pitch)}.` : ""}${pp.silent ? " Demo track, no sound." : ""}`;
     fill($("player"), 
       h("div", { class: "pad" },
@@ -2322,7 +2334,7 @@
       const t = track(pp.trackId);
       main = `${pp.playing ? "PLAY" : "PAUSE"} ${t.title || t.filename}`;
       time = clock(pp.pos);
-      sub = `${t.title || t.filename}${t.artist ? `, ${t.artist}` : ""}. From the library.`;
+      sub = `${t.title || t.filename}${t.artist ? `, ${t.artist}` : ""}. ${pp.trackId.startsWith("yt:") ? "From YouTube." : "From the library."}`;
     } else if (S.view === "stick" && !pp.entryId && s) {
       const plan = planSet(s);
       main = s.name;
@@ -2947,7 +2959,8 @@
     markPlaying();
     renderDisplay();
     try {
-      await api.play({ trackId, token, from, gainDb: 0, recipe: null });
+      if (trackId.startsWith("yt:")) await api.youtubePlay({ id: trackId.slice(3), token, from });
+      else await api.play({ trackId, token, from, gainDb: 0, recipe: null });
     } catch (err) {
       toast(String(err));
       if (S.player.token === token) stopPlayback();
@@ -3197,6 +3210,7 @@
   function markPlaying() {
     if (S.player.playlistId === S.current || !S.player.entryId) renderList();
     lib.markPlaying();
+    yt.markPlaying();
     stickView.markPlaying();
   }
 
@@ -3219,7 +3233,7 @@
   function insertTracks(ids, target, name = "Dropped files") {
     if (!ids.length) return;
     if (target && target.kind === "playlist") {
-      addTracks(ids, target.id);
+      addTracks(ids, target.id, target.index);
       toast(`Added ${plural(ids.length, "track")} to ${pl(target.id).name}.`, { label: "Undo", run: undo });
     } else if (target && target.kind === "new") {
       newPlaylist(name, ids);
@@ -3558,6 +3572,7 @@
     for (const r of d.el.querySelectorAll(".dragging")) r.classList.remove("dragging");
     if (!d.started) { if (commit && d.opts.onTap) d.opts.onTap(); return; }
     if (!commit || !d.target) return;
+    if (d.opts.onDrop) { d.opts.onDrop(d.ids, d.target); return; }
     insertTracks(d.ids, d.target, d.opts.name || (d.ids.length === 1 ? track(d.ids[0]).title || "New playlist" : "From the library"));
   }
   function tdragUp(e) { if (tdrag && e.pointerId === tdrag.pointerId) endTrackDrag(true); }
@@ -3679,6 +3694,7 @@
     if (modalOpen() || !$("menu").hidden) return;
     if (drag && e.key === "Escape") { e.preventDefault(); endDrag(false); return; }
     if (tdrag && e.key === "Escape") { e.preventDefault(); endTrackDrag(false); return; }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "f") { e.preventDefault(); yt.open(); return; }
     if (lib.onKey(e)) return;
     if (S.searching && e.key === "Escape" && !e.target.closest("input, select, textarea")) { e.preventDefault(); lib.closeSearch(); return; }
     if (e.target.closest("input, select, textarea")) return;
@@ -3783,6 +3799,7 @@
       { label: "Print a setlist…", key: "Ctrl+P", action: printSetlist, disabled: !stickSet() },
       "-",
       { label: "Search your music", key: "Ctrl+F", action: () => lib.openSearch() },
+      { label: "Search YouTube", key: "Ctrl+Shift+F", action: () => yt.open() },
       { label: S.view === "library" ? "Back to the playlist" : "Music library", action: () => setView(S.view === "library" ? "playlist" : "library") },
       "-",
       { heading: "Theme" },
@@ -3915,7 +3932,7 @@
     persist();
     scheduleWork();
     // For the app's self-test (tests/app_e2e.py) and for poking around in the inspector.
-    P.app = { S, setProcessing, playSetlist, setFilesOf, pl, stickSet, track, planSet, buildSyncPlan, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, edgesDialog, seekTo, refreshSticks, holder, selectSet, openStick, layoutData, setView, setlist, lib, toggleTags, ready: true };
+    P.app = { S, setProcessing, playSetlist, setFilesOf, pl, stickSet, track, planSet, buildSyncPlan, staleness, addPaths, playEntry, playTrack, stopPlayback, keyDialog, keyText, fadeDialog, edgesDialog, seekTo, refreshSticks, holder, selectSet, openStick, layoutData, setView, setlist, lib, yt, toggleTags, ready: true };
     if (S.ffmpegError) toast("ffmpeg wasn't found, so files can't be read or converted. Reinstall Fatstick to get it back.");
     if (!DEMO) {
       stickPoll = setInterval(() => { if (!(S.sync && S.sync.running)) refreshSticks(true); }, 3000);

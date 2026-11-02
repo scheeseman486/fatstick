@@ -1,0 +1,19 @@
+[package]
+name = "fatstick-youtube"
+description = "Fatstick's YouTube side, through yt-dlp: search, audio-only downloads, and getting yt-dlp and Deno"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+fatstick-audio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# Getting yt-dlp and Deno from their releases, with the system's trusted certificates.
+ureq = { version = "3", features = ["platform-verifier"] }
+sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"

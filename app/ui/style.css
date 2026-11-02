@@ -196,7 +196,15 @@ body.pl-dragging, body.pl-dragging * { cursor: grabbing !important; }
 .app { transition: grid-template-columns 0.18s ease; }
 .app.searching { --side-w: 340px; }
 .app.searching .side { overflow: hidden; gap: 0; }
-.srch { flex: 1 1 auto; min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 6px; }
+.srch { flex: 1 1 auto; min-height: 0; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; gap: 6px; }
+.srch-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--rule); }
+.srch-tab {
+  flex: 1 1 0; height: 28px; padding: 0 8px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  background: transparent; color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer;
+}
+.srch-tab:hover { color: var(--ink); }
+.srch-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.srch-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: var(--r-s) var(--r-s) 0 0; }
 .srch-box { display: flex; align-items: center; gap: 4px; position: relative; }
 .srch-ic { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: var(--ink-3); display: inline-flex; pointer-events: none; }
 .srch-in, .lib-q { width: 100%; padding-left: 30px; }
@@ -231,6 +239,39 @@ body.pl-dragging, body.pl-dragging * { cursor: grabbing !important; }
 .sr-div::before, .sr-div::after, .lr-div::after { content: ""; flex: 1 1 auto; border-top: 1px solid var(--rule); }
 .sr-div::before { flex: 0 0 10px; }
 .srch-foot { margin: 0 2px; padding-bottom: 4px; font-size: 12px; color: var(--ink-3); }
+
+/* YouTube's side of the search panel. Video titles are long: two lines of them. */
+.yr .sr-t { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.25; }
+.yr .sr-t .eq { display: inline-flex; vertical-align: -1px; margin-right: 4px; }
+.srch-scope .yt-line, .srch-scope .yt-note { margin: 0; }
+.yt-line.busy::before {
+  content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px;
+  border: 2px solid var(--rule); border-top-color: var(--accent); border-radius: 50%; animation: yt-spin 0.8s linear infinite;
+}
+@keyframes yt-spin { to { transform: rotate(360deg); } }
+.yt-err { color: var(--error); }
+.yt-note { color: var(--ink-2); }
+.yr-act { display: inline-flex; align-items: center; gap: 2px; min-height: 26px; }
+.yr-act .btn.small.icon { width: 24px; height: 24px; }
+.yr-add { opacity: 0.75; }
+.sr:hover .yr-add, .sr.sel .yr-add, .yr-add:focus-visible { opacity: 1; }
+.sr.sel .yr-act .btn { color: inherit; }
+.yr-add.failed { color: var(--error); opacity: 1; }
+.yr-pct { min-width: 28px; text-align: right; font-size: 12px; }
+.yr-bar { display: block; height: 3px; margin-top: 3px; border-radius: 2px; background: var(--rule); overflow: hidden; }
+.yr-bar[hidden] { display: none; }
+.yr-bar i { display: block; height: 100%; background: var(--accent); }
+.yt-more { margin: 6px 0 0 -2px; }
+.yt-foot { display: grid; gap: 2px; padding-bottom: 4px; }
+.yt-foot .srch-foot { padding-bottom: 2px; }
+.yt-where { margin: 0 2px; font-size: 12px; color: var(--ink-3); }
+.yt-where .btn.inline { font-size: 12px; min-height: 0; }
+.yt-setup { display: grid; gap: 10px; justify-items: start; padding: 10px 2px; }
+.yt-setup h3 { margin: 0; font-size: 15px; }
+.yt-setup p { margin: 0; font-size: 13px; color: var(--ink-2); }
+.yt-setup .yt-small { font-size: 12px; color: var(--ink-3); }
+.yt-prog { display: grid; gap: 4px; justify-items: start; width: 100%; font-size: 13px; }
+.yt-prog .yr-bar { width: 100%; margin: 0; }
 
 /* ---- tags --------------------------------------------------------------------- */
 /* Two shapes: your labels are rounded and coloured by name; a file's own tags

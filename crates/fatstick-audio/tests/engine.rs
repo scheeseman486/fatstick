@@ -313,6 +313,7 @@ fn tags_written_into_library_files() {
         track: Some("4/12".into()),
         disc: Some("2".into()),
         labels: Some(vec!["chill".into(), "road trip".into()]),
+        comment: None,
     };
     for n in ["a.mp3", "b.flac", "c.opus", "d.m4a"] {
         let before = probe(&t, &p(n)).unwrap();

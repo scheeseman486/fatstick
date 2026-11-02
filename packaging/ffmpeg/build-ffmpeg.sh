@@ -61,7 +61,7 @@ build_one() {
       --enable-parser=mpegaudio,flac,aac,vorbis,opus \
       --enable-decoder=mp1,mp2,mp3,mp3float,flac,alac,aac,vorbis,opus,wmav1,wmav2,wmapro,wmalossless,ape,wavpack,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_f64le,pcm_s16be,pcm_s24be,pcm_s32be,pcm_u8 \
       --enable-encoder=libmp3lame,pcm_s16le,pcm_f32le \
-      --enable-muxer=mp3,wav,pcm_f32le,pcm_s16le,null,data \
+      --enable-muxer=mp3,wav,pcm_f32le,pcm_s16le,null,data,ogg,opus,ipod \
       --enable-filter=aresample,aformat,volume,ebur128,pan,anull,abuffer,abuffersink,anullsink,atrim &&
     make -s -j"$JOBS" && make -s install)
 }

@@ -17,6 +17,7 @@ fatstick-core = { path = "../../crates/fatstick-core" }
 fatstick-device = { path = "../../crates/fatstick-device" }
 fatstick-audio = { path = "../../crates/fatstick-audio" }
 fatstick-library = { path = "../../crates/fatstick-library" }
+fatstick-youtube = { path = "../../crates/fatstick-youtube" }
 cpal = "0.16"
 # Watching the music folder for changes.
 notify = "8"

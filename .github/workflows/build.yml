@@ -166,4 +166,5 @@ jobs:
       - name: Tests on macOS, after the upload so a failure doesn't hold up the build (FAT writer, audio engine, library; the app's sync and player)
         run: |
           cargo test -p fatstick-core -p fatstick-audio -p fatstick-library
+          cargo test -p fatstick-youtube --lib
           cargo test --manifest-path app/src-tauri/Cargo.toml

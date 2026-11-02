@@ -81,6 +81,17 @@ impl Tools {
         c
     }
 
+    /// Whether this ffmpeg can write a format (a build of ours from before it
+    /// was added, or someone's own, may not).
+    pub fn can_mux(&self, name: &str) -> bool {
+        run(self.ffmpeg().arg("-muxers")).is_ok_and(|o| {
+            String::from_utf8_lossy(&o.stdout).lines().any(|l| {
+                let mut p = l.split_whitespace();
+                p.next().is_some_and(|flags| flags.contains('E')) && p.next().is_some_and(|n| n.split(',').any(|x| x == name))
+            })
+        })
+    }
+
     /// "ffmpeg version n9.0.2 ..." first line, for the About box.
     pub fn version(&self) -> String {
         run(self.ffmpeg().arg("-version"))

@@ -66,6 +66,37 @@ GPL version 3 or later.
   Each result shows its labels (those that matched first), with
   "+2" for any that don't fit, as in the library. Double-click a song to hear it, as in the library; drag songs
   into the playlist to add them.
+- **YouTube.** The search panel's other tab, or "Search YouTube" in the menu
+  (Ctrl+Shift+F). Type and press Enter, or paste a link to a video. Double-click
+  a result to hear it, in the player at the bottom; drag it into a playlist, or
+  press Shift+Enter, to add it to that playlist; press its button to add it to
+  the library. Several can be selected, as in the music search. **Only the audio
+  is ever fetched.** yt-dlp is asked for audio-only formats and nothing else, so
+  a video with no audio-only stream fails rather than fetching the video; your
+  own yt-dlp config is ignored; and the file that arrives is checked with ffprobe.
+  The audio stays as YouTube sent it, not re-encoded: Opus in an `.opus` file, or
+  AAC in an `.m4a` if your ffmpeg can't write Ogg. A song you only hear stays in
+  the cache (1 GB, the least recently used going first) and leaves nothing in
+  your music folder. One you add goes into a folder there ("YouTube" unless you
+  change it), named and tagged from what YouTube knows about it: its track,
+  artist, album and year for music it recognizes, otherwise the video's title
+  without its "(Official Video)", split at " - " into artist and title, or the
+  channel for the artist. The link goes in the Comment tag. Added once, it's that
+  track from then on: a video isn't fetched or filed twice. The upload date isn't
+  the song's year, so it isn't used as one. What YouTube's terms allow you to
+  download is for you to check.
+
+  ![The YouTube side of the search panel, one song playing and another on its way](docs/youtube.png)
+
+  yt-dlp and Deno don't come with the app, as YouTube changes often and yt-dlp
+  has to keep up with it. The first time, the panel offers to get them (about 85
+  MB) from their official GitHub releases, checks them against the published
+  checksums, sees them run, and keeps them in the data folder; nothing is
+  downloaded until you press the button. That copy of yt-dlp is then checked for
+  a new version once a day, when YouTube is used, and "Update" in the panel does
+  it now. yt-dlp or Deno on your PATH is used as it is, and is yours to update.
+  Deno runs the code YouTube asks to be run, in its sandbox; without it yt-dlp
+  still works, but some songs fail.
 - **Tags in the playlist.** Click a track (or press T) to see its tags under
   it; click again to hide them. "Edit tags" opens the Tags panel on the selected
   tracks, and while it's open a click just selects, as the tags are there
@@ -305,10 +336,12 @@ now.
 | What | Linux | macOS | Windows |
 |------|-------|-------|---------|
 | Library (`library.db`, SQLite: tracks, measurements, playlists, profiles, setlists, past syncs) | `~/.local/share/fatstick` | `~/Library/Application Support/fatstick` | `%APPDATA%\fatstick` |
-| Prepared files (safe to clear, from the menu) | `~/.cache/fatstick` | `~/Library/Caches/fatstick` | `%LOCALAPPDATA%\fatstick` |
+| Prepared files, and songs from YouTube only heard (safe to clear, from the menu) | `~/.cache/fatstick` | `~/Library/Caches/fatstick` | `%LOCALAPPDATA%\fatstick` |
+| yt-dlp and Deno, if the app got them (`tools` in the library's folder) | `~/.local/share/fatstick/tools` | `~/Library/Application Support/fatstick/tools` | `%APPDATA%\fatstick\tools` |
 
 `FATSTICK_DATA_DIR` and `FATSTICK_CACHE_DIR` override these. `FATSTICK_FFMPEG_DIR` points the
-app at your own `ffmpeg` and `ffprobe` instead of the bundled ones.
+app at your own `ffmpeg` and `ffprobe` instead of the bundled ones, and `FATSTICK_YTDLP` and
+`FATSTICK_DENO` at a particular `yt-dlp` and `deno`.
 
 Fatstick used to be called Playlist2USB. On its first start it moves the
 `playlist2usb` folders above to their new names, so the library, playlists
@@ -325,14 +358,15 @@ crates/fatstick-audio     the ffmpeg engine: probing, MP3 frame scan, loudness, 
 crates/fatstick-stretch   key shifting: Signalsmith Stretch (MIT, vendored C++) behind a small C interface
 crates/fatstick-library   the SQLite library, reading files, folders and playlist files into it, and the
                           music folder's scan (new, changed, moved and missing files)
+crates/fatstick-youtube   YouTube through yt-dlp: search, audio-only fetches, keeping a song, getting yt-dlp and Deno
 crates/fatstick-cli       `fatstick` command-line tool
 crates/fatstick-helper    tiny privileged helper (Windows UAC, Linux pkexec fallback)
 app/src-tauri             the app: commands, background preparation, sync, sticks, the player (cpal)
 app/ui                    the window: plain HTML/CSS/JS. js/api.js talks to the app (or to demo data in a
                           browser); js/names.js and js/rules.js hold the naming and copy-or-encode rules;
                           js/library.js is the library view, the search panel and the tag editor,
-                          js/search.js the search itself, js/stickview.js a setlist's view, and
-                          js/setlist.js the printed setlist
+                          js/search.js the search itself, js/youtube.js the search panel's YouTube side,
+                          js/stickview.js a setlist's view, and js/setlist.js the printed setlist
 packaging/ffmpeg          builds the bundled LGPL ffmpeg and ffprobe, with LAME, from source
 packaging/licenses        LGPL texts and third-party notices, installed with the app
 packaging/linux           polkit policy for the pkexec fallback
@@ -412,7 +446,7 @@ cargo build --release -p fatstick-cli --target x86_64-unknown-linux-musl
 python3 tests/kernel_stick.py --kroot <kernel dir> --fatstick target/x86_64-unknown-linux-musl/release/fatstick
 ```
 
-`tests/app_e2e.py` runs the real app under Xvfb, three times. The first run starts
+`tests/app_e2e.py` runs the real app under Xvfb, four times. The first run starts
 from an empty library, with the transfer panel closed until a setlist's button opens it: it adds two folders of real audio (FLAC, Opus, WAV,
 MP3s at 320 kbps and at 22.05 kHz mono), turns on even volume, cuts and pads
 a track, shifts another 5 semitones up (changing its key live while it
@@ -430,8 +464,10 @@ asks first. The third chooses a music folder, scans and searches it, writes
 tags into two files as they're edited (no prompts) and renames them from the
 library view, and checks that
 a file copied into the folder shows up by itself (and that the scan's own
-reading of the folder doesn't set off another scan). Then the image is
-read with tools that aren't ours: fsck.fat, mtools (the order a player sees),
+reading of the folder doesn't set off another scan). The fourth searches YouTube,
+hears songs and adds them, with `tests/fake_ytdlp.py` standing in for yt-dlp, so
+the tests don't depend on YouTube; its log shows that every fetch named audio-only
+formats. Then the image is read with tools that aren't ours: fsck.fat, mtools (the order a player sees),
 ffprobe (codec, sample rate, tags, cover, lengths), and ffmpeg's EBU R128
 meter and volumedetect (−18 LUFS where the volume was evened out; silence
 where it was added), and the shifted track is measured: 550 Hz became 734 Hz,
@@ -451,6 +487,10 @@ Working, and tested on disk images; not yet tried on real hardware.
 - The whole app is tested end to end on Linux, on disk images, with a silent
   audio output. What a setlist plays is checked sample by sample in the stream
   the player takes, not by ear.
+- YouTube: the real yt-dlp has searched and been given the exact options the app
+  uses, and a real file from YouTube has gone through unpacking, playing, tagging
+  and keeping. A whole download through the app, and getting yt-dlp and Deno from
+  GitHub, are only tested against stand-ins so far: try them on a home connection.
 - Not yet run: real USB sticks (the OS broker and disk-level code, meaning
   unmount, raw whole-disk access, power-off and eject, compiles for all three
   systems), a real sound card, and the app on Windows and macOS. The Windows

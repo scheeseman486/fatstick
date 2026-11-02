@@ -73,6 +73,16 @@
       libraryForget: (del, hide) => invoke("library_forget", { delete: del, hide }),
       libraryWriteTags: (jobs) => invoke("library_write_tags", { jobs }),
       libraryRename: (jobs) => invoke("library_rename", { jobs }),
+      youtubeStatus: () => invoke("youtube_status"),
+      youtubeSetup: () => invoke("youtube_setup"),
+      youtubeCancelSetup: () => invoke("youtube_cancel_setup"),
+      youtubeUpdate: () => invoke("youtube_update"),
+      youtubeSearch: (query, limit) => invoke("youtube_search", { query, limit }),
+      youtubeFetch: (id) => invoke("youtube_fetch", { id }),
+      youtubeCancel: (id) => invoke("youtube_cancel", { id }),
+      youtubePlay: ({ id, token, from }) => invoke("youtube_play", { id, token, from }),
+      youtubeKeep: (id) => invoke("youtube_keep", { id }),
+      youtubeSetFolder: (path) => invoke("youtube_set_folder", { path }),
       async pickFolder(title) {
         const r = await T.dialog.open({ directory: true, multiple: false, title });
         return r || null;
@@ -201,6 +211,27 @@
         }, 250);
       }
     }
+
+    // YouTube, made up: setting up takes a moment, a search answers with a few
+    // versions of whatever was typed, and a song "arrives" in a second or so.
+    const YT = { ready: false, cancelSetup: false, hits: new Map(), kept: new Map(), cancelled: new Set(), folder: "YouTube" };
+    const ytStatus = () => ({
+      ytdlp: YT.ready ? { path: "tools/yt-dlp", version: "2026.10.26", managed: true } : null,
+      deno: YT.ready ? { path: "tools/deno", version: "2.9.6", managed: true } : null,
+      ytdlpOld: false, canGet: true, settingUp: false,
+      folder: music.root ? `${music.root}/${YT.folder}` : null,
+    });
+    const YT_FORMS = [
+      ["{q} - Official Audio", "The Night Shift - Topic", 214, 1840233],
+      ["{q} (Official Video)", "The Night Shift", 231, 48210554],
+      ["{q} (Live at the Roundhouse)", "Roundhouse Sessions", 276, 913402],
+      ["{q} (Lyrics)", "Lyric Corner", 214, 6204118],
+      ["The Night Shift - {q} (Remastered 2019)", "The Night Shift", 219, 402155],
+      ["{q} - Piano Cover", "Keys at Home", 188, 77102],
+      ["{q} (Slowed)", "Late Hours", 262, 15033],
+      ["{q} - Acoustic Session", "Porch Tapes", 203, 241870],
+    ];
+    const ytPlain = (q) => q.replace(/\s+/g, " ").trim();
 
     return {
       kind: "demo",
@@ -445,6 +476,75 @@
         return out;
       },
       async pickFolder() { return "~/Music"; },
+      async youtubeStatus() { return ytStatus(); },
+      async youtubeSetup() {
+        YT.cancelSetup = false;
+        for (const [what, total] of [["yt-dlp", 41e6], ["Deno", 42e6]]) {
+          for (let done = 0; done < total; done += total / 12) {
+            if (YT.cancelSetup) throw new Error("Cancelled.");
+            ev.emit("youtube-setup", { what, done, total });
+            await sleep(60);
+          }
+        }
+        YT.ready = true;
+        return ytStatus();
+      },
+      async youtubeCancelSetup() { YT.cancelSetup = true; },
+      async youtubeUpdate() { return { changed: false, status: ytStatus() }; },
+      async youtubeSearch(query, limit) {
+        await sleep(350);
+        const q = ytPlain(query);
+        if (/^nothing/i.test(q)) return [];
+        if (/^fail/i.test(q)) throw new Error("Couldn't reach YouTube. Check the connection and try again.");
+        const out = [];
+        for (let i = 0; i < Math.min(limit, 40); i++) {
+          const [form, channel, duration, views] = YT_FORMS[i % YT_FORMS.length];
+          const round = Math.floor(i / YT_FORMS.length);
+          const id = `demo${String(i).padStart(2, "0")}${[...q].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36)}xxxxxxx`.slice(0, 11);
+          const hit = { id, title: form.replace("{q}", q) + (round ? ` (take ${round + 1})` : ""), channel, duration, views: Math.floor(views / (round + 1)) };
+          YT.hits.set(id, hit);
+          out.push({ ...hit, trackId: YT.kept.get(id) || null });
+        }
+        return out;
+      },
+      async youtubeFetch(id) {
+        const hit = YT.hits.get(id);
+        if (!hit) throw new Error("That isn't a YouTube video.");
+        const total = hit.duration * 16000;
+        YT.cancelled.delete(id);
+        if (!YT.ready) throw new Error("yt-dlp isn't set up yet.");
+        if (!hit.fetched) {
+          for (let done = 0; done < total; done += total / 10) {
+            if (YT.cancelled.has(id)) throw new Error("Cancelled.");
+            ev.emit("youtube-progress", { id, done, total });
+            await sleep(70);
+          }
+          hit.fetched = true;
+        }
+        return { id, file: `${id}.opus`, duration: hit.duration, tags: {} };
+      },
+      async youtubeCancel(id) { YT.cancelled.add(id); },
+      youtubePlay({ id, token, from = 0 }) { return this.playParts({ token, from, seconds: YT.hits.get(id).duration }); },
+      async youtubeKeep(id) {
+        if (!music.root) throw new Error("Choose your music folder first.");
+        const hit = YT.hits.get(id);
+        await sleep(120);
+        const split = hit.title.includes(" - ") ? hit.title.split(" - ") : [hit.channel.replace(" - Topic", ""), hit.title];
+        const [artist, title] = [split[0], split.slice(1).join(" - ").replace(/\s*\((Official (Video|Audio)|Lyrics)\)/, "")];
+        const t = {
+          id: `t-${id}`, path: `${music.root}/${YT.folder}/${artist} - ${title}.opus`, filename: `${artist} - ${title}`, title, artist, album: "", albumartist: "", year: null, track: null, disc: null,
+          genre: "", composer: "", labels: [], codec: "opus", bitrate: 128, peakBitrate: 128, vbr: true, sampleRate: 48000, bits: 0, channels: 2, duration: hit.duration, size: hit.duration * 16000,
+          lufs: null, truePeak: null, cover: false, exists: true, quick: false, drm: false,
+        };
+        tracks.set(t.id, t);
+        YT.kept.set(id, t.id);
+        return t;
+      },
+      async youtubeSetFolder(path) {
+        if (!music.root || !path.startsWith(music.root)) throw new Error("Songs from YouTube go in your music folder, so that's a folder in there.");
+        YT.folder = path.slice(music.root.length + 1) || "";
+        return ytStatus();
+      },
       on: ev.on,
     };
   }

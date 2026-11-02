@@ -673,9 +673,10 @@
           const now = performance.now();
           if (X.lastTap && X.lastTap.id === id && now - X.lastTap.t < 450) {
             X.lastTap = null;
-            core.playTrack(id);
+            (X.play || core.playTrack)(id);
           } else X.lastTap = { id, t: now };
         },
+        onDrop: X.drop,
       });
     }
     function rangeOf(ids, a, b, into) {
@@ -707,8 +708,8 @@
       else if (e.key === "Home") go(0);
       else if (e.key === "End") go(ids.length - 1);
       else if (mod && e.key.toLowerCase() === "a") X.set(new Set(ids), X.focus);
-      else if (e.key === "Enter" && e.shiftKey) addToCurrent(X.ordered());
-      else if (e.key === "Enter") { const id = X.focus && X.sel.has(X.focus) ? X.focus : X.ordered()[0]; if (id) core.playTrack(id); }
+      else if (e.key === "Enter" && e.shiftKey) (X.add || addToCurrent)(X.ordered());
+      else if (e.key === "Enter") { const id = X.focus && X.sel.has(X.focus) ? X.focus : X.ordered()[0]; if (id) (X.play || core.playTrack)(id); }
       else if (e.key === "Escape") { if (X.sel.size) X.set(new Set(), null); else if (X.escape) X.escape(); else return false; }
       else if ((e.key === "Delete" || e.key === "Backspace") && X.remove && goneOf(X.ordered()).length) X.remove(X.ordered());
       else return false;
@@ -804,7 +805,9 @@
         onkeydown: (e) => { if (listKey(e, SX, 8)) e.stopPropagation(); },
         oncontextmenu: (e) => trackMenu(e, SX),
       });
+      SE.tabs = h("div", { class: "srch-tabs", role: "tablist", "aria-label": "Search in" });
       SE.root = h("div", { class: "srch" },
+        SE.tabs,
         h("div", { class: "srch-box" },
           h("span", { class: "srch-ic" }, icon("search")),
           SE.input,
@@ -822,11 +825,13 @@
       if (r.parentNode !== side) fill(side, r, foot);
       else if (r.nextSibling) r.nextSibling.replaceWith(foot);
       else side.append(foot);
+      fill(SE.tabs, core.searchTabs());
       refreshSearch();
     }
     function openSearch() {
       if (S.view === "library") core.setView("playlist");
       S.searching = true;
+      S.searchSource = "music";
       core.renderSide();
       document.getElementById("app").classList.add("searching");
       SE.input.focus();
@@ -1500,7 +1505,7 @@
       panelChanged() { if (S.view === "library" && V.root && root()) renderLibFoot(); },
       /** The playlist's selection changed. */
       followList() { if (S.sel.size) tagSource = "list"; renderEditor(); },
-      inMusic, renameDialog, renderView, refresh, useFolder, markPlaying, trackToPlay, renderSearch, openSearch, closeSearch, searchRoot,
+      inMusic, renameDialog, renderView, refresh, useFolder, markPlaying, trackToPlay, renderSearch, openSearch, closeSearch, searchRoot, rowsDown, listKey, rangeOf,
       onProgress, onScanned, onKey, display, revealInLibrary,
       /** The folder's state from the window's start, unless a scan's event beat it here. */
       initial(music) {

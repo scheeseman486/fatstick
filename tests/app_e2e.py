@@ -14,6 +14,10 @@ runs a debug build of the app three times under Xvfb with FATSTICK_SELFTEST:
    a few more files), scans and searches it, writes tags into two files and
    renames them through the library view, and sees a file copied into the
    folder show up by itself. ffprobe reads the tags back.
+4. tests/app_selftest4.js searches YouTube with tests/fake_ytdlp.py standing in
+   for yt-dlp, hears a song without keeping it and adds others to the library and
+   a playlist. ffprobe checks they hold audio alone, and the stand-in's log that
+   no command line ever asked for anything else.
 
 Then it reads the image with tools that aren't ours: fsck.fat, mtools (the
 order a player sees), ffprobe (codec, bitrate, tags, cover) and ebur128
@@ -281,6 +285,37 @@ def main():
     record("files the library didn't edit are byte for byte the same", sums(cfg["untouched"]) == untouched)
     with open(spare, "rb") as f:
         record("the excluded image was never written", f.read() == b"\x5a" * (16 << 20))
+
+    # Phase 4: YouTube, with a stand-in for yt-dlp, and for Deno (which is only
+    # asked its version).
+    ytlog = os.path.join(work, "ytdlp.log")
+    deno = os.path.join(work, "deno")
+    with open(deno, "w") as f:
+        f.write("#!/bin/sh\necho 'deno 2.9.6 (stable, release, x86_64)'\n")
+    os.chmod(deno, 0o755)
+    yt_env = dict(env, FATSTICK_YTDLP=os.path.join(ROOT, "tests", "fake_ytdlp.py"), FATSTICK_DENO=deno, FAKE_YTDLP_LOG=ytlog)
+    run_app("phase 4", "app_selftest4.js", {"root": cfg["root"], "outside": work}, yt_env)
+    yt_dir = os.path.join(cfg["root"], "YouTube")
+    kept = sorted(os.listdir(yt_dir)) if os.path.isdir(yt_dir) else []
+    record("the songs added are in the YouTube folder, and nothing else is", kept == ["Some Channel - Second Song.opus", "The Band - First Song.opus", "The Band - Third Song Proper.opus"], str(kept))
+    for name in kept:
+        path = os.path.join(yt_dir, name)
+        j = json.loads(subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format", path], capture_output=True, text=True).stdout or "{}")
+        streams = j.get("streams", [])
+        record(f"{name}: audio alone, as YouTube sent it (ffprobe)", [s.get("codec_type") for s in streams] == ["audio"] and streams[0].get("codec_name") == "opus", str([(s.get("codec_type"), s.get("codec_name")) for s in streams]))
+        tags = {k.lower(): v for k, v in {**j.get("format", {}).get("tags", {}), **(streams[0].get("tags", {}) if streams else {})}.items()}
+        record(f"{name}: tagged, and says where it came from", tags.get("title") and tags.get("artist") and tags.get("comment", "").startswith("https://www.youtube.com/watch?v="), str(tags))
+    with open(ytlog) as f:
+        asked = [json.loads(l) for l in f]
+    fetches = [a for a in asked if "--no-simulate" in a]
+    def selector(a):
+        return a[a.index("--format") + 1]
+    record("the stand-in was asked to fetch songs", len(fetches) >= 5, str(len(fetches)))
+    record("every fetch named audio-only formats, with nothing to fall back to", all(all(alt.startswith("bestaudio[") for alt in selector(a).split("/")) for a in fetches), str({selector(a) for a in fetches}))
+    record("no command line mentions video formats", not any("bestvideo" in x or x == "-x" or "merge-output" in x for a in asked for x in a))
+    record("every run ignored yt-dlp's own config", all("--ignore-config" in a for a in asked if a != ["--version"]))
+    record("every run was given Deno", all(f"deno:{deno}" in a for a in asked if a != ["--version"]))
+    record("nothing typed reached yt-dlp except after --", all(a[a.index("--") + 1].startswith(("ytsearch", "https://www.youtube.com/watch?v=")) for a in asked if a != ["--version"]))
 
     shutil.rmtree(work, ignore_errors=True)
     passed = sum(ok for _, ok in RESULTS)
