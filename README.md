@@ -42,15 +42,17 @@ GPL version 3 or later.
   One a playlist still has stays there, where Locate can find its file
   again; if a file comes back, the next scan lists it again. A track's
   labels that don't fit its row show as "+2": hover it for all of them.
-- **Tags, and labels of your own.** Select tracks in the library to see and
-  change their tags (several at once: "Various" fields stay as they are
-  unless you type over them). Labels are your own free-form tags ("road
+- **Tags, and labels of your own.** The "Tags" button at the top opens the tag
+  editor in the panel at the right, beside whatever you're looking at. It shows
+  the tracks selected in a playlist, the library or the search results (several
+  at once: "Various" fields stay as they are unless you type over them). A file
+  outside your music folder shows its tags without letting them change. Labels are your own free-form tags ("road
   trip", "kids", "sleep"), kept in each file's Grouping field where other
   players see them too, and shown as coloured boxes, one colour per label.
   A change is written into the files as soon as it's entered: Enter, or
   leaving the field (Esc puts a field back first); a label as soon as it's
   added or taken off. The editor says what it just saved, with Undo beside
-  it, and Ctrl+Z in the library undoes tag edits one at a time. Nothing asks
+  it, and Ctrl+Z in the library view undoes tag edits one at a time. Nothing asks
   first, and clicking elsewhere saves what was typed. "Clean up file names…" renames files from their tags with
   the same template language as names on a stick; files stay in their
   folders and keep their type. Nothing outside the music folder is touched.
@@ -64,24 +66,29 @@ GPL version 3 or later.
   "+2" for any that don't fit, as in the library. Double-click a song to hear it, as in the library; drag songs
   into the playlist to add them.
 - **Tags in the playlist.** Click a track (or press T) to see its tags under
-  it; click again to hide them. "Edit tags…" opens the tag editor there, and
-  "Show in the library" in a track's right-click menu opens the library with
-  it selected (or says why it can't: a file outside the music folder).
+  it; click again to hide them. "Edit tags" opens the Tags panel on the selected
+  tracks, and while it's open a click just selects, as the tags are there
+  instead. "Show in the library" in a track's right-click menu opens the
+  library with it selected (or says why it can't: a file outside the music
+  folder).
+
+  ![The Tags panel beside a playlist, with a track selected](docs/tags.png)
+
 
 - **Setlists.** A setlist holds one or more playlists in the order you choose,
   and says how they go on a stick: one folder each, or a single playlist at the
   top level. It also has a player profile, which sets the bitrate cap, sample
   rates, tag version, cover art and file names. A Generic profile is built in;
   make your own for a particular player.
-- **FAT USB Stick transfer.** The panel at the right of the window is where
-  music leaves the app. It's closed whenever the app starts, and the "FAT USB
-  Stick transfer" button at the top (or the menu) opens and closes it. It shows
-  the setlist, what is on the stick now, what the next sync would write,
+- **The panel at the right.** Tools that work on your music, one at a time:
+  "Tags" and "FAT USB Stick transfer", from their buttons at the top (or the
+  menu). It's closed whenever the app starts, sits beside any view once open,
+  and stays open as you move between them.
+- **FAT USB Stick transfer.** Where music leaves the app. It shows the setlist, what is on the stick now, what the next sync would write,
   whether it fits, and the sync itself. A sync carries on with the panel
   closed: the button shows it's busy and the display counts it up; if it stops,
   a message offers to show why. A stick you plug in is marked in the sidebar,
-  and its message opens the panel. The library view has the whole window, so
-  the panel waits behind it. Other ways of copying are meant to go in this
+  and its message opens the panel. Other ways of copying are meant to go in this
   panel too: keeping what's already on a stick, copying into a folder, a
   particular player, burning a CD.
 
@@ -198,7 +205,7 @@ GPL version 3 or later.
   through play & stop (to the end of the playlist), repeat one song and
   repeat playlist; the display shows RPT or RPT1.
 
-![The music library: browsing by label, four tracks selected in the tag editor](docs/library.png)
+![The music library: browsing by label, four tracks selected, their tags in the panel](docs/library.png)
 
 ![The search panel, with a track's tags shown in the playlist](docs/search.png)
 

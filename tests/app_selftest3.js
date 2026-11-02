@@ -102,17 +102,18 @@
     // Tags for two tracks: a genre, a label added and one taken off.
     clickRow(rowOf("Lanterns"));
     clickRow(rowOf("Harbour Song"), { ctrlKey: true });
-    check("two tracks selected", $$(".lr.sel").length === 2 && /2 tracks/.test($(".lib-edit h3").textContent));
-    const genre = $('.lib-edit input[id^="ted-genre"]');
+    $("#proc-tags").click();
+    check("two tracks selected, in the Tags panel", $$(".lr.sel").length === 2 && /2 tracks/.test($(".st-tags .ted-head h3").textContent));
+    const genre = $('.st-tags input[id^="ted-genre"]');
     typeIn(genre, "Night Folk");
     genre.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-    const lbl = $('.lib-edit input[id^="ted-lbl"]');
+    const lbl = $('.st-tags input[id^="ted-lbl"]');
     lbl.value = "kitchen";
     lbl.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-    const road = $$(".lib-edit .tag.lbl").find((t) => /road trip/.test(t.textContent));
+    const road = $$(".st-tags .tag.lbl").find((t) => /road trip/.test(t.textContent));
     road.querySelector('button[aria-label^="Remove"]').click();
-    const wrote = await until(() => /“road trip” taken off/.test($(".lib-edit .ted-status").textContent), 30000);
-    check("each change is written as it's made, with no prompt", !!wrote && $("#modal-back").hidden, $(".lib-edit .ted-status").textContent);
+    const wrote = await until(() => /“road trip” taken off/.test($(".st-tags .ted-status").textContent), 30000);
+    check("each change is written as it's made, with no prompt", !!wrote && $("#modal-back").hidden, $(".st-tags .ted-status").textContent);
     const now = (title) => inLib().find((t) => t.title === title);
     check("the library reads them back", ["Lanterns", "Harbour Song"].every((x) => now(x).genre === "Night Folk" && now(x).labels.includes("kitchen") && now(x).labels.includes("chill") && !now(x).labels.includes("road trip")),
       ["Lanterns", "Harbour Song"].map((x) => `${now(x).genre} [${now(x).labels}]`).join(" / "));

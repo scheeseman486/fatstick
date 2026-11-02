@@ -51,8 +51,8 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.waitForTimeout(60);
   };
 
-  // 0. The processing panel: closed when the app starts, opened by its button,
-  // and out of the way of the library. Left open for the checks after this.
+  // 0. The processing panel: closed when the app starts, opened by its buttons,
+  // beside any view. Left open on the transfer for the checks after this.
   {
     const panel = p.locator('#stick');
     const btn = p.locator('#proc-fat');
@@ -93,16 +93,29 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.locator('#menu').getByText('FAT USB Stick transfer').click();
     await settled();
     check('the menu opens it', await panel.isVisible() && await pressed());
-    // The library has the whole width, and the panel waits behind it.
+    // It stays beside the library, and the library has the room when it's closed.
     await p.locator('#lib-btn').click();
-    check('the library view has the whole window', await panel.isHidden() && !(await pressed()) && Math.abs(await right('#libview') - await right('#player')) < 2);
+    await settled();
+    check('it stays open beside the library', await panel.isVisible() && await pressed() && await right('#libview') <= (await panel.boundingBox()).x + 1);
+    await p.locator('#proc-close').click();
+    await panel.waitFor({ state: 'hidden' });
+    check('closed, the library has the whole window', Math.abs(await right('#libview') - await right('#player')) < 2);
+    await btn.click();
+    await settled();
+    check('and it opens in the library, without leaving it', await panel.isVisible() && await p.locator('#libview').isVisible());
     await p.locator('#lib-btn').click();
     await settled();
     check('back from the library, it is as it was', await panel.isVisible() && await pressed());
-    await p.locator('#lib-btn').click();
-    await btn.click();
+    // Tags, in the same panel: one thing at a time.
+    const tagsBtn = p.locator('#proc-tags');
+    check('a Tags button sits beside it', (await tagsBtn.textContent()) === 'Tags' && (await tagsBtn.getAttribute('aria-pressed')) === 'false');
+    await tagsBtn.click();
+    check('it switches the panel over, without closing it', (await p.locator('#proc-title').textContent()) === 'Tags' && await p.locator('.st-tags').isVisible() && await p.locator('#sync-btn').isHidden() && (await tagsBtn.getAttribute('aria-pressed')) === 'true' && !(await pressed()));
     await settled();
-    check('from the library, the button goes back to the playlist with the panel', await p.locator('#main').isVisible() && await p.locator('#libview').isHidden() && await panel.isVisible() && await pressed());
+    check('it fits its column, nothing cut off', Math.round((await panel.boundingBox()).width) === 304 && await panel.evaluate((x) => x.scrollWidth <= x.clientWidth));
+    check('with nothing selected it says what to do', /Select a track in a playlist or the library/.test(await p.locator('.st-tags').textContent()));
+    await btn.click();
+    check('and back', (await p.locator('#proc-title').textContent()) === 'FAT USB Stick transfer' && await p.locator('#sync-btn').isVisible() && await p.locator('.st-tags').isHidden() && (await tagsBtn.getAttribute('aria-pressed')) === 'false' && await pressed());
     // A stick that's plugged in while it's closed says so, with the way in.
     await p.locator('#proc-close').click();
     await panel.waitFor({ state: 'hidden' });
@@ -552,20 +565,22 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     const selIds = await p.evaluate(() => Fatstick.app.lib.state.L.ids.filter((x) => Fatstick.app.lib.state.L.sel.has(x)));
     const tagsBefore = await tagsOf(selIds);
     const toastSays = (re) => p.waitForFunction((src) => new RegExp(src).test(document.getElementById('toast').textContent), re.source, { timeout: 5000 }).catch(() => {});
-    const settled = (re) => p.waitForFunction((src) => new RegExp(src).test(document.querySelector('.lib-edit .ted-status').textContent), re.source, { timeout: 5000 }).catch(() => {});
-    check('the editor says edits save as they are made', /saved into the files as you make them/.test(await p.locator('.lib-edit .ted-status').textContent()));
-    await p.locator('.lib-edit input[id^="ted-genre"]').fill('Kids');
+    const settled = (re) => p.waitForFunction((src) => new RegExp(src).test(document.querySelector('.st-tags .ted-status').textContent), re.source, { timeout: 5000 }).catch(() => {});
+    await p.locator('#proc-tags').click();
+    check('the Tags panel shows what\'s selected in the library', /2 tracks/.test(await p.locator('.st-tags .ted-head h3').textContent()));
+    check('the editor says edits save as they are made', /saved into the files as you make them/.test(await p.locator('.st-tags .ted-status').textContent()));
+    await p.locator('.st-tags input[id^="ted-genre"]').fill('Kids');
     await p.keyboard.press('Enter');
     await settled(/Saved: Genre/);
     check('Enter in a field writes it into the files, without asking', (await tagsOf(selIds)).every((x) => /^Kids\|/.test(x)) && await p.locator('#modal-back').isHidden(), (await tagsOf(selIds)).join(' / '));
-    check('and says what was saved', /Saved: Genre “Kids”, in 2 files\./.test(await p.locator('.lib-edit .ted-status').textContent()));
-    await p.locator('.lib-edit input[id^="ted-lbl"]').fill('car');
+    check('and says what was saved', /Saved: Genre “Kids”, in 2 files\./.test(await p.locator('.st-tags .ted-status').textContent()));
+    await p.locator('.st-tags input[id^="ted-lbl"]').fill('car');
     await p.keyboard.press('Enter');
     await settled(/label “car” added/);
     check('a label is written as soon as it is added', (await tagsOf(selIds)).every((x) => /^Kids\|.*car/.test(x)), (await tagsOf(selIds)).join(' / '));
     check('the table shows the new label', (await p.locator('.lr.sel .c-labels').evaluateAll((cs) => cs.filter((c) => [...c.querySelectorAll('.tag')].some((t) => t.textContent === 'car' || /\bcar\b/.test(t.getAttribute('aria-label') || ''))).length)) === 2);
     await p.screenshot({ path: `${out}/tags-saved.png` });
-    await p.locator('.lib-edit .ted-status .btn', { hasText: 'Undo' }).click();
+    await p.locator('.st-tags .ted-status .btn', { hasText: 'Undo' }).click();
     await p.waitForFunction(() => Fatstick.app.lib.state.L.ids.filter((x) => Fatstick.app.lib.state.L.sel.has(x)).every((id) => !Fatstick.app.S.tracks.get(id).labels.includes('car')), null, { timeout: 5000 }).catch(() => {});
     check('Undo beside it takes the label off again', (await tagsOf(selIds)).every((x) => /^Kids\|/.test(x) && !/car/.test(x)), (await tagsOf(selIds)).join(' / '));
     await p.locator('.lib-scroll').focus();
@@ -574,7 +589,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('Ctrl+Z puts the genre back', JSON.stringify(await tagsOf(selIds)) === JSON.stringify(tagsBefore), (await tagsOf(selIds)).join(' / '));
 
     // 23. Clicking away saves what was typed: no warning.
-    await p.locator('.lib-edit input[id^="ted-year"]').fill('1999');
+    await p.locator('.st-tags input[id^="ted-year"]').fill('1999');
     await p.locator('.lr').nth(4).click();
     await p.waitForTimeout(300);
     check('clicking another track saves the edit, without asking', await p.locator('#modal-back').isHidden() && (await tagsOf(selIds)).every((x) => /\|1999$/.test(x)), (await tagsOf(selIds)).join(' / '));
@@ -616,12 +631,98 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.locator('[data-pl="p-road"]').click();
     check('a playlist on the left leaves the library', !(await p.locator('#app').evaluate((a) => a.classList.contains('lib-mode'))) && await p.locator('#main').isVisible());
 
-    // 26. Edit tags from a playlist row.
+    // 26. Tags in a playlist's view: the same panel, following its selection.
+    const tTitle = p.locator('.st-tags input[id^="ted-title"]');
+    const tGenre = p.locator('.st-tags input[id^="ted-genre"]');
+    check('the Tags panel stays open going back to a playlist', await p.locator('.st-tags').isVisible() && (await p.locator('#proc-title').textContent()) === 'Tags');
+    await p.locator('#proc-close').click();
+    await p.locator('#stick').waitFor({ state: 'hidden' });
     const first = (await titles())[0];
     await row(0).click({ button: 'right' });
-    await p.getByRole('menuitem', { name: 'Edit tags…' }).click();
-    check('"Edit tags…" opens the editor in a dialog', /Edit tags/.test(await p.locator('#modal-title').textContent()) && (await p.locator('#modal input[id^="ted-title"]').inputValue()) === first, first);
+    await p.getByRole('menuitem', { name: 'Edit tags' }).click();
+    check('"Edit tags" opens the Tags panel on that track, in no dialog', await p.locator('#modal-back').isHidden() && (await p.locator('#proc-title').textContent()) === 'Tags' && (await tTitle.inputValue()) === first, first);
+    check('with its first field ready to type in', await tTitle.evaluate((x) => document.activeElement === x));
+    await row(1).click();
+    check('clicking another track shows its tags there', (await tTitle.inputValue()) === (await titles())[1]);
+    check('and no row opens its tags as well', (await p.locator('#list .row-tags').count()) === 0);
+    await p.keyboard.press('t');
+    check('T leaves the rows alone while the panel has the tags', (await p.locator('#list .row-tags').count()) === 0);
+    await row(1).click({ button: 'right' });
+    check('the menu doesn\'t offer to show them under the row either', (await p.getByRole('menuitem', { name: 'Show the tags' }).count()) === 0);
     await p.keyboard.press('Escape');
+    await row(2).click({ modifiers: ['Shift'] });
+    check('selecting several edits them together', /2 tracks/.test(await p.locator('.st-tags .ted-head h3').textContent()) && (await tTitle.getAttribute('placeholder')) === 'Various');
+    await p.waitForTimeout(250);
+    check('its fields fit the panel', await p.evaluate(() => { const box = document.getElementById('stick'); const r = box.getBoundingClientRect(); return box.scrollLeft === 0 && box.scrollWidth <= box.clientWidth && [...box.querySelectorAll('.ted-grid input:not(.num-in)')].every((i) => { const b = i.getBoundingClientRect(); return b.left >= r.left && b.right <= r.right; }); }));
+    await p.screenshot({ path: `${out}/tags-playlist.png` });
+    // A change from here goes into the files like one in the library.
+    const plTags = await p.evaluate(() => { const A = Fatstick.app; return A.pl().entries.slice(1, 3).map((e) => e.trackId); });
+    const lenBefore = (await titles()).length;
+    // Typing here isn't a shortcut for the list behind it.
+    const tComposer = p.locator('.st-tags input[id^="ted-composer"]');
+    await tComposer.type('kfet');
+    await tComposer.press('Delete');
+    check('typing in a field leaves the playlist alone', (await titles()).length === lenBefore && await p.locator('#modal-back').isHidden() && (await tComposer.inputValue()) === 'kfet');
+    await tComposer.press('Escape');
+    check('and Esc puts the field back, unsaved', (await tComposer.inputValue()) === '');
+    await tGenre.fill('Playlist Rock');
+    await tGenre.press('Enter');
+    await settled(/Saved: Genre/);
+    check('a tag edited in a playlist\'s view is written into the files', (await p.evaluate((ids) => ids.map((id) => Fatstick.app.track(id).genre), plTags)).every((g) => g === 'Playlist Rock'));
+    await p.locator('.st-tags .ted-status .btn', { hasText: 'Undo' }).click();
+    await settled(/saved into the files|^$/);
+    await p.waitForFunction((ids) => ids.every((id) => Fatstick.app.track(id).genre !== 'Playlist Rock'), plTags, { timeout: 5000 }).catch(() => {});
+    check('and its Undo puts it back', (await p.evaluate((ids) => ids.map((id) => Fatstick.app.track(id).genre), plTags)).every((g) => g !== 'Playlist Rock'));
+    // Search results beside the playlist: the last selection made is the one shown.
+    await p.keyboard.press('Escape');
+    await p.locator('#srch-btn').click();
+    await p.locator('#srch-in').fill('Everywhere');
+    await p.locator('.srch-res .sr').first().waitFor();
+    await p.locator('.srch-res .sr').first().click();
+    check('a search result shows its tags there', (await tTitle.inputValue()) === 'Everywhere');
+    await row(0).click();
+    check('and a click in the playlist takes it back', (await tTitle.inputValue()) === first);
+    await p.locator('.srch-res .sr').first().click({ button: 'right' });
+    await p.getByRole('menuitem', { name: 'Edit tags' }).click();
+    check('"Edit tags" on a search result shows that one', (await tTitle.inputValue()) === 'Everywhere');
+    await p.locator('#srch-btn').click();
+    check('with the search closed, it\'s the playlist\'s selection again', (await tTitle.inputValue()) === first);
+    await p.locator('#srch-btn').click();
+    check('open again, it\'s the result again', (await tTitle.inputValue()) === 'Everywhere');
+    await p.locator('#srch-in').fill('');
+    await p.waitForFunction(() => document.querySelectorAll('.srch-res .sr').length === 0);
+    check('a selected result that goes from the list goes from the panel', (await tTitle.inputValue()) === first);
+    await p.locator('#srch-btn').click();
+    // A setlist's view has no tracks to select.
+    await p.locator('[data-set="set-car"]').click();
+    check('a setlist\'s view has nothing selected', /Select a track in a playlist or the library/.test(await p.locator('.st-tags').textContent()));
+    await p.locator('[data-pl="p-road"]').click();
+    check('back in the playlist, its selection shows again', (await tTitle.inputValue()) === first);
+    // In the library: its selection, and "Edit tags" from its foot and its menu.
+    await p.locator('#proc-close').click();
+    await p.locator('#stick').waitFor({ state: 'hidden' });
+    await p.locator('#lib-btn').click();
+    await p.locator('.lr').first().click();
+    await p.locator('#lib-tags').click();
+    check('its button goes while the panel has the tags', (await p.locator('#lib-tags').count()) === 0);
+    check('"Edit tags" in the library opens the panel on its selection', (await p.locator('#proc-title').textContent()) === 'Tags' && await p.locator('#libview').isVisible() && (await tTitle.inputValue()) === (await p.locator('.lr.sel').first().locator('.lc-title, span').first().textContent()).trim());
+    await p.locator('#proc-close').click();
+    await p.locator('#stick').waitFor({ state: 'hidden' });
+    await p.locator('.lr').nth(1).click({ button: 'right' });
+    await p.getByRole('menuitem', { name: 'Edit tags' }).click();
+    check('and so does its right-click menu', await p.locator('.st-tags').isVisible() && await p.locator('#libview').isVisible());
+    await p.locator('#lib-btn').click();
+    // A file outside the music folder: shown, not editable.
+    const outsider = await p.evaluate(() => { const A = Fatstick.app; const e = A.pl().entries.find((x) => !A.lib.inMusic(A.track(x.trackId))); return e ? A.pl().entries.indexOf(e) : -1; });
+    if (outsider >= 0) {
+      await row(outsider).click();
+      check('a file outside the music folder shows its tags, and says why they can\'t change', await tTitle.isDisabled() && /Only files in your music folder/.test(await p.locator('.st-tags .ted-note').textContent()));
+    }
+    // The transfer again, for what follows.
+    await p.locator('#proc-fat').click();
+    check('the transfer is one click away', await p.locator('#sync-btn').isVisible());
+    await row(0).click();
+    check('and clicking a row shows its tags under it again', (await p.locator('#list .row-tags').count()) <= 1);
 
   }
 
@@ -914,6 +1015,8 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   }
 
   // 33. "Show in the library" from a playlist's track: the library, with it selected.
+  // (The panel closed: the library's table has the room for all its columns.)
+  await p.evaluate(() => Fatstick.app.setProcessing(null));
   {
     await p.locator('[data-pl="p-road"]').click();
     const i = await p.evaluate(() => { const A = Fatstick.app; return A.pl().entries.findIndex((e) => A.lib.inMusic(A.track(e.trackId)) && A.track(e.trackId).exists); });
@@ -922,7 +1025,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.getByRole('menuitem', { name: 'Show in the library' }).click();
     await p.waitForTimeout(150);
     const sel = await p.evaluate(() => [...Fatstick.app.lib.state.L.sel]);
-    check('"Show in the library" opens the library with that track selected', JSON.stringify(sel) === JSON.stringify([want]) && (await p.locator('.lr.sel').count()) === 1 && /1 track|Edit|Title/.test(await p.locator('.lib-edit').textContent()), JSON.stringify(sel));
+    check('"Show in the library" opens the library with that track selected', JSON.stringify(sel) === JSON.stringify([want]) && (await p.locator('.lr.sel').count()) === 1, JSON.stringify(sel));
   }
 
   // 34. Tracks whose files have gone can be taken out of the library.

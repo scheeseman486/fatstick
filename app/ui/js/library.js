@@ -3,9 +3,12 @@
 // * The library view (the Library button, top right) takes the middle of the
 //   window: the folder and its scan, tags to browse by (your labels, genres,
 //   artists, albums, decades, and what's missing), the tracks as a table to
-//   filter, sort and select, and a tag editor for the selection. Tags are
-//   written into the files after a preview, and file names can be cleaned up
-//   from the tags the same way. Drag tracks onto a playlist on the left.
+//   filter and sort and select. File names can be cleaned up from the tags,
+//   after a preview. Drag tracks onto a playlist on the left.
+// * The tag editor (the Tags button, top right) is the panel at the right of
+//   the window, in any view: it shows what's selected in a playlist, the
+//   library or the search results, and writes changes into the files as
+//   they're entered.
 // * The search panel (the search button, bottom left) widens the sidebar:
 //   type a title, an artist, a label or anything else; exact matches come
 //   first, then a divider, then close ones. Drag songs into the playlist.
@@ -253,11 +256,11 @@
     const goneOf = (ids) => ids.filter((id) => !track(id).exists);
 
     // ---- the tag editor ------------------------------------------------------------------
-    // One component for the library's side panel and the playlist's "Edit
-    // tags…" dialog. Fields show the tracks' common value, or "Various" when
-    // they differ (left as they are unless typed over). Labels show on how
-    // many of the tracks they are, and can be added to or taken off all.
-    function makeEditor(ids, opts = {}) {
+    // In the panel at the right, for whatever's selected. Fields show the
+    // tracks' common value, or "Various" when they differ (left as they are
+    // unless typed over). Labels show on how many of the tracks they are, and
+    // can be added to or taken off all.
+    function makeEditor(ids) {
       const ED = { ids: [...new Set(ids)], draft: {}, add: [], remove: new Map(), err: {}, v: S.tracksVersion, sending: [] };
       const all = () => ED.ids.map(track);
       const ok = () => all().filter((t) => !whyNot(t));
@@ -491,10 +494,12 @@
 
       const grid = h("div", { class: "ted-grid" }, EDIT_FIELDS.map(fieldRow));
       const reason = whyText(all());
-      const el = h("div", { class: `ted${opts.modal ? " in-modal" : ""}` },
+      const el = h("div", { class: "ted" },
         head(),
         all().length > 1 && !readOnly ? h("p", { class: "hint ted-hint", text: "“Various” means the tracks differ there; they keep their own unless you type over it." }) : null,
-        reason ? h("p", { class: "ted-note", text: readOnly ? `These tags can't be changed here (${reason}). Only files in your music folder can be changed.` : `Left as they are: ${reason}.` }) : null,
+        reason ? h("div", { class: "ted-note" },
+          readOnly ? `These tags can't be changed here (${reason}). Only files in your music folder can be changed.` : `Left as they are: ${reason}.`,
+          root() ? null : h("button", { type: "button", class: "btn small", text: "Choose your music folder…", onclick: () => core.setView("library") })) : null,
         grid,
         h("div", { class: "ted-lbl" },
           h("label", { class: "lbl", for: lblIn.id, text: "Labels" }),
@@ -511,33 +516,22 @@
       return { el, ids: ED.ids, v: ED.v, dirty, valid, commit, reset, busy: () => ED.sending.length > 0, count: () => ok().length };
     }
 
-    /** "Edit tags…" from a playlist: the editor in a dialog. */
-    function editTagsDialog(ids) {
-      const ts = ids.map(track);
-      if (!root()) {
-        modal({
-          title: "Choose your music folder first",
-          body: [h("p", { text: "Tags can be written into files in your music folder. Choose the folder your music is in, in the library, and the files there can be retagged and renamed." })],
-          buttons: [
-            h("button", { type: "button", class: "btn", text: "Cancel", onclick: closeModal }),
-            h("button", { type: "button", class: "btn primary", text: "Open the library", onclick: () => { closeModal(); core.setView("library"); } }),
-          ],
-        });
-        return;
-      }
-      if (!ts.some((t) => !whyNot(t))) {
-        toast(`Those tags can't be changed here: ${whyText(ts)}.`);
-        return;
-      }
-      const ed = makeEditor(ids, { modal: true });
-      modal({
-        title: ts.length === 1 ? "Edit tags" : `Edit the tags of ${ts.length} tracks`, body: [ed.el], wide: false,
-        buttons: [h("button", { type: "button", class: "btn primary", text: "Done", onclick: closeModal })],
-        // Whatever's typed and not yet entered is saved on the way out.
-        onClose: () => ed.commit(),
-      });
-      const first = ed.el.querySelector("input:not(:disabled)");
-      if (first) first.focus();
+    // The panel's contents: the editor for what's selected, wherever that is.
+    const tagsBox = h("section", { class: "st-tags", "aria-label": "Tags of the selected tracks", hidden: true });
+    let tagEditor = null;
+    /** Beside a playlist there are two selections, the playlist's and the search
+     * results': "list" or "search", whichever was made last. */
+    let tagSource = "list";
+    function tagIds() {
+      if (S.view === "library") return LX.ordered();
+      if (S.searching && tagSource === "search" && SE.sel.size) return SX.ordered();
+      return S.view === "playlist" ? [...new Set(core.selectedTrackIds())] : [];
+    }
+    /** "Edit tags": the panel on what's selected, the first field ready to type in. */
+    function openTags() {
+      core.setProcessing("tags");
+      const first = tagsBox.querySelector("input:not(:disabled)");
+      if (first) first.focus({ preventScroll: true });
     }
 
     // ---- cleaning up file names -------------------------------------------------------------
@@ -731,7 +725,6 @@
       const n = ids.length;
       const p = core.pl();
       const others = S.playlists.filter((x) => !p || x.id !== p.id);
-      const canTag = ids.some((x) => !whyNot(track(x)));
       const t = track(id);
       menu({ x: e.clientX, y: e.clientY }, [
         { label: "Play", key: "Enter", action: () => core.playTrack(id), disabled: !t.exists },
@@ -741,7 +734,7 @@
         { label: "New playlist from these", action: () => { core.newPlaylist(n === 1 ? titleOf(track(ids[0])) : "From the library", ids); if (S.view === "library") core.setView("playlist"); } },
         "-",
         X.inLibrary ? null : { label: "Show in the library", action: () => revealInLibrary(id), disabled: !inMusic(track(id)) },
-        X.inLibrary ? null : { label: n === 1 ? "Edit tags…" : `Edit the tags of ${n} tracks…`, action: () => editTagsDialog(ids), disabled: !canTag },
+        { label: n === 1 ? "Edit tags" : `Edit the tags of ${n} tracks`, action: () => { tagSource = X === SX ? "search" : "list"; openTags(); } },
         X.inLibrary ? { label: n === 1 ? "Clean up the file name…" : `Clean up ${n} file names…`, action: () => renameDialog(ids), disabled: !ids.some((x) => !whyNot(track(x), true)) } : null,
         ...(X.inLibrary && goneOf(ids).length ? ["-", {
           label: goneOf(ids).length === 1 ? "Remove from the library" : `Remove ${goneOf(ids).length} from the library`, key: "Delete",
@@ -781,7 +774,7 @@
       ids: () => SE.ids,
       ordered: () => SE.ids.filter((x) => SE.sel.has(x)),
       range: (a, b, into) => rangeOf(SE.ids, a, b, into),
-      set(next, focus) { SE.sel = next; SE.focus = focus; syncSearchRows(); return true; },
+      set(next, focus) { SE.sel = next; SE.focus = focus; tagSource = "search"; syncSearchRows(); renderEditor(); return true; },
       reveal(id) { const el = document.getElementById(`sr-${id}`); if (el) el.scrollIntoView({ block: "nearest" }); },
       up() { SE.input.focus(); },
       escape() { SE.input.focus(); },
@@ -838,11 +831,13 @@
       document.getElementById("app").classList.add("searching");
       SE.input.focus();
       SE.input.select();
+      renderEditor();
     }
     function closeSearch() {
       S.searching = false;
       document.getElementById("app").classList.remove("searching");
       core.renderSide();
+      renderEditor();
       const b = document.getElementById("srch-btn");
       if (b) b.focus({ preventScroll: true });
     }
@@ -883,7 +878,9 @@
           h("span", { class: "sr-time num", text: t.duration ? clock(t.duration) : "" })));
       };
       SE.ids = R ? [...R.exact, ...R.close].map((x) => x.t.id) : [];
+      const selWas = SE.sel.size;
       SE.sel = new Set([...SE.sel].filter((x) => SE.ids.includes(x)));
+      if (SE.sel.size !== selWas) renderEditor();
       if (!q) {
         fill(SE.scope, `Searches ${plural(AC.n, "song")}${root() ? " in your music folder and your playlists" : " in your playlists"}: titles, artists, albums, genres, labels, years and file names.`,
           root() ? null : h("button", { type: "button", class: "btn quiet small", text: "Choose your music folder…", onclick: () => core.setView("library") }));
@@ -911,7 +908,7 @@
     }
 
     // ---- the library view -----------------------------------------------------------------
-    const L = { q: "", filters: [], sort: { key: "artist", dir: 1 }, best: true, sel: new Set(), anchor: null, focus: null, rows: [], ids: [], at: new Map(), more: {}, width: 800, editor: null, lastTap: null, scrollTo: null };
+    const L = { q: "", filters: [], sort: { key: "artist", dir: 1 }, best: true, sel: new Set(), anchor: null, focus: null, rows: [], ids: [], at: new Map(), more: {}, width: 800, lastTap: null, scrollTo: null };
     const V = {};
     const LX = {
       inLibrary: true,
@@ -956,12 +953,11 @@
       }, V.inner);
       V.empty = h("p", { class: "lib-none", hidden: true });
       V.foot = h("div", { class: "lib-foot" });
-      V.edit = h("aside", { class: "lib-edit", "aria-label": "Tags of the selected tracks" });
       V.main = h("div", { class: "lib-main" },
         h("div", { class: "lib-bar" }, h("div", { class: "lib-qbox" }, h("span", { class: "srch-ic" }, icon("search")), V.q), V.chips),
         h("div", { class: "lib-table" }, V.cols, V.scroll, V.empty),
         V.foot);
-      V.body = h("div", { class: "lib-body" }, V.facets, V.main, V.edit);
+      V.body = h("div", { class: "lib-body" }, V.facets, V.main);
       V.start = h("div", { class: "lib-start" });
       V.root.replaceChildren(V.head, V.body, V.start);
       new ResizeObserver(() => {
@@ -997,7 +993,7 @@
       if (S.view === "library" && V.root) {
         renderView();
         drawnAt = S.tracksVersion;
-      }
+      } else renderEditor();
     }
 
     function statusText() {
@@ -1053,7 +1049,7 @@
       if (scanEvents === seen) S.music = info;
       L.sel = new Set();
       L.filters = [];
-      L.editor = null;
+      tagEditor = null;
       renderView();
       core.renderDisplay();
       return true;
@@ -1157,7 +1153,7 @@
       L.at = new Map();
       rows.forEach((r, i) => { if (r.t) { L.ids.push(r.t.id); L.at.set(r.t.id, i); } });
       // The selection only keeps what's shown, unless an edit for it is on its way.
-      if (!(L.editor && (L.editor.dirty() || L.editor.busy()))) {
+      if (!(tagEditor && (tagEditor.dirty() || tagEditor.busy()))) {
         const shown = new Set(L.ids);
         const next = new Set([...L.sel].filter((x) => shown.has(x)));
         if (next.size !== L.sel.size) L.sel = next;
@@ -1377,7 +1373,7 @@
     }
     function setSel(next, focus) {
       // An edit not yet entered is saved before the selection moves on.
-      if (!sameSet(next, L.sel) && L.editor && L.editor.dirty()) L.editor.commit();
+      if (!sameSet(next, L.sel) && tagEditor && tagEditor.dirty()) tagEditor.commit();
       const changedSel = !sameSet(next, L.sel);
       L.sel = next;
       L.focus = focus;
@@ -1398,31 +1394,36 @@
           n ? `, ${length(dur(L.ids))}` : "",
           sel.length ? `. ${sel.length} selected, ${clock(dur(sel))}: drag ${sel.length === 1 ? "it" : "them"} onto a playlist on the left.` : ". Double-click a track to hear it; drag tracks onto a playlist on the left to add them."),
         sel.length ? h("div", { class: "tools" },
+          S.processing === "tags" ? null : h("button", { type: "button", class: "btn small", id: "lib-tags", text: "Edit tags", onclick: openTags }),
           p ? h("button", { type: "button", class: "btn small", text: `Add to ${p.name}`, onclick: () => addToCurrent(sel) }) : null,
           h("button", { type: "button", class: "btn small", text: "New playlist", onclick: () => { core.newPlaylist("From the library", sel); core.setView("playlist"); } })) : null,
         // Showing only files that have gone: out with them, in one go.
         L.filters.some((f) => f.field === "missing" && f.value === "file") && goneOf(L.ids).length
           ? h("div", { class: "tools" }, h("button", { type: "button", class: "btn small", id: "lib-forget-all", text: `Remove all ${goneOf(L.ids).length} from the library`, onclick: () => forgetGone(L.ids) })) : null);
     }
+    /** The panel's editor, for what's selected now. Nothing to do while it's
+     * showing something else: opening it draws it. */
     function renderEditor(force) {
-      const ids = LX.ordered();
-      const ed = L.editor;
+      if (S.processing !== "tags") return;
+      const ids = tagIds();
+      const ed = tagEditor;
       if (!ids.length) {
         if (ed && ed.dirty()) return;
-        L.editor = null;
-        fill(V.edit,
+        tagEditor = null;
+        fill(tagsBox,
           h("div", { class: "ted-idle" },
-            h("h3", { text: "Tags" }),
-            h("p", { text: "Select a track to see its tags here and change them. Select several to change them all at once: a genre, an album artist, or labels of your own." }),
-            h("p", { text: "Labels are your own tags, like “road trip”, “kids” or “sleep”. Browse by them on the left, and search for them." })));
+            h("p", { text: "Select a track in a playlist or the library to see its tags here and change them. Select several to change them all at once: a genre, an album artist, or labels of your own." }),
+            h("p", { text: "Labels are your own tags, like “road trip”, “kids” or “sleep”. Browse by them in the library, and search for them." })));
         return;
       }
       const same = ed && ed.ids.length === ids.length && ed.ids.every((x, i) => x === ids[i]);
-      if (same && (ed.dirty() || ed.busy() || (!force && (ed.v === S.tracksVersion || V.edit.contains(document.activeElement))))) return;
-      L.editor = makeEditor(ids);
-      const top = V.edit.scrollTop;
-      fill(V.edit, L.editor.el);
-      if (same) V.edit.scrollTop = top;
+      if (same && (ed.dirty() || ed.busy() || (!force && (ed.v === S.tracksVersion || tagsBox.contains(document.activeElement))))) return;
+      // An edit not yet entered is saved before the selection moves on.
+      if (ed && !same && ed.dirty()) ed.commit();
+      tagEditor = makeEditor(ids);
+      const top = tagsBox.scrollTop;
+      fill(tagsBox, tagEditor.el);
+      if (same) tagsBox.scrollTop = top;
     }
     function revealInLibrary(id) {
       core.setView("library");
@@ -1481,16 +1482,20 @@
     }
 
     return {
-      tagChips, rowTags(t, ids) {
+      tagChips, rowTags(t, onEdit) {
         const chips = tagChips(t);
         const why = whyNot(t);
         return h("div", { class: "row-tags" },
           h("div", { class: "tags" }, chips.length ? chips : h("span", { class: "tags-none", text: "No tags" })),
-          !why ? h("button", { type: "button", class: "btn quiet small", text: "Edit tags…", onclick: (ev) => { ev.stopPropagation(); editTagsDialog(ids && ids.includes(t.id) ? ids : [t.id]); } })
+          !why ? h("button", { type: "button", class: "btn quiet small", text: "Edit tags", onclick: (ev) => { ev.stopPropagation(); onEdit(); } })
             : root() && t.exists && !inMusic(t) ? h("span", { class: "tags-why", text: "Not in your music folder" }) : null);
       },
-      canTag: (t) => !whyNot(t),
-      inMusic, editTagsDialog, renameDialog, renderView, refresh, useFolder, markPlaying, trackToPlay, renderSearch, openSearch, closeSearch, searchRoot,
+      tagsBox, openTags, renderTags: renderEditor,
+      /** The panel changed: "Edit tags" under the table is only for when it's elsewhere. */
+      panelChanged() { if (S.view === "library" && V.root && root()) renderLibFoot(); },
+      /** The playlist's selection changed. */
+      followList() { if (S.sel.size) tagSource = "list"; renderEditor(); },
+      inMusic, renameDialog, renderView, refresh, useFolder, markPlaying, trackToPlay, renderSearch, openSearch, closeSearch, searchRoot,
       onProgress, onScanned, onKey, display, revealInLibrary,
       /** The folder's state from the window's start, unless a scan's event beat it here. */
       initial(music) {

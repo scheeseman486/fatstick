@@ -35,6 +35,8 @@ button, input, select { font: inherit; color: inherit; }
   --proc-w: var(--stick-w, 344px);
   grid-template-areas: "top top top" "side main stick" "player player player";
 }
+/* The tags take less, so the library's table keeps its columns beside them. */
+.app.proc-open.proc-tags { --proc-w: var(--tags-w, 304px); --proc-full: var(--tags-w, 304px); }
 .app.proc-open.proc-closing { --proc-w: 0px; }
 html.framed .app {
   padding-left: max(16px, env(safe-area-inset-left, 0px));
@@ -461,7 +463,7 @@ body.modal-player .player { position: relative; z-index: 60; }
 /* ---- the processing panel ------------------------------------------------------------ */
 .stick { grid-area: stick; background: var(--pane); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; min-width: 0; overflow: hidden; }
 /* Its contents keep their width while the column opens and closes. */
-.stick > * { min-width: var(--stick-w, 344px); }
+.stick > * { min-width: var(--proc-full, var(--stick-w, 344px)); }
 .st-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 8px 8px 16px; border-bottom: 1px solid var(--rule); }
 .st-top h2 { margin: 0; font-size: 14px; font-weight: 600; min-width: 0; }
 .st-scroll { overflow: auto; padding: 14px 16px 18px; display: grid; gap: 20px; align-content: start; min-height: 0; }
@@ -688,9 +690,8 @@ html.framed .player { padding-inline: 2px; }
 .tabpanel { align-content: start; }
 
 /* ---- the library view ------------------------------------------------------------ */
-.app.lib-mode { grid-template-areas: "top top top" "side lib lib" "player player player"; }
-.app.lib-mode .main, .app.lib-mode .stick { display: none; }
-.libview { grid-area: lib; min-width: 0; min-height: 0; background: var(--sheet); display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.app.lib-mode .main { display: none; }
+.libview { grid-area: main; min-width: 0; min-height: 0; background: var(--sheet); display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .lib-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 16px; padding: 14px 18px 10px; border-bottom: 1px solid var(--rule); }
 .lib-title { min-width: 0; flex: 1 1 320px; display: grid; gap: 2px; }
 .lib-head h1 { margin: 0; font-size: 22px; font-weight: 600; line-height: 1.2; }
@@ -701,7 +702,7 @@ html.framed .player { padding-inline: 2px; }
 .lib-prog i { display: block; height: 100%; background: var(--accent); transition: width 0.2s; }
 .lib-prog.busy i { animation: libbusy 1.1s ease-in-out infinite alternate; }
 @keyframes libbusy { from { margin-left: 0; } to { margin-left: 70%; } }
-.lib-body { display: grid; grid-template-columns: 196px minmax(0, 1fr) 304px; min-height: 0; }
+.lib-body { display: grid; grid-template-columns: 196px minmax(0, 1fr); min-height: 0; }
 .lib-facets { overflow-x: hidden; overflow-y: auto; min-width: 0; padding: 12px 8px 18px; border-right: 1px solid var(--rule); display: grid; gap: 16px; align-content: start; overscroll-behavior: contain; }
 .fct-g h3 { margin: 0 0 4px 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
 .fct-g ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
@@ -765,7 +766,7 @@ html.framed .player { padding-inline: 2px; }
   padding: 7px 18px 9px; border-top: 1px solid var(--rule);
 }
 .lib-count { margin: 0; font-size: 12px; color: var(--ink-3); flex: 1 1 280px; }
-.lib-edit { background: var(--pane); overflow: auto; min-height: 0; overscroll-behavior: contain; }
+.st-tags { background: var(--pane); overflow: auto; min-height: 0; overscroll-behavior: contain; }
 .lib-start { display: grid; place-items: center; padding: 32px 24px; }
 .lib-start-in { max-width: 48ch; display: grid; gap: 12px; justify-items: start; }
 .lib-start-in h2 { margin: 0; font-size: 22px; font-weight: 600; text-wrap: balance; }
@@ -774,13 +775,13 @@ html.framed .player { padding-inline: 2px; }
 
 /* The tag editor: the library's right-hand panel, or a dialog from a playlist. */
 .ted { display: grid; gap: 14px; padding: 14px 16px 0; align-content: start; min-height: 100%; grid-template-rows: auto auto auto auto auto 1fr; }
-.ted.in-modal { padding: 0; min-height: 0; grid-template-rows: none; }
 .ted-head { display: grid; gap: 2px; min-width: 0; }
 .ted-head h3 { margin: 0; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
 .ted-head h3.untagged { font-style: italic; font-weight: 500; }
 .ted-sub { margin: 0; font-size: 13px; color: var(--ink-2); }
 .ted-path { margin: 0; font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
 .ted-note { margin: 0; padding: 8px 10px; border-radius: var(--r-s); background: var(--warn-bg); font-size: 12.5px; }
+.ted-note .btn { display: flex; margin-top: 6px; }
 .ted-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 10px; align-items: center; }
 .ted-grid .lbl, .ted-lbl .lbl { font-size: 12.5px; color: var(--ink-2); }
 .ted-grid .input { width: 100%; height: 28px; }
@@ -822,13 +823,14 @@ html.framed .player { padding-inline: 2px; }
 
 /* ---- narrower windows ----------------------------------------------------------- */
 @media (max-width: 1180px) {
-  .app { --side-w: 184px; --stick-w: 312px; }
+  .app { --side-w: 184px; --stick-w: 312px; --tags-w: 272px; }
   .app.searching { --side-w: 296px; }
   .disp-sub { display: none; }
-  .lib-body { grid-template-columns: 168px minmax(0, 1fr) 272px; }
+  .lib-body { grid-template-columns: 168px minmax(0, 1fr); }
 }
 @media (max-width: 1024px) {
-  .lib-body { grid-template-columns: 150px minmax(0, 1fr) 260px; }
+  .app { --tags-w: 260px; }
+  .lib-body { grid-template-columns: 150px minmax(0, 1fr); }
   .ted { padding-inline: 12px; }
   .ted-grid { column-gap: 8px; }
 }
@@ -847,7 +849,7 @@ html.framed .player { padding-inline: 2px; }
   .list { max-height: 62vh; }
   .stick { grid-template-rows: auto auto auto; }
   .stick > * { min-width: 0; }
-  .st-scroll { overflow: visible; }
+  .st-scroll, .st-tags { overflow: visible; }
   .player {
     position: sticky; bottom: 0; z-index: 5;
     grid-template-columns: auto minmax(0, 1fr);
@@ -857,7 +859,6 @@ html.framed .player { padding-inline: 2px; }
   .player .aos, .player .vol { display: none; }
   .disp-sub { display: block; }
   .toast { bottom: 140px; }
-  .app.lib-mode { grid-template-areas: "top" "side" "lib" "player"; }
   .app.searching .side { flex-direction: column; overflow: visible; }
   .srch-res { max-height: 55vh; }
   .side-foot { position: static; margin: 0; flex: 1 1 100%; border-top: 0; padding: 0; background: none; }

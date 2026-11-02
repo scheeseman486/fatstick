@@ -42,9 +42,11 @@
   };
 
   /** What the processing panel at the right can do, each with a button at the
-   * top of the window. Other ways of copying (keeping what's on the stick,
-   * into a folder, for a particular player, onto a CD) go here too. */
+   * top of the window. It shows one at a time, beside any view. Other ways of
+   * copying (keeping what's on the stick, into a folder, for a particular
+   * player, onto a CD) go here too. */
   const PROCESSES = {
+    tags: { label: "Tags", says: "See and change the tags of the selected tracks" },
     fat: { label: "FAT USB Stick transfer", says: "Write a setlist to a USB stick, in the order cheap players read it" },
   };
 
@@ -124,7 +126,8 @@
     lib.refresh();
   }
   const lib = P.librarySetup({
-    S, api, DEMO, track, pl, collator, insertTracks, newPlaylist, putTracks, renderSide, renderDisplay, saveSetting, setView, startTrackDrag, playTrack,
+    S, api, DEMO, track, pl, collator, insertTracks, newPlaylist, putTracks, renderSide, renderDisplay, saveSetting, setView, startTrackDrag, playTrack, setProcessing,
+    selectedTrackIds: () => (pl() ? selectedInOrder().map((e) => e.trackId) : []),
   });
   /** What a USB stick holds, going by the note its last sync left on it (or,
    * for a stick the OS hasn't mounted, the volume serial that sync recorded):
@@ -461,6 +464,7 @@
     if (S.focus) list.setAttribute("aria-activedescendant", `row-${S.focus}`);
     else list.removeAttribute("aria-activedescendant");
     renderFoot();
+    lib.followList();
   }
   function revealFocus() {
     const r = S.focus && document.getElementById(`row-${S.focus}`);
@@ -1654,13 +1658,14 @@
       const it = byEntry.get(e.id);
       const t = it.t;
       const playing = pp.entryId === e.id && pp.playlistId === p.id;
-      const open = S.expanded === e.id;
+      // With the tags in the panel, a row doesn't show them too.
+      const open = S.expanded === e.id && S.processing !== "tags";
       const r = h("div", {
         class: `row${S.sel.has(e.id) ? " sel" : ""}${S.focus === e.id ? " focus" : ""}${t.exists ? "" : " missing"}${playing ? " playing" : ""}${open ? " open" : ""}`,
         role: "option", id: `row-${e.id}`, dataset: { id: e.id }, "aria-selected": String(S.sel.has(e.id)), "aria-expanded": String(open),
       });
       for (const c of cols) r.append(cell(c, it, i, padN, playing, cols, prf));
-      if (open) r.append(lib.rowTags(t, selectedInOrder().map((x) => x.trackId)));
+      if (open) r.append(lib.rowTags(t, () => { if (!S.sel.has(e.id)) { selectOnly(e.id); syncSelection(); } lib.openTags(); }));
       return r;
     });
     list.replaceChildren(...rows);
@@ -1765,19 +1770,21 @@
   const ST = {};
   function buildStick() {
     const root = $("stick");
-    const title = h("header", { class: "st-top" },
-      h("h2", { id: "proc-title", text: PROCESSES.fat.label }),
-      h("button", {
-        type: "button", class: "btn quiet small icon", id: "proc-close", title: "Close this panel", "aria-label": `Close ${PROCESSES.fat.label}`,
-        onclick: () => { setProcessing(null); $("proc-fat").focus({ preventScroll: true }); },
-      }, icon("close")));
+    ST.title = h("h2", { id: "proc-title" });
+    ST.close = h("button", {
+      type: "button", class: "btn quiet small icon", id: "proc-close", title: "Close this panel",
+      onclick: () => { const was = S.processing; setProcessing(null); $(`proc-${was}`).focus({ preventScroll: true }); },
+    }, icon("close"));
     ST.head = h("section", { class: "st-sec" });
     ST.folders = h("section", { class: "st-sec", "aria-label": "Playlists in this setlist" });
     ST.profile = h("section", { class: "st-sec" });
     ST.device = h("section", { class: "st-sec" });
     ST.space = h("section", { class: "st-sec" });
     ST.sync = h("div", { class: "sync" });
-    root.replaceChildren(title, h("div", { class: "st-scroll" }, ST.head, ST.device, ST.folders, ST.profile, ST.space), ST.sync);
+    const scroll = h("div", { class: "st-scroll" }, ST.head, ST.device, ST.folders, ST.profile, ST.space);
+    /** What the panel holds for each thing it can do. */
+    ST.bodies = { tags: [lib.tagsBox], fat: [scroll, ST.sync] };
+    root.replaceChildren(h("header", { class: "st-top" }, ST.title, ST.close), lib.tagsBox, scroll, ST.sync);
   }
   /** The buttons at the top that open the panel, one per way of copying. */
   function buildProcessButtons() {
@@ -1785,26 +1792,24 @@
     for (const [kind, m] of Object.entries(PROCESSES)) {
       libBtn.before(h("button", {
         type: "button", class: "ghost-btn", id: `proc-${kind}`, "aria-pressed": "false", "aria-controls": "stick", title: m.says, text: m.label,
-        onclick: () => setProcessing(processShown() === kind ? null : kind),
+        onclick: () => setProcessing(S.processing === kind ? null : kind),
       }));
     }
   }
-  /** What the panel is showing right now: the library view has the whole
-   * width, so the panel waits behind it. */
-  const processShown = () => (S.view === "library" ? null : S.processing);
   function renderProcessButtons() {
-    const busy = !!(S.sync && S.sync.running);
+    const syncing = !!(S.sync && S.sync.running);
     for (const kind of Object.keys(PROCESSES)) {
       const b = $(`proc-${kind}`);
-      const on = processShown() === kind;
+      const on = S.processing === kind;
+      const busy = kind === "fat" && syncing;
       b.setAttribute("aria-pressed", String(on));
       b.classList.toggle("on", on);
       b.classList.toggle("busy", busy);
       b.title = busy ? `Syncing ${stickSet(S.sync.setId)?.name || ""}`.trim() : PROCESSES[kind].says;
     }
   }
-  /** Open the panel on one way of copying, or close it (null). A sync goes on
-   * either way, and the panel is kept up to date while it's closed. */
+  /** Open the panel on one of the things it does, or close it (null). A sync
+   * goes on whatever the panel shows, and its contents are kept up to date. */
   let procTimer = null;
   function setProcessing(kind) {
     const app = $("app");
@@ -1812,10 +1817,14 @@
     clearTimeout(procTimer);
     S.processing = kind;
     if (kind) {
-      if (S.view === "library") setView("playlist");
+      ST.title.textContent = PROCESSES[kind].label;
+      ST.close.setAttribute("aria-label", `Close ${PROCESSES[kind].label}`);
+      for (const [k, els] of Object.entries(ST.bodies)) for (const el of els) el.hidden = k !== kind;
       app.classList.remove("proc-closing");
       app.classList.add("proc-open");
+      app.classList.toggle("proc-tags", kind === "tags");
       panel.hidden = false;
+      lib.renderTags(true);
       // On a narrow window it opens below the list, out of sight.
       if (matchMedia("(max-width: 900px)").matches) panel.scrollIntoView({ block: "start" });
     } else if (app.classList.contains("proc-open")) {
@@ -1827,6 +1836,7 @@
       }
     }
     renderProcessButtons();
+    lib.panelChanged();
   }
   function renderAfterProfile() {
     renderList();
@@ -1923,7 +1933,7 @@
         h("span", { class: "fn", text: String(i + 1) }),
         gap
           ? h("span", { class: "fname", text: name })
-          : h("button", { type: "button", class: "fname btn quiet small", style: { "justify-content": "flex-start", padding: "0", height: "auto", color: "inherit" }, text: name, title: `Show ${p.name}`, onclick: () => openPlaylist(id) }),
+          : h("button", { type: "button", class: "fname btn quiet small", style: { "justify-content": "flex-start", padding: "0", height: "auto", color: "inherit" }, text: name, title: `Show ${p.name}`, onclick: () => { if (S.view !== "playlist") setView("playlist"); openPlaylist(id); } }),
         h("span", { class: "fbtns" },
           h("button", { type: "button", class: "btn quiet small icon", title: "Move up", "aria-label": `Move ${what} up`, disabled: i === 0, onclick: () => mv(-1) }, icon("up")),
           h("button", { type: "button", class: "btn quiet small icon", title: "Move down", "aria-label": `Move ${what} down`, disabled: i === s.playlistIds.length - 1, onclick: () => mv(1) }, icon("down")),
@@ -2329,6 +2339,7 @@
     renderPlayer();
     renderDisplay();
     renderProcessButtons();
+    lib.renderTags();
     if (S.view === "library") lib.renderView();
   }
 
@@ -2863,7 +2874,7 @@
     } else msg = res.error || "The sync stopped.";
     S.sync = { setId: s.id, done: true, ok: !!res.ok, cancelled: !!res.cancelled, msg, notes: res.notes || [] };
     if (res.ok) toast(`Synced ${s.name}.`);
-    else if (!processShown()) toast(`The sync of ${s.name} stopped.`, { label: "See why", run: () => { selectSet(s.id); setProcessing("fat"); } });
+    else if (S.processing !== "fat") toast(`The sync of ${s.name} stopped.`, { label: "See why", run: () => { selectSet(s.id); setProcessing("fat"); } });
     refreshSticks(true);
     renderAll();
   }
@@ -3124,7 +3135,7 @@
     }
     if (!picked) return false;
     if (!(S.sync && S.sync.running)) selectSet(picked.id);
-    toast(`${picked.name} is plugged in.`, processShown() ? undefined : { label: "Open the transfer", run: () => setProcessing("fat") });
+    toast(`${picked.name} is plugged in.`, S.processing === "fat" ? undefined : { label: "Open the transfer", run: () => setProcessing("fat") });
     changed();
     return true;
   }
@@ -3284,6 +3295,7 @@
   }
 
   function toggleTags(entryId) {
+    if (S.processing === "tags") return;
     S.expanded = S.expanded === entryId ? null : entryId;
     renderList();
   }
@@ -3388,7 +3400,6 @@
       lib.renderView();
       renderSide();
       renderDisplay();
-      renderProcessButtons();
       const q = $("lib-q");
       if (q && S.music && S.music.root) q.focus({ preventScroll: true });
     } else {
@@ -3548,8 +3559,8 @@
       { label: n === 1 ? "Fade in and out…" : `Fades of ${n} tracks…`, key: "F", action: () => fadeDialog([...S.sel]) },
       { label: n === 1 ? "Key…" : `Key of ${n} tracks…`, key: "K", action: () => keyDialog([...S.sel]) },
       "-",
-      n === 1 ? { label: S.expanded === id ? "Hide the tags" : "Show the tags", key: "T", action: () => toggleTags(id) } : null,
-      { label: n === 1 ? "Edit tags…" : `Edit the tags of ${n} tracks…`, action: () => lib.editTagsDialog(tids()), disabled: !tids().some((x) => lib.canTag(track(x))) },
+      n === 1 && S.processing !== "tags" ? { label: S.expanded === id ? "Hide the tags" : "Show the tags", key: "T", action: () => toggleTags(id) } : null,
+      { label: n === 1 ? "Edit tags" : `Edit the tags of ${n} tracks`, action: () => lib.openTags() },
       { label: "Show in the library", action: () => showInLibrary(t) },
       "-",
       t.exists ? { label: "Show where the file is", action: () => toast(t.path) } : { label: "Locate…", action: () => locate(t) },
@@ -3592,7 +3603,7 @@
       "-",
       { label: "Search your music", key: "Ctrl+F", action: () => lib.openSearch() },
       { label: S.view === "library" ? "Back to the playlist" : "Music library", action: () => setView(S.view === "library" ? "playlist" : "library") },
-      ...Object.entries(PROCESSES).map(([kind, m]) => (processShown() === kind
+      ...Object.entries(PROCESSES).map(([kind, m]) => (S.processing === kind
         ? { label: `Close ${m.label}`, action: () => setProcessing(null) }
         : { label: m.label, action: () => setProcessing(kind) })),
       "-",
