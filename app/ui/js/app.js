@@ -101,8 +101,11 @@
     tracksVersion: 0,
     /** What plays: a playlist's entry (`entryId`, `playlistId`), or one song
      * from the library on its own (`trackId`), which plays once, or a setlist
-     * (`set`), file by file; its `entryId` is the track in the file, if any. */
-    player: { entryId: null, playlistId: null, trackId: null, token: null, playing: false, pos: 0, dur: 0, asOnStick: false, volume: 0.8, silent: false, error: null, from: "source", repeat: "off", set: null },
+     * (`set`), file by file; its `entryId` is the track in the file, if any.
+     * `live`: from a dialog, with changes heard as it plays. Otherwise it's in
+     * the gapless stream, its position as on the stick, and `sent` has what's
+     * been given to it, by token. */
+    player: { entryId: null, playlistId: null, trackId: null, token: null, playing: false, pos: 0, dur: 0, asOnStick: false, volume: 0.8, silent: false, error: null, from: "source", repeat: "off", set: null, live: false, sent: null },
   };
   const hostTheme = document.documentElement.getAttribute("data-theme");
 
@@ -385,6 +388,9 @@
   function changed() {
     persist();
     scheduleWork();
+    // What follows what's playing may have changed.
+    clearTimeout(queueTimer);
+    queueTimer = setTimeout(queueNext, 150);
   }
 
   // ---- undoable edits ---------------------------------------------------------------
@@ -1017,7 +1023,7 @@
     const wasPlaying = playingHere();
     let startedHere = false;
     // A prepared file has the old settings in it: changes play the source.
-    let fromSource = wasPlaying && pp.from !== "cache";
+    let fromSource = wasPlaying && pp.live;
     return {
       playingHere, current,
       play(e, at) {
@@ -1317,7 +1323,7 @@
    * with its padding, at the cut start. */
   function sourcePos(e) {
     const pp = S.player;
-    if (pp.from !== "cache") return pp.pos;
+    if (pp.live) return pp.pos;
     const x = R.edges(e);
     return Math.max(x.cutStart, pp.pos - x.padStart + x.cutStart);
   }
@@ -1334,7 +1340,7 @@
     const playingHere = () => !pp.set && !!pp.entryId && pp.playlistId === p.id && es.some((e) => e.id === pp.entryId);
     const wasPlaying = playingHere();
     let startedHere = false;
-    let fromSource = playingHere() && pp.from !== "cache";
+    let fromSource = playingHere() && pp.live;
     let applied = false;
 
     const lcd = h("output", { class: "key-lcd", for: "key-semis", "aria-hidden": "true" },
@@ -2196,6 +2202,7 @@
     const pp = S.player;
     pp.repeat = REPEAT[pp.repeat].next;
     saveSetting("repeat", pp.repeat);
+    queueNext();
     renderPlayer();
     renderDisplay();
     const said = `${REPEAT[pp.repeat].label}: ${REPEAT[pp.repeat].says}.`;
@@ -2914,7 +2921,7 @@
   // ---- player -----------------------------------------------------------------------------------
   // The app's own player decodes with the bundled ffmpeg; this side sends
   // commands and follows its events. "As on the stick" plays the prepared
-  // file when it's in the cache, or the source with the planned gain.
+  // file when it's in the cache, or makes it as it plays with the planned gain.
   function stickItem(plId, entryId) {
     const p = pl(plId);
     const s = p && setsFor(p.id)[0];
@@ -2923,7 +2930,7 @@
   }
   function stopPlayback() {
     api.stop().catch(() => {});
-    Object.assign(S.player, { entryId: null, playlistId: null, trackId: null, token: null, playing: false, pos: 0, dur: 0, silent: false, error: null, set: null });
+    Object.assign(S.player, { entryId: null, playlistId: null, trackId: null, token: null, playing: false, pos: 0, dur: 0, silent: false, error: null, set: null, live: false, sent: null });
     renderPlayer();
     markPlaying();
     renderDisplay();
@@ -2935,7 +2942,7 @@
     const t = track(trackId);
     if (!t.exists) { toast(`${t.title || t.filename} can't play: its file isn't there.`); return; }
     const token = `track-${trackId}-${++playCount}`;
-    Object.assign(S.player, { entryId: null, playlistId: null, trackId, token, playing: true, pos: from, dur: t.duration, error: null, silent: DEMO && !t.url, from: "source", set: null });
+    Object.assign(S.player, { entryId: null, playlistId: null, trackId, token, playing: true, pos: from, dur: t.duration, error: null, silent: DEMO && !t.url, from: "source", set: null, live: false, sent: null });
     renderPlayer();
     markPlaying();
     renderDisplay();
@@ -2946,31 +2953,27 @@
       if (S.player.token === token) stopPlayback();
     }
   }
-  /** opts.source: the source file (not the prepared one), in opts.key or the entry's key. */
+  /** A playlist's entry as the stick will have it, in the gapless stream, with
+   * what follows queued. opts.source: from a dialog instead, the source file with
+   * what's being tried (opts.key, .edges, .shape), which can change as it plays. */
   async function playEntry(entryId, plId = S.current, from = 0, opts = {}) {
     const p = pl(plId);
     const e = p && p.entries.find((x) => x.id === entryId);
     if (!e) return;
     const t = track(e.trackId);
     if (!t.exists) { toast(`${t.title || t.filename} can't play: the file isn't where the playlist says. Use Locate to find it.`); return; }
+    if (!opts.source) return startItem(entryItem(p, e), from);
     const k = opts.key || R.key(e);
     const x = opts.edges || R.edges(e);
     const f = opts.shape || R.fades(e);
-    // As on the stick: the silence before it (from its start), its cut start
-    // to its cut end, faded and in its key, then the silence after it.
+    // The silence before it (from its start), its cut start to its cut end,
+    // faded and in its key, then the silence after it.
     const args = {
       trackId: t.id, token: entryId, from, gainDb: 0, recipe: null, pitch: k.pitch, keepFormants: k.keepFormants,
       cutStart: x.cutStart, cutEnd: x.cutEnd, padStart: x.padStart, padEnd: x.padEnd,
       fadeIn: f.fadeIn, fadeOut: f.fadeOut, fadeInShape: f.fadeInShape || "smooth", fadeOutShape: f.fadeOutShape || "smooth",
     };
-    if (S.player.asOnStick && !opts.source) {
-      const it = stickItem(plId, entryId);
-      if (it && it.recipe && it.recipe.kind !== "copy") {
-        args.recipe = it.recipe;
-        args.gainDb = it.recipe.kind === "gain" ? it.recipe.steps * R.STEP : it.recipe.gainDb || 0;
-      }
-    }
-    Object.assign(S.player, { entryId, playlistId: plId, trackId: null, token: entryId, playing: true, pos: from, dur: t.duration, error: null, silent: DEMO && !t.url, from: "source", set: null });
+    Object.assign(S.player, { entryId, playlistId: plId, trackId: null, token: entryId, playing: true, pos: from, dur: t.duration, error: null, silent: DEMO && !t.url, from: "source", set: null, live: true, sent: null });
     renderPlayer();
     markPlaying();
     renderDisplay();
@@ -2981,6 +2984,95 @@
       toast(String(err));
       stopPlayback();
     }
+  }
+
+  // ---- gapless ---------------------------------------------------------------------------------
+  // An item is what the player streams: a track, a joined playlist or silence,
+  // and how the player bar shows it. Whenever one starts, the one after it is
+  // queued, so the player has it running before the device gets there, and says
+  // "next" at the frame it starts. Nothing here stops or starts the audio then.
+  /** A playlist's entry. Its volume and prepared file only "as on the stick". */
+  function entryItem(p, e) {
+    const t = track(e.trackId);
+    const it = S.player.asOnStick ? stickItem(p.id, e.id) : null;
+    const seconds = R.stickSeconds(t, e);
+    return {
+      token: `pl-${e.id}-${++playCount}`,
+      state: { entryId: e.id, playlistId: p.id, trackId: null, dur: seconds, silent: DEMO && !t.url, set: null },
+      args: { parts: [R.part(t, e, it ? it.g : null)], seconds, ...(it && it.recipe ? { recipe: it.recipe, trackId: t.id } : {}) },
+    };
+  }
+  /** A setlist's file, `index` in `files`, as it goes on the stick. */
+  function fileItem(s, files, index, from = 0) {
+    const { it, f } = files[index];
+    const now = it.gap ? null : it.joined ? partAt(it, from) : it;
+    return {
+      token: `set-${s.id}-${++playCount}`,
+      state: {
+        entryId: now ? now.entry.id : null, playlistId: now ? f.p.id : null, trackId: null, dur: it.secs, silent: DEMO,
+        set: { id: s.id, name: s.name, index, count: files.length, file: it.entry.id, item: it, playlist: f.p },
+      },
+      args: { parts: partsOf(it), seconds: it.secs, ...(S.player.asOnStick && it.recipe ? { recipe: it.recipe, trackId: it.t.id } : {}) },
+    };
+  }
+  async function startItem(item, from = 0) {
+    Object.assign(S.player, item.state, { token: item.token, playing: true, pos: from, error: null, from: "source", live: false, sent: new Map([[item.token, item]]) });
+    renderPlayer();
+    markPlaying();
+    renderDisplay();
+    try {
+      const r = await api.playParts({ token: item.token, from, ...item.args });
+      if (S.player.token !== item.token) return;
+      S.player.from = r.from;
+      renderPlayer();
+      queueNext();
+    } catch (err) {
+      toast(String(err));
+      if (S.player.token === item.token) stopPlayback();
+    }
+  }
+  /** What follows what's playing: by the repeat button, the setlist or the playlist. */
+  function itemAfter() {
+    const pp = S.player;
+    const again = pp.repeat === "one";
+    if (pp.set) {
+      const s = stickSet(pp.set.id);
+      if (!s) return null;
+      const files = setFilesOf(s);
+      const at = files.findIndex((x) => x.it.entry.id === pp.set.file);
+      // Taken out since it started: what followed it now has its place.
+      let j = at < 0 ? pp.set.index : again ? at : at + 1;
+      if (j >= files.length) j = pp.repeat === "all" ? 0 : -1;
+      return j >= 0 && files[j] ? fileItem(s, files, j) : null;
+    }
+    const p = pp.entryId ? pl(pp.playlistId) : null;
+    if (!p) return null;
+    const i = p.entries.findIndex((e) => e.id === pp.entryId);
+    const playable = (e) => track(e.trackId).exists;
+    const e = again && i >= 0 ? p.entries[i] : p.entries.slice(i + 1).find(playable) || (pp.repeat === "all" ? p.entries.find(playable) : null);
+    return e ? entryItem(p, e) : null;
+  }
+  let queueTimer = null;
+  async function queueNext() {
+    const pp = S.player;
+    if (!pp.sent) return;
+    const item = itemAfter();
+    if (item) pp.sent.set(item.token, item);
+    try {
+      const r = await api.queue(item ? { token: item.token, ...item.args } : null);
+      if (item && r) item.from = r.from;
+    } catch { /* When it's reached it's played the usual way, and says what's wrong. */ }
+  }
+  /** The player has reached what was queued: it's playing now, with no break. */
+  function onNext(token) {
+    const pp = S.player;
+    const item = pp.sent && pp.sent.get(token);
+    if (!item) return;
+    Object.assign(pp, item.state, { token, playing: true, pos: 0, error: null, from: item.from || "source", live: false });
+    renderPlayer();
+    markPlaying();
+    renderDisplay();
+    queueNext();
   }
 
   // ---- playing a setlist ---------------------------------------------------------------------
@@ -3002,26 +3094,8 @@
   async function playSetlist(setId, index = 0, from = 0) {
     const s = stickSet(setId);
     const files = s ? setFilesOf(s) : [];
-    const here = files[index];
-    if (!here) { toast(s ? `There's nothing to play in ${s.name} yet.` : "That setlist has gone."); return; }
-    const { it, f } = here;
-    const token = `set-${setId}-${++playCount}`;
-    const now = it.gap ? null : it.joined ? partAt(it, from) : it;
-    Object.assign(S.player, {
-      entryId: now ? now.entry.id : null, playlistId: now ? f.p.id : null, trackId: null, token, playing: true, pos: from, dur: it.secs, error: null, silent: DEMO, from: "source",
-      set: { id: setId, name: s.name, index, count: files.length, file: it.entry.id, item: it, playlist: f.p },
-    });
-    renderPlayer();
-    markPlaying();
-    renderDisplay();
-    try {
-      const prepared = S.player.asOnStick && it.recipe ? { recipe: it.recipe, trackId: it.t.id } : {};
-      const r = await api.playParts({ token, from, parts: partsOf(it), seconds: it.secs, ...prepared });
-      if (S.player.token === token) { S.player.from = r.from; renderPlayer(); }
-    } catch (err) {
-      toast(String(err));
-      if (S.player.token === token) stopPlayback();
-    }
+    if (!files[index]) { toast(s ? `There's nothing to play in ${s.name} yet.` : "That setlist has gone."); return; }
+    return startItem(fileItem(s, files, index, from), from);
   }
   /** On by `d` files from the one playing (0: again). */
   function stepSetlist(d, auto, from = 0) {
@@ -3053,7 +3127,9 @@
 
   function onPlayer(ev) {
     const pp = S.player;
+    if (ev.state === "next") { onNext(ev.token); return; }
     if (!pp.token || ev.token !== pp.token) return;
+    pp.starved = ev.starved || 0;
     // A song from the library is one and done; a playlist goes on.
     if (ev.state === "ended") {
       if (pp.trackId) stopPlayback();

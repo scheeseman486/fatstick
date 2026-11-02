@@ -56,6 +56,7 @@
       cancelSync: () => invoke("cancel_sync"),
       play: (args) => invoke("player_play", { args }),
       playParts: (args) => invoke("player_play_parts", { args }),
+      queue: (args) => invoke("player_queue", { args }),
       pause: () => invoke("player_pause"),
       playerKey: (pitch, keepFormants) => invoke("player_key", { pitch, keepFormants }),
       playerShape: (x) => invoke("player_shape", x),
@@ -166,13 +167,39 @@
     }
 
     // The silent player: demo tracks have no audio; dropped files play for real.
-    const P = { audio: null, timer: null, token: "", pos: 0, dur: 0, playing: false };
+    const P = { audio: null, timer: null, token: "", pos: 0, dur: 0, playing: false, next: null };
     function pev(state, error) {
       ev.emit("player", { state, token: P.token, pos: P.pos, dur: P.dur, error: error || null });
     }
     function stopAudio() {
       clearInterval(P.timer);
       if (P.audio) { P.audio.pause(); P.audio.removeAttribute("src"); P.audio = null; }
+    }
+    /** The end of what's playing: what's queued, at once, or the end. */
+    function reachedEnd() {
+      stopAudio();
+      const n = P.next;
+      if (n) { P.next = null; startItem(n, 0); pev("next"); } else pev("ended");
+    }
+    /** An item: a dropped file plays for real, anything else silently, for as long as it would. */
+    function startItem({ token, seconds = 0, parts = [] }, from) {
+      stopAudio();
+      const t = parts.length === 1 && parts[0].trackId ? tracks.get(parts[0].trackId) : null;
+      Object.assign(P, { token, pos: from, dur: seconds, playing: true });
+      if (t && t.url) {
+        P.audio = new Audio(t.url);
+        P.audio.currentTime = from;
+        P.audio.addEventListener("timeupdate", () => { if (P.audio) { P.pos = P.audio.currentTime; P.dur = P.audio.duration || P.dur; pev("playing"); } });
+        P.audio.addEventListener("ended", reachedEnd);
+        P.audio.play().catch(() => pev("error", "This browser can't play this format; the app plays everything through its own ffmpeg."));
+      } else {
+        P.timer = setInterval(() => {
+          if (!P.playing) return;
+          P.pos += 0.25;
+          if (P.pos >= P.dur) { reachedEnd(); return; }
+          pev("playing");
+        }, 250);
+      }
     }
 
     return {
@@ -298,6 +325,7 @@
       async cancelSync() { cancel = true; },
       async play({ trackId, token, from = 0 }) {
         stopAudio();
+        P.next = null;
         const t = tracks.get(trackId);
         Object.assign(P, { token, pos: from, dur: t ? t.duration : 0, playing: true });
         if (t && t.url) {
@@ -317,18 +345,15 @@
         pev("playing");
         return { from: "source", silent: !(t && t.url) };
       },
-      /** One file of a setlist: silent here, for as long as it would be. */
-      async playParts({ token, from = 0, seconds = 0 }) {
-        stopAudio();
-        Object.assign(P, { token, pos: from, dur: seconds, playing: true });
-        P.timer = setInterval(() => {
-          if (!P.playing) return;
-          P.pos += 0.25;
-          if (P.pos >= P.dur) { stopAudio(); pev("ended"); return; }
-          pev("playing");
-        }, 250);
+      async playParts(args) {
+        P.next = null;
+        startItem(args, args.from || 0);
         pev("playing");
         return { from: "source" };
+      },
+      async queue(args) {
+        P.next = args || null;
+        return args ? { from: "source" } : null;
       },
       async playerKey() {},
       async playerShape() {},

@@ -271,6 +271,7 @@
       A.seekTo(Math.max(0, S.player.dur - 0.5));
     }
     check("every file played, in order", JSON.stringify(seen) === JSON.stringify(order), seen.join(" | "));
+    check("and the sound never stopped, from one to the next", S.player.starved < 0.05, `${S.player.starved} s waiting`);
     check("then it stopped", !!(await until(() => !S.player.set && !S.player.playing, 15000)));
     // Repeat playlist, to see it kept after a restart.
     document.getElementById("repeat").click();

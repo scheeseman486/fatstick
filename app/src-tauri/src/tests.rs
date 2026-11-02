@@ -364,19 +364,19 @@ fn player_plays_seeks_and_ends() {
     }
     let took = start.elapsed().as_secs_f64();
     assert!((2.3..3.6).contains(&took), "with the silences: {took}");
-    // A setlist's file made as it plays: silence, a cut track, another joined on,
-    // more silence. The position runs through all of it and it ends once.
-    let part = |id: Option<&str>| fatstick_audio::render::RenderPart { track_id: id.map(String::from), ..Default::default() };
-    let src = Some(fatstick_audio::render::Source { path: f.clone(), content_key: String::new() });
-    let job = || crate::player::Parts {
-        parts: vec![
-            fatstick_audio::render::RenderPart { pad_start: 0.4, cut_start: 1.5, ..part(Some("a")) },
-            fatstick_audio::render::RenderPart { pad_end: 0.3, cut_end: 1.2, ..part(Some("a")) },
-        ],
+    // An item made as it plays: silence, a cut track, another joined on, more
+    // silence. The position runs through all of it and it ends once.
+    use fatstick_audio::render::{RenderPart, Source};
+    let part = |id: Option<&str>| RenderPart { track_id: id.map(String::from), ..Default::default() };
+    let src = Some(Source { path: f.clone(), content_key: String::new() });
+    let item = |token: &str| crate::player::Item {
+        token: token.into(),
+        duration: 2.0,
+        parts: vec![RenderPart { pad_start: 0.4, cut_start: 1.5, ..part(Some("a")) }, RenderPart { pad_end: 0.3, cut_end: 1.2, ..part(Some("a")) }],
         sources: vec![src.clone(), src.clone()],
         lengths: vec![2.0, 2.0],
     };
-    p.send(crate::player::Cmd::PlayParts { parts: job(), from: 0.0, duration: 2.0, token: "s1".into() });
+    p.send(crate::player::Cmd::PlayStream { item: item("s1"), from: 0.0 });
     let start = std::time::Instant::now();
     let (mut last, mut ends) = (0.0f64, 0);
     loop {
@@ -397,7 +397,7 @@ fn player_plays_seeks_and_ends() {
     assert!((1.9..3.2).contains(&took), "0.4 + 0.5 + 0.8 + 0.3 s in real time: {took}");
     assert!((last - 2.0).abs() < 0.25, "the position reaches the end: {last}");
     // Seeking in it, and past the silence: what's left is what plays.
-    p.send(crate::player::Cmd::PlayParts { parts: job(), from: 0.0, duration: 2.0, token: "s2".into() });
+    p.send(crate::player::Cmd::PlayStream { item: item("s2"), from: 0.0 });
     std::thread::sleep(std::time::Duration::from_millis(100));
     p.send(crate::player::Cmd::Seek(1.6));
     let start = std::time::Instant::now();
@@ -409,7 +409,8 @@ fn player_plays_seeks_and_ends() {
     }
     assert!(start.elapsed().as_secs_f64() < 1.2, "from 1.6 of 2 s");
     // A stretch of silence alone.
-    p.send(crate::player::Cmd::PlayParts { parts: crate::player::Parts { parts: vec![fatstick_audio::render::RenderPart { pad_start: 0.5, ..part(None) }], sources: vec![None], lengths: vec![0.0] }, from: 0.0, duration: 0.5, token: "s3".into() });
+    let silence = |token: &str, secs: f64| crate::player::Item { token: token.into(), duration: secs, parts: vec![RenderPart { pad_start: secs, ..part(None) }], sources: vec![None], lengths: vec![0.0] };
+    p.send(crate::player::Cmd::PlayStream { item: silence("s3", 0.5), from: 0.0 });
     let start = std::time::Instant::now();
     loop {
         let e = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
@@ -419,6 +420,95 @@ fn player_plays_seeks_and_ends() {
     }
     let took = start.elapsed().as_secs_f64();
     assert!((0.4..1.2).contains(&took), "silence takes its time: {took}");
+
+    // Gapless: what's queued follows in the same stream. Three items, 2 + 0.5 + 2 s,
+    // each queued as the one before starts, as the window does. The device never
+    // waits, and it takes the time they add up to, with no pause for each start.
+    let track = |token: &str| crate::player::Item { token: token.into(), duration: 2.0, parts: vec![part(Some("a"))], sources: vec![src.clone()], lengths: vec![2.0] };
+    p.send(crate::player::Cmd::PlayStream { item: track("g1"), from: 0.0 });
+    p.send(crate::player::Cmd::Queue(Some(silence("g2", 0.5))));
+    let start = std::time::Instant::now();
+    let mut order = vec!["g1".to_string()];
+    let mut times = Vec::new();
+    let mut restarted = 0.0f64;
+    let (ended_at, starved) = loop {
+        let e = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert!(e.state != "error", "{:?}", e.error);
+        if e.state == "next" {
+            order.push(e.token.clone());
+            times.push(start.elapsed().as_secs_f64());
+            if e.token == "g2" {
+                p.send(crate::player::Cmd::Queue(Some(track("g3"))));
+            }
+        } else if e.state == "playing" && e.token == "g3" {
+            restarted = restarted.max(e.pos);
+        }
+        if e.state == "ended" {
+            assert_eq!(e.token, "g3", "the last one ended");
+            break (start.elapsed().as_secs_f64(), e.starved);
+        }
+    };
+    assert_eq!(order, ["g1", "g2", "g3"]);
+    assert!(starved < 0.02, "the device never waited: {starved} s");
+    assert!((4.3..5.3).contains(&ended_at), "2 + 0.5 + 2 s in real time, no more: {ended_at}");
+    assert!((1.8..2.5).contains(&times[0]) && (2.3..3.0).contains(&times[1]), "each starts where the last ended: {times:?}");
+    assert!((1.5..2.2).contains(&restarted), "the position starts again for each: {restarted}");
+
+    // Seeking back after the stream has taken what's queued: it still follows.
+    p.send(crate::player::Cmd::PlayStream { item: silence("h1", 0.6), from: 0.0 });
+    p.send(crate::player::Cmd::Queue(Some(silence("h2", 0.4))));
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    p.send(crate::player::Cmd::Seek(0.1));
+    let mut next = None;
+    loop {
+        let e = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        if e.state == "next" {
+            next = Some(e.token.clone());
+        }
+        if e.state == "ended" {
+            assert_eq!(e.token, "h2");
+            break;
+        }
+    }
+    assert_eq!(next.as_deref(), Some("h2"), "what was queued still came next");
+
+    // Taken off the queue in time: it ends with the item.
+    p.send(crate::player::Cmd::PlayStream { item: track("i1"), from: 0.0 });
+    p.send(crate::player::Cmd::Queue(Some(silence("i2", 0.3))));
+    p.send(crate::player::Cmd::Queue(None));
+    p.send(crate::player::Cmd::Seek(1.7));
+    loop {
+        let e = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert!(e.state != "next", "nothing is queued");
+        if e.state == "ended" {
+            assert_eq!(e.token, "i1");
+            break;
+        }
+    }
+    // A queued file that can't be read: the one before it plays to its end first.
+    let broken = dir.path().join("broken.flac");
+    std::fs::write(&broken, b"not audio").unwrap();
+    p.send(crate::player::Cmd::PlayStream { item: silence("k1", 0.8), from: 0.0 });
+    p.send(crate::player::Cmd::Queue(Some(crate::player::Item { token: "k2".into(), duration: 1.0, parts: vec![part(Some("x"))], sources: vec![Some(Source { path: broken, content_key: String::new() })], lengths: vec![1.0] })));
+    let start = std::time::Instant::now();
+    loop {
+        let e = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        if e.state == "ended" || e.state == "error" {
+            break;
+        }
+    }
+    assert!(start.elapsed().as_secs_f64() > 0.6, "the silence wasn't cut short: {}", start.elapsed().as_secs_f64());
+    // Something else started: what was queued for the last one is forgotten.
+    p.send(crate::player::Cmd::PlayStream { item: silence("j1", 0.3), from: 0.0 });
+    p.send(crate::player::Cmd::Queue(Some(silence("j2", 0.3))));
+    p.send(crate::player::Cmd::Play { path: f.clone(), from: 1.7, gain_db: 0.0, duration: 2.0, token: "j3".into(), key: None, shape: Default::default() });
+    loop {
+        let e = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert!(e.token != "j2", "it was replaced");
+        if e.token == "j3" && e.state == "ended" {
+            break;
+        }
+    }
     p.send(crate::player::Cmd::Stop);
 }
 

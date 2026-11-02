@@ -531,15 +531,16 @@ struct PlayPartsArgs {
     track_id: String,
 }
 
-/// One file of a setlist, as the stick will have it: a track, a joined playlist
-/// or silence. It's made as it plays, unless the prepared file is asked for and
-/// is ready, so nothing has to be prepared first.
-#[tauri::command]
-fn player_play_parts(st: State<AppState>, args: PlayPartsArgs) -> Res<Playing> {
+/// A playlist's track or a setlist's file as the stick will have it: a track, a
+/// joined playlist or silence. It's made as it plays, unless the prepared file is
+/// asked for and is ready, so nothing has to be prepared first.
+fn item_of(st: &AppState, args: PlayPartsArgs) -> Res<(player::Item, &'static str)> {
+    use fatstick_audio::render::{RenderPart, Source};
     if let Some(p) = args.recipe.as_ref().and_then(|r| work::cached_for(&st.lib, &st.cache, &args.track_id, r)) {
         let duration = fatstick_audio::mp3::scan(&p).ok().flatten().map(|i| i.duration).unwrap_or(0.0);
-        st.player.send(player::Cmd::Play { path: p, from: args.from, gain_db: 0.0, duration, token: args.token, key: None, shape: player::Shape::default() });
-        return Ok(Playing { from: "cache".into() });
+        let part = RenderPart { track_id: Some(args.track_id), ..Default::default() };
+        let item = player::Item { token: args.token, duration, parts: vec![part], sources: vec![Some(Source { path: p, content_key: String::new() })], lengths: vec![duration] };
+        return Ok((item, "cache"));
     }
     let (mut sources, mut lengths, mut duration) = (Vec::new(), Vec::new(), 0.0);
     {
@@ -556,7 +557,7 @@ fn player_play_parts(st: State<AppState>, args: PlayPartsArgs) -> Res<Playing> {
                     }
                     length = t.duration;
                     audio = (t.duration - p.cut_start - p.cut_end).max(0.0);
-                    Some(fatstick_audio::render::Source { path: PathBuf::from(&t.path), content_key: String::new() })
+                    Some(Source { path: PathBuf::from(&t.path), content_key: String::new() })
                 }
             });
             lengths.push(length);
@@ -565,8 +566,27 @@ fn player_play_parts(st: State<AppState>, args: PlayPartsArgs) -> Res<Playing> {
     }
     let spec = fatstick_audio::render::RenderSpec { cap: 320, vbr: false, sample_rate: 44100, parts: args.parts };
     spec.check(&sources).map_err(err)?;
-    st.player.send(player::Cmd::PlayParts { parts: player::Parts { parts: spec.parts, sources, lengths }, from: args.from, duration, token: args.token });
-    Ok(Playing { from: "source".into() })
+    Ok((player::Item { token: args.token, duration, parts: spec.parts, sources, lengths }, "source"))
+}
+
+#[tauri::command]
+fn player_play_parts(st: State<AppState>, args: PlayPartsArgs) -> Res<Playing> {
+    let from = args.from;
+    let (item, source) = item_of(&st, args)?;
+    st.player.send(player::Cmd::PlayStream { item, from });
+    Ok(Playing { from: source.into() })
+}
+
+/// What follows the track playing, with nothing between them (none: nothing yet).
+#[tauri::command]
+fn player_queue(st: State<AppState>, args: Option<PlayPartsArgs>) -> Res<Option<Playing>> {
+    let Some(args) = args else {
+        st.player.send(player::Cmd::Queue(None));
+        return Ok(None);
+    };
+    let (item, source) = item_of(&st, args)?;
+    st.player.send(player::Cmd::Queue(Some(item)));
+    Ok(Some(Playing { from: source.into() }))
 }
 
 /// The start and end, and fade sliders, live: other cuts, fades and silences
@@ -813,6 +833,7 @@ fn main() {
             cancel_sync,
             player_play,
             player_play_parts,
+            player_queue,
             player_pause,
             player_key,
             player_shape,

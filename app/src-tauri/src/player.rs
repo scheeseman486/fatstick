@@ -11,11 +11,14 @@
 //! heard at once (the key after the shifter's tenth of a second). A plain
 //! track skips all of it.
 //!
-//! A setlist plays file by file as the stick will have them: each file's parts
-//! (a track with its cuts, fades, key, gain and silences; a whole joined
-//! playlist; a stretch of silence) come from the renderer as one stream, the
-//! one the encoder gets, into the same buffer. Nothing is left to do after the
-//! buffer, and there's nothing between a joined playlist's tracks.
+//! That live way is for trying things in the dialogs. Ordinary playback is an
+//! `Item`: a playlist's track or a setlist's file, as the stick will have it.
+//! Its parts (a track with its cuts, fades, key, gain and silences; a whole
+//! joined playlist; a stretch of silence) come from the renderer as one stream,
+//! the one the encoder gets, into the same buffer, with nothing left to do after
+//! it. And it's gapless: what the window queues joins the same stream, ahead of
+//! time, with a mark where it starts. The device never stops, and at that frame
+//! the position starts again and the window hears that the next one is playing.
 //!
 //! The device lives on its own thread (cpal streams aren't Send everywhere);
 //! the UI talks to it with commands and hears back through `player` events
@@ -76,8 +79,12 @@ impl Shape {
     }
 }
 
-/// One stick file as the renderer makes it, and how long each part's track is.
-pub struct Parts {
+/// One track or stick file as the renderer makes it, and how long each part's track is.
+pub struct Item {
+    /// Whatever the UI passed (it hears this back as the item starts).
+    pub token: String,
+    /// Seconds, in all.
+    pub duration: f64,
     pub parts: Vec<RenderPart>,
     pub sources: Vec<Option<Source>>,
     pub lengths: Vec<f64>,
@@ -87,13 +94,15 @@ pub struct Parts {
 #[derive(Clone)]
 enum Playing {
     File { path: PathBuf, gain_db: f64 },
-    Parts(Arc<Parts>),
+    Stream(Arc<Item>),
 }
 
 pub enum Cmd {
     Play { path: PathBuf, from: f64, gain_db: f64, duration: f64, token: String, key: Option<Key>, shape: Shape },
-    /// A stick file made as it plays, `duration` long in all.
-    PlayParts { parts: Parts, from: f64, duration: f64, token: String },
+    /// An item, made as it plays.
+    PlayStream { item: Item, from: f64 },
+    /// What follows the item playing, with nothing between them (none: nothing yet).
+    Queue(Option<Item>),
     /// Another start, end and fades for what's playing (live, from the fade sliders).
     Shape(Shape),
     /// Another key for what's playing (live, from the key slider), or none.
@@ -108,13 +117,16 @@ pub enum Cmd {
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerEvent {
-    /// "playing", "paused", "stopped", "ended" or "error".
+    /// "playing", "paused", "stopped", "ended", "error", or "next": what was
+    /// queued (this token) has just started.
     pub state: String,
     /// Whatever the UI passed with Play (its entry id).
     pub token: String,
     pub pos: f64,
     pub dur: f64,
     pub error: Option<String>,
+    /// Seconds the device has waited for audio since this began playing: 0 is gapless.
+    pub starved: f64,
 }
 
 /// The key shifter and its buffers, used by the device callback.
@@ -148,6 +160,17 @@ struct Shared {
     eof: AtomicBool,
     /// Bumped on every Play/Seek/Stop so old decoder threads stop.
     generation: AtomicU64,
+    /// What follows the item playing, for the stream to take when it's ready.
+    queue: Mutex<Option<Arc<Item>>>,
+    /// The items in the stream after the one playing: where each starts, in
+    /// frames since the last (re)start.
+    marks: Mutex<VecDeque<(u64, Arc<Item>)>>,
+    /// Items the device has reached, for the player to tell the window.
+    reached: Mutex<VecDeque<Arc<Item>>>,
+    /// Frames taken from the buffer since the last (re)start.
+    taken: AtomicU64,
+    /// Frames the device waited for audio, once it had begun.
+    starved: AtomicU64,
 }
 
 impl Shared {
@@ -158,9 +181,10 @@ impl Shared {
         let mut frames = 0u64;
         let shape = *self.shape.lock().unwrap();
         let shaped = !shape.plain();
-        let (base, rate) = (f64::from_bits(self.base.load(Ordering::Relaxed)), self.rate.load(Ordering::Relaxed).max(1) as f64);
-        let f0 = self.frames.load(Ordering::Relaxed);
-        let eof = self.eof.load(Ordering::Relaxed);
+        let (mut base, rate) = (f64::from_bits(self.base.load(Ordering::Relaxed)), self.rate.load(Ordering::Relaxed).max(1) as f64);
+        let mut f0 = self.frames.load(Ordering::Relaxed);
+        let mut taken = self.taken.load(Ordering::Relaxed);
+        let mut starved = 0u64;
         let pad_end = (shape.pad_end.max(0.0) * rate) as u64;
         let (mut lead, mut tail) = (self.lead.load(Ordering::Relaxed), self.tail.load(Ordering::Relaxed));
         let mut sh = self.shift.lock().unwrap();
@@ -168,7 +192,21 @@ impl Shared {
         input.clear();
         {
             let mut buf = self.buf.lock().unwrap();
+            let eof = self.eof.load(Ordering::Relaxed);
+            let mut mark = if playing { self.marks.lock().unwrap().front().map(|m| m.0) } else { None };
             for _ in 0..n {
+                // The next item starts here, in the same stream: its position
+                // runs from 0, and the player tells the window.
+                if mark.is_some_and(|at| taken >= at) {
+                    let mut marks = self.marks.lock().unwrap();
+                    if let Some((_, item)) = marks.pop_front() {
+                        self.reached.lock().unwrap().push_back(item);
+                    }
+                    mark = marks.front().map(|m| m.0);
+                    self.base.store(0f64.to_bits(), Ordering::Relaxed);
+                    self.frames.store(0, Ordering::Relaxed);
+                    (base, f0, frames) = (0.0, 0, 0);
+                }
                 let (mut l, mut r) = (0.0, 0.0);
                 if !playing {
                 } else if lead > 0 {
@@ -186,6 +224,9 @@ impl Shared {
                     l = buf.pop_front().unwrap() * g;
                     r = buf.pop_front().unwrap() * g;
                     frames += 1;
+                    taken += 1;
+                } else if taken > 0 {
+                    starved += 1;
                 }
                 input.push(l);
                 input.push(r);
@@ -215,6 +256,8 @@ impl Shared {
             }
         }
         self.frames.fetch_add(frames, Ordering::Relaxed);
+        self.taken.store(taken, Ordering::Relaxed);
+        self.starved.fetch_add(starved, Ordering::Relaxed);
     }
 }
 
@@ -363,6 +406,8 @@ struct Sink<'a> {
     generation: u64,
     high: usize,
     carry: Vec<u8>,
+    /// Frames written so far: where in the stream the next item will start.
+    frames: u64,
 }
 
 impl Write for Sink<'_> {
@@ -378,6 +423,7 @@ impl Write for Sink<'_> {
                 return Err(moved_on());
             }
             if buf.len() <= self.high {
+                self.frames += samples.len() as u64 / 2;
                 buf.extend(samples);
                 return Ok(data.len());
             }
@@ -390,16 +436,52 @@ impl Write for Sink<'_> {
     }
 }
 
-fn spawn_parts(tools: Tools, shared: Arc<Shared>, job: Arc<Parts>, from: f64, rate: u32, err_tx: Sender<String>) {
+/// The stream: the item from `from`, then what's queued, for as long as there's
+/// more. The buffer's two seconds ahead, so the next decoder starts well before
+/// the device gets there. With nothing queued the device can run out, and then
+/// that's the end; something queued in time carries on.
+fn spawn_stream(tools: Tools, shared: Arc<Shared>, item: Arc<Item>, from: f64, rate: u32, err_tx: Sender<String>) {
     let generation = shared.generation.load(Ordering::SeqCst);
     std::thread::spawn(move || {
-        let mut sink = Sink { shared: &shared, generation, high: rate as usize * 2 * 2, carry: Vec::new() };
-        let r = render::stream(&tools, &job.parts, &job.sources, &job.lengths, from, rate, &mut sink);
-        if shared.generation.load(Ordering::SeqCst) == generation {
-            if let Err(e) = r {
-                let _ = err_tx.send(e.to_string());
+        let stale = || shared.generation.load(Ordering::SeqCst) != generation;
+        let mut sink = Sink { shared: &shared, generation, high: rate as usize * 2 * 2, carry: Vec::new(), frames: 0 };
+        let (mut item, mut from) = (item, from);
+        loop {
+            let r = render::stream(&tools, &item.parts, &item.sources, &item.lengths, from, rate, &mut sink);
+            if stale() {
+                return;
             }
             shared.eof.store(true, Ordering::SeqCst);
+            if let Err(e) = r {
+                // What's in the buffer still plays: a queued file that can't be
+                // read doesn't cut short the one before it.
+                while !stale() && shared.buf.lock().unwrap().len() >= 2 {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                if !stale() {
+                    let _ = err_tx.send(e.to_string());
+                }
+                return;
+            }
+            let next = loop {
+                if stale() {
+                    return;
+                }
+                if let Some(n) = shared.queue.lock().unwrap().take() {
+                    break n;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            };
+            {
+                // Under the buffer's lock, so the device sees both or neither.
+                let _buf = shared.buf.lock().unwrap();
+                if stale() {
+                    return;
+                }
+                shared.eof.store(false, Ordering::SeqCst);
+                shared.marks.lock().unwrap().push_back((sink.frames, next.clone()));
+            }
+            (item, from) = (next, 0.0);
         }
     });
 }
@@ -435,11 +517,15 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
         volume: AtomicU32::new(0.8f32.to_bits()),
         eof: AtomicBool::new(false),
         generation: AtomicU64::new(0),
+        queue: Mutex::new(None),
+        marks: Mutex::new(VecDeque::with_capacity(4)),
+        reached: Mutex::new(VecDeque::with_capacity(4)),
+        taken: AtomicU64::new(0),
+        starved: AtomicU64::new(0),
     });
     let mut output: Option<(Output, u32)> = None;
     let (err_tx, err_rx) = channel::<String>();
     let mut current: Option<(Playing, String)> = None;
-    let mut base = 0.0f64;
     let dur = std::cell::Cell::new(0.0f64);
     let mut state = "stopped".to_string();
     let reset = |s: &Shared| {
@@ -450,6 +536,9 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
         s.past_end.store(false, Ordering::SeqCst);
         s.lead.store(0, Ordering::SeqCst);
         s.tail.store(0, Ordering::SeqCst);
+        s.marks.lock().unwrap().clear();
+        s.reached.lock().unwrap().clear();
+        s.taken.store(0, Ordering::SeqCst);
         if let Some(sh) = s.shift.lock().unwrap().shifter.as_mut() {
             sh.reset();
         }
@@ -482,9 +571,17 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
             Err(RecvTimeoutError::Disconnected) => return,
         };
         let rate = output.as_ref().map(|o| o.1).unwrap_or(44100);
-        let pos = base + shared.frames.load(Ordering::Relaxed) as f64 / rate as f64;
+        let starved = shared.starved.load(Ordering::Relaxed) as f64 / rate as f64;
+        // The device has reached what was queued: that's what's playing now.
+        loop {
+            let Some(item) = shared.reached.lock().unwrap().pop_front() else { break };
+            dur.set(item.duration);
+            emit(PlayerEvent { state: "next".into(), token: item.token.clone(), pos: 0.0, dur: item.duration, error: None, starved });
+            current = Some((Playing::Stream(item.clone()), item.token.clone()));
+        }
+        let pos = f64::from_bits(shared.base.load(Ordering::Relaxed)) + shared.frames.load(Ordering::Relaxed) as f64 / rate as f64;
         let token = current.as_ref().map(|c| c.1.clone()).unwrap_or_default();
-        let ev = |state: &str, pos: f64, error: Option<String>, token: &str| PlayerEvent { state: state.into(), token: token.into(), pos, dur: dur.get(), error };
+        let ev = |state: &str, pos: f64, error: Option<String>, token: &str| PlayerEvent { state: state.into(), token: token.into(), pos, dur: dur.get(), error, starved };
         match cmd {
             Some(Cmd::Play { path, from, gain_db, duration, token, key, shape }) => {
                 let Some(t) = tools.clone() else {
@@ -501,6 +598,8 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
                     }
                 }
                 reset(&shared);
+                shared.starved.store(0, Ordering::SeqCst);
+                *shared.queue.lock().unwrap() = None;
                 while err_rx.try_recv().is_ok() {}
                 let rate = output.as_ref().unwrap().1;
                 set_key(&shared, key, rate, true);
@@ -510,7 +609,6 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
                 *shared.shape.lock().unwrap() = shape;
                 shared.rate.store(rate, Ordering::SeqCst);
                 shared.base.store(from.to_bits(), Ordering::SeqCst);
-                base = from;
                 dur.set(duration);
                 current = Some((Playing::File { path: path.clone(), gain_db }, token.clone()));
                 spawn_decoder(t, shared.clone(), path, from, gain_db, rate, err_tx.clone());
@@ -518,7 +616,8 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
                 state = "playing".into();
                 emit(ev(&state, from, None, &token));
             }
-            Some(Cmd::PlayParts { parts, from, duration, token }) => {
+            Some(Cmd::PlayStream { item, from }) => {
+                let token = item.token.clone();
                 let Some(t) = tools.clone() else {
                     emit(ev("error", 0.0, Some("ffmpeg isn't available, so nothing can play.".into()), &token));
                     continue;
@@ -533,6 +632,8 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
                     }
                 }
                 reset(&shared);
+                shared.starved.store(0, Ordering::SeqCst);
+                *shared.queue.lock().unwrap() = None;
                 while err_rx.try_recv().is_ok() {}
                 let rate = output.as_ref().unwrap().1;
                 // Everything is in the stream: nothing to do after the buffer.
@@ -541,14 +642,18 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
                 let from = from.max(0.0);
                 shared.rate.store(rate, Ordering::SeqCst);
                 shared.base.store(from.to_bits(), Ordering::SeqCst);
-                base = from;
-                dur.set(duration);
-                let job = Arc::new(parts);
-                current = Some((Playing::Parts(job.clone()), token.clone()));
-                spawn_parts(t, shared.clone(), job, from, rate, err_tx.clone());
+                dur.set(item.duration);
+                let item = Arc::new(item);
+                current = Some((Playing::Stream(item.clone()), token.clone()));
+                spawn_stream(t, shared.clone(), item, from, rate, err_tx.clone());
                 shared.playing.store(true, Ordering::SeqCst);
                 state = "playing".into();
                 emit(ev(&state, from, None, &token));
+            }
+            Some(Cmd::Queue(item)) => {
+                if matches!(current, Some((Playing::Stream(_), _))) {
+                    *shared.queue.lock().unwrap() = item.map(Arc::new);
+                }
             }
             Some(Cmd::Pause) => {
                 shared.playing.store(false, Ordering::SeqCst);
@@ -566,14 +671,22 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
             }
             Some(Cmd::Seek(to)) => {
                 if let (Some((what, tok)), Some(t), Some((_, rate))) = (current.clone(), tools.clone(), output.as_ref()) {
+                    // What the stream had taken from the queue is still to come.
+                    let taken = shared.marks.lock().unwrap().front().map(|m| m.1.clone());
                     reset(&shared);
+                    if taken.is_some() {
+                        let mut q = shared.queue.lock().unwrap();
+                        if q.is_none() {
+                            *q = taken;
+                        }
+                    }
                     let shape = *shared.shape.lock().unwrap();
-                    base = to.max(shape.start).clamp(0.0, dur.get().max(to));
+                    let base = to.max(shape.start).clamp(0.0, dur.get().max(to));
                     lead_in(&shared, &shape, base, *rate);
                     shared.base.store(base.to_bits(), Ordering::SeqCst);
                     match what {
                         Playing::File { path, gain_db } => spawn_decoder(t, shared.clone(), path, base, gain_db, *rate, err_tx.clone()),
-                        Playing::Parts(job) => spawn_parts(t, shared.clone(), job, base, *rate, err_tx.clone()),
+                        Playing::Stream(item) => spawn_stream(t, shared.clone(), item, base, *rate, err_tx.clone()),
                     }
                     emit(ev(&state, base, None, &tok));
                 }
@@ -581,6 +694,7 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
             Some(Cmd::Stop) => {
                 shared.playing.store(false, Ordering::SeqCst);
                 reset(&shared);
+                *shared.queue.lock().unwrap() = None;
                 current = None;
                 state = "stopped".into();
                 emit(ev(&state, 0.0, None, &token));
@@ -595,6 +709,8 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
             None => {
                 if let Ok(e) = err_rx.try_recv() {
                     shared.playing.store(false, Ordering::SeqCst);
+                    reset(&shared);
+                    *shared.queue.lock().unwrap() = None;
                     current = None;
                     state = "stopped".into();
                     emit(ev("error", pos, Some(e), &token));
@@ -606,6 +722,8 @@ fn run(tools: Option<Tools>, rx: Receiver<Cmd>, emit: impl Fn(PlayerEvent)) {
                     let done = shared.past_end.load(Ordering::SeqCst);
                     if done {
                         shared.playing.store(false, Ordering::SeqCst);
+                        reset(&shared);
+                        *shared.queue.lock().unwrap() = None;
                         current = None;
                         state = "stopped".into();
                         emit(ev("ended", pos, None, &token));
@@ -637,6 +755,11 @@ mod key_tests {
             volume: AtomicU32::new(1.0f32.to_bits()),
             eof: AtomicBool::new(false),
             generation: AtomicU64::new(0),
+            queue: Mutex::new(None),
+            marks: Mutex::new(VecDeque::new()),
+            reached: Mutex::new(VecDeque::new()),
+            taken: AtomicU64::new(0),
+            starved: AtomicU64::new(0),
         }
     }
     fn tone(hz: f32, secs: f32) -> Vec<f32> {
@@ -658,6 +781,52 @@ mod key_tests {
             all.extend_from_slice(&out);
         }
         all
+    }
+
+    #[test]
+    fn the_next_item_starts_at_its_exact_frame_with_nothing_between() {
+        // Three items in one stream, 700, 1 and 900 frames, none of them a whole
+        // number of the device's blocks.
+        let item = |t: &str| Arc::new(Item { token: t.into(), duration: 1.0, parts: vec![], sources: vec![], lengths: vec![] });
+        let want: Vec<f32> = (0..1601).flat_map(|i| [(i + 1) as f32 / 4000.0, -((i + 1) as f32) / 4000.0]).collect();
+        let s = shared(want.clone());
+        s.marks.lock().unwrap().extend([(700u64, item("b")), (701u64, item("c"))]);
+        s.base.store(5f64.to_bits(), Ordering::SeqCst);
+        s.eof.store(true, Ordering::SeqCst);
+        let mut out = vec![0.0f32; 512 * 2];
+        s.take(&mut out, 2);
+        assert_eq!(&out[..], &want[..1024], "the first block is the first item");
+        assert!(s.reached.lock().unwrap().is_empty(), "not there yet");
+        assert_eq!(s.frames.load(Ordering::SeqCst), 512);
+        assert_eq!(f64::from_bits(s.base.load(Ordering::SeqCst)), 5.0, "its position goes on");
+        s.take(&mut out, 2);
+        assert_eq!(&out[..], &want[1024..2048], "the second has both joins in it, and no hole");
+        let reached: Vec<String> = s.reached.lock().unwrap().iter().map(|i| i.token.clone()).collect();
+        assert_eq!(reached, ["b", "c"], "the device got to both, in order");
+        assert_eq!(f64::from_bits(s.base.load(Ordering::SeqCst)), 0.0, "the position starts again");
+        assert_eq!(s.frames.load(Ordering::SeqCst), 1024 - 701, "from where the last one started");
+        assert!(!s.past_end.load(Ordering::SeqCst));
+        let mut rest = Vec::new();
+        while !s.past_end.load(Ordering::SeqCst) {
+            s.take(&mut out, 2);
+            rest.extend_from_slice(&out);
+        }
+        assert_eq!(&rest[..want.len() - 2048], &want[2048..], "and the rest, to the last frame");
+        assert!(s.marks.lock().unwrap().is_empty());
+        assert_eq!(s.starved.load(Ordering::SeqCst), 0, "it never waited");
+    }
+
+    #[test]
+    fn a_device_kept_waiting_is_counted() {
+        let s = shared(vec![0.5; 200]);
+        let mut out = vec![0.0f32; 512 * 2];
+        s.take(&mut out, 2);
+        assert_eq!(s.starved.load(Ordering::SeqCst), 412, "100 frames, then waiting");
+        assert!(!s.past_end.load(Ordering::SeqCst), "more may come");
+        // Before the first audio it's only starting up.
+        let t = shared(Vec::new());
+        t.take(&mut out, 2);
+        assert_eq!(t.starved.load(Ordering::SeqCst), 0);
     }
 
     #[test]

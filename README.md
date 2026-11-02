@@ -213,11 +213,20 @@ GPL version 3 or later.
   previous go by file, as on a player, and the repeat button repeats a file or
   the whole setlist. Nothing has to be prepared first: each file is made as it
   plays, by the same code a sync uses. "As on the stick" plays the prepared file
-  where there is one. Between files there's a moment's pause, as on a player. An
-  edit counts from the next file.
+  where there is one. An edit counts from the next file.
 
   ![A setlist playing, with the file playing marked](docs/setlist.png)
 
+- **Gapless playback.** One track follows the next with nothing between them,
+  in a playlist and in a setlist, and round again when it repeats: the player has
+  the next one running two seconds before it's needed, in the same stream, so the
+  sound never stops. FLAC, WAV, Ogg Vorbis, Opus and MP3s with a LAME header join
+  to the sample, even resampled to the sound card's rate. AAC files have silence
+  of their own at the ends (about 34 ms measured on ffmpeg's encodes), and MP3s
+  without that header keep the padding their encoder left; the player can't tell
+  that from the music. Trying something in a dialog plays the track on its own, so
+  changes can be heard as it plays. On a stick it's up to the player: cheap ones
+  pause between files, and "One track" is the way to have none.
 - **The player.** Listen to a playlist as it is, or "as on the stick", with
   the gain and bitrate the sync will use. The repeat button (or R) steps
   through play & stop (to the end of the playlist), repeat one song and

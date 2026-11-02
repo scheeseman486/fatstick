@@ -1084,7 +1084,8 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.locator('#player button[aria-label="Next"]').click();
     now = await pl();
     check('next goes to the next file', now.file === order[1] && now.index === 1);
-    const second = await p.evaluate(() => window.__played.at(-1));
+    const nowSent = () => p.evaluate(() => { const P = Fatstick.app.S.player; return P.sent.get(P.token).args; });
+    const second = await nowSent();
     const part2 = second.parts[0];
     check('with its cut, silence, key, fade and volume', second.parts.length === 1 && part2.cutStart === 2 && part2.padEnd === 1.5 && part2.pitch === 3 && part2.fadeIn === 4 && typeof part2.gainDb === 'number', JSON.stringify(part2));
     const expected = await p.evaluate(() => { const A = Fatstick.app; const it = A.setFilesOf(A.stickSet('set-car'))[1].it; return { secs: it.secs, recipe: it.recipe }; });
@@ -1106,7 +1107,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await runOut();
     now = await pl();
     check('the silence plays as a file of its own', now.file === 'gap-test:silence' && Math.abs(now.dur - 7) < 0.01 && now.entry === null && now.playing);
-    const gapSent = await p.evaluate(() => window.__played.at(-1));
+    const gapSent = await nowSent();
     check('with nothing but silence in it', gapSent.parts.length === 1 && gapSent.parts[0].trackId === null && gapSent.parts[0].padStart === 7, JSON.stringify(gapSent.parts));
     check('and says so', /^SILENCE /.test((await p.locator('#disp-text').textContent()).trim()) && (await p.locator('#player .np-t').textContent()) === 'Silence' && (await p.locator('#stickview .lay-line.sv-now').count()) === 1);
     await p.waitForTimeout(600);
@@ -1115,7 +1116,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await runOut();
     now = await pl();
     check('then the joined playlist, as one file', now.file === `${made.b}:joined` && now.index === order.length - 1);
-    const joinSent = await p.evaluate(() => window.__played.at(-1));
+    const joinSent = await nowSent();
     check('made of all its tracks, in order', joinSent.parts.length === made.parts && joinSent.parts.every((x) => x.trackId), String(joinSent.parts.length));
     const join = await p.evaluate(() => { const A = Fatstick.app; const it = A.S.player.set.item; return { secs: it.secs, at: it.parts.map((x) => x.at), ids: it.parts.map((x) => x.entry.id) }; });
     check('its length is all of theirs', Math.abs((await pl()).dur - join.secs) < 0.01);
@@ -1190,6 +1191,94 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('a dialog\'s slider leaves a setlist playing alone', (await p.evaluate(() => window.__shape)) === 0 && shapeSent && (await pl()).set === 'set-car');
     await p.keyboard.press('Escape');
     await p.evaluate(() => { const A = Fatstick.app; A.stopPlayback(); delete Fatstick.api.playParts; });
+    await p.reload();
+    await p.waitForTimeout(600);
+    await p.evaluate(() => Fatstick.app.setProcessing('fat'));
+    await p.waitForTimeout(260);
+  }
+
+  // 32c. Gapless: what follows is queued as each one starts, and moving on to it
+  // doesn't start or stop anything.
+  {
+    await p.evaluate(() => {
+      const api = Fatstick.api;
+      window.__calls = [];
+      for (const k of ['play', 'playParts', 'queue', 'stop']) {
+        const real = api[k];
+        api[k] = (a) => { window.__calls.push({ k, token: a && a.token, args: a }); return real.call(api, a); };
+      }
+    });
+    const calls = () => p.evaluate(() => window.__calls.map((c) => `${c.k}${c.token ? '' : ':none'}`));
+    const clear = () => p.evaluate(() => { window.__calls.length = 0; });
+    const cur = () => p.evaluate(() => { const P = Fatstick.app.S.player; return { entry: P.entryId, token: P.token, playing: P.playing, pos: P.pos, dur: P.dur, from: P.from, live: P.live, set: P.set && P.set.index }; });
+    const ids = await p.evaluate(() => Fatstick.app.pl().entries.filter((e) => Fatstick.app.track(e.trackId).exists).map((e) => e.id));
+    await p.evaluate((id) => Fatstick.app.playEntry(id), ids[0]);
+    await p.waitForTimeout(50);
+    check('a track starts in the stream, with the next one queued', JSON.stringify(await calls()) === JSON.stringify(['playParts', 'queue']));
+    const q = await p.evaluate(() => window.__calls[1].args.parts[0].trackId);
+    check('what\'s queued is the next in the playlist', q === await p.evaluate((id) => Fatstick.app.pl().entries.find((e) => e.id === id).trackId, ids[1]));
+    await clear();
+    await p.evaluate(() => { const A = Fatstick.app; A.seekTo(A.S.player.dur - 0.3); });
+    await p.waitForTimeout(600);
+    let now = await cur();
+    check('at its end the next is playing', now.entry === ids[1] && now.playing && now.pos < 1);
+    check('with no play or stop sent, only the one after it queued', JSON.stringify(await calls()) === JSON.stringify(['queue']), JSON.stringify(await calls()));
+    check('the row and the bar follow', (await p.locator(`#row-${ids[1]}.playing`).count()) === 1 && (await p.locator('#row-' + ids[0] + '.playing').count()) === 0);
+    // The repeat button changes what's queued.
+    await clear();
+    await p.evaluate(() => { document.getElementById('repeat').click(); });
+    const queuedNow = () => p.evaluate(() => { const a = window.__calls.filter((c) => c.k === 'queue').at(-1); return a && a.args ? a.args.parts[0].trackId : null; });
+    await p.waitForTimeout(50);
+    const thisTrack = await p.evaluate((id) => Fatstick.app.pl().entries.find((e) => e.id === id).trackId, ids[1]);
+    check('repeat one queues the same track, for no gap as it comes round', (await queuedNow()) === thisTrack, await p.evaluate(() => Fatstick.app.S.player.repeat));
+    await p.evaluate(() => { document.getElementById('repeat').click(); });
+    await p.evaluate(() => { document.getElementById('repeat').click(); });
+    await p.waitForTimeout(50);
+    check('and play & stop goes back to the next one', (await p.evaluate(() => Fatstick.app.S.player.repeat)) === 'off');
+    // The last track has nothing after it, unless the playlist repeats.
+    await p.evaluate((id) => Fatstick.app.playEntry(id), ids[ids.length - 1]);
+    await p.waitForTimeout(50);
+    check('the last track queues nothing', (await queuedNow()) === null);
+    await p.evaluate(() => { document.getElementById('repeat').click(); document.getElementById('repeat').click(); });
+    await p.waitForTimeout(50);
+    check('repeating the playlist queues its first', (await queuedNow()) === await p.evaluate((id) => Fatstick.app.pl().entries.find((e) => e.id === id).trackId, ids[0]));
+    await p.evaluate(() => { document.getElementById('repeat').click(); });
+    // An edit changes what follows.
+    await p.evaluate((id) => Fatstick.app.playEntry(id), ids[0]);
+    await p.waitForTimeout(50);
+    await clear();
+    await row(1).click();
+    await p.keyboard.press('Delete');
+    await p.waitForTimeout(250);
+    const third = await p.evaluate((id) => Fatstick.app.pl().entries.find((e) => e.id === id).trackId, ids[2]);
+    check('taking the next track out queues the one after', (await queuedNow()) === third);
+    await p.keyboard.press('Control+z');
+    // The position is the track as the stick has it, cuts and silences included.
+    await p.evaluate(() => { const e = Fatstick.app.pl().entries[0]; e.cutStart = 2; e.padEnd = 1.5; });
+    await p.evaluate(() => Fatstick.app.playEntry(Fatstick.app.pl().entries[0].id));
+    const cutNow = await p.evaluate(() => { const A = Fatstick.app; const e = A.pl().entries[0]; return { dur: A.S.player.dur, want: A.track(e.trackId).duration - 2 + 1.5, pos: A.S.player.pos, part: A.S.player.sent.get(A.S.player.token).args.parts[0] }; });
+    check('a track\'s length is as on the stick, from 0', Math.abs(cutNow.dur - cutNow.want) < 0.01 && cutNow.pos < 0.5, JSON.stringify(cutNow));
+    check('with its cut and silence in what it plays', cutNow.part.cutStart === 2 && cutNow.part.padEnd === 1.5);
+    await p.evaluate(() => { const e = Fatstick.app.pl().entries[0]; delete e.cutStart; delete e.padEnd; });
+    // A dialog's Hear plays the source, live, and queues nothing; afterwards it goes back.
+    await clear();
+    await row(0).click();
+    await p.keyboard.press('f');
+    await p.waitForTimeout(50);
+    await p.getByRole('button', { name: /^Hear the start/ }).click();
+    await p.waitForTimeout(50);
+    now = await cur();
+    check('a dialog hears the track live, on its own', now.live && (await calls()).at(-1) === 'play', JSON.stringify(await calls()));
+    await p.keyboard.press('Escape');
+    await p.evaluate(() => Fatstick.app.stopPlayback());
+    // "As on the stick" asks for the prepared file, and gets the volume.
+    await p.evaluate(() => { Fatstick.app.S.player.asOnStick = true; });
+    await clear();
+    await p.evaluate((id) => Fatstick.app.playEntry(id), ids[0]);
+    await p.waitForTimeout(50);
+    const aos = await p.evaluate(() => window.__calls.find((c) => c.k === 'playParts').args);
+    check('"as on the stick" asks for the prepared file, with the volume', !!aos.recipe && typeof aos.parts[0].gainDb === 'number', JSON.stringify(aos.recipe));
+    await p.evaluate(() => { Fatstick.app.S.player.asOnStick = false; Fatstick.app.stopPlayback(); });
     await p.reload();
     await p.waitForTimeout(600);
     await p.evaluate(() => Fatstick.app.setProcessing('fat'));
