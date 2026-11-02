@@ -25,7 +25,7 @@ pub mod setup;
 
 use std::collections::HashSet;
 use std::ffi::OsString;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -564,6 +564,28 @@ impl Store {
     }
 }
 
+/// Copy `src` to `to`, as a file of the folder's own. `std::fs::copy` also gives
+/// the copy `src`'s permissions, and fails if that's refused, as it is on a FAT,
+/// exFAT or NTFS drive or a network share where the files aren't the user's, though
+/// writing to them is fine. Nothing is left at `to` if this fails.
+fn copy_new(src: &Path, to: &Path) -> std::io::Result<()> {
+    let copied = (|| {
+        let mut from = std::fs::File::open(src)?;
+        let mut out = std::fs::File::create(to)?;
+        std::io::copy(&mut from, &mut out)?;
+        // A network drive may only say now that a write failed. A drive that
+        // has no way to flush, or won't, has been given the data all the same.
+        match out.sync_all() {
+            Err(e) if !matches!(e.kind(), ErrorKind::Unsupported | ErrorKind::InvalidInput | ErrorKind::PermissionDenied) => Err(e),
+            _ => Ok(()),
+        }
+    })();
+    if copied.is_err() {
+        let _ = std::fs::remove_file(to);
+    }
+    copied
+}
+
 /// Tag a fetched song and copy it into `dir`, under a name from its tags. The
 /// file appears whole, under its final name, or not at all; nothing in `dir` is
 /// ever replaced. Returns where it went.
@@ -575,7 +597,7 @@ pub fn keep(store: &Store, f: &Fetched, dir: &Path) -> Result<PathBuf, String> {
     fatstick_audio::tagwrite::write_tags(&src, &edit).map_err(|e| format!("Couldn't tag the file: {e}"))?;
     std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't make {}: {e}", dir.display()))?;
     let tmp = dir.join(format!(".fatstick-youtube-{}.{ext}", f.id));
-    std::fs::copy(&src, &tmp).map_err(|e| format!("Couldn't copy it into {}: {e}", dir.display()))?;
+    copy_new(&src, &tmp).map_err(|e| format!("Couldn't copy it into {}: {e}", dir.display()))?;
     let stem = meta::file_stem(&f.tags, &f.id);
     let mut n = 0;
     loop {
@@ -607,6 +629,29 @@ mod tests {
     }
     fn text(a: &[OsString]) -> Vec<String> {
         a.iter().map(|x| x.to_string_lossy().into_owned()).collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_copy_is_the_folders_own_and_nothing_stays_if_it_fails() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let (src, to) = (d.path().join("cached.opus"), d.path().join("copy.opus"));
+        std::fs::write(&src, b"the song").unwrap();
+        // Read-only here, and std::fs::copy would make the copy read-only too:
+        // that same step is what a drive can refuse.
+        std::fs::set_permissions(&src, std::fs::Permissions::from_mode(0o400)).unwrap();
+        copy_new(&src, &to).unwrap();
+        assert_eq!(std::fs::read(&to).unwrap(), b"the song");
+        assert_ne!(std::fs::metadata(&to).unwrap().permissions().mode() & 0o200, 0, "it doesn't take the source's permissions");
+        // Over what a failed try left behind.
+        std::fs::write(&to, b"something much longer than the song").unwrap();
+        copy_new(&src, &to).unwrap();
+        assert_eq!(std::fs::read(&to).unwrap(), b"the song");
+        // A directory opens but can't be read, so this fails after making the file.
+        let gone = d.path().join("failed.opus");
+        assert!(copy_new(d.path(), &gone).is_err());
+        assert!(!gone.exists(), "no working file left behind");
     }
 
     #[test]
