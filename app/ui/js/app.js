@@ -90,6 +90,8 @@
     /** What the processing panel shows (a key of PROCESSES). It's closed (null)
      * whenever the app starts, until something opens it. */
     processing: null,
+    /** Playlists being filled from YouTube: { playlist id: its job }. */
+    importing: new Map(),
     /** The sidebar's lists folded away, kept across restarts. */
     sideClosed: { playlists: false, setlists: false },
     /** The sidebar shows the search panel, on your music or on YouTube. */
@@ -142,7 +144,7 @@
     S, api, DEMO, track, pl, collator, insertTracks, newPlaylist, putTracks, renderSide, renderDisplay, saveSetting, setView, startTrackDrag, playTrack, setProcessing, searchTabs,
     selectedTrackIds: () => (pl() ? selectedInOrder().map((e) => e.trackId) : []),
   });
-  const yt = P.youtubeSetup({ S, api, lib, pl, insertTracks, putTracks, renderSide, setView, playTrack, searchTabs });
+  const yt = P.youtubeSetup({ S, api, lib, pl, insertTracks, putTracks, renderSide, setView, playTrack, searchTabs, beginImport, importing, importArrived, importChanged, endImport });
   /** What a USB stick holds, going by the note its last sync left on it (or,
    * for a stick the OS hasn't mounted, the volume serial that sync recorded):
    * `{ set, note, ours }`, where `set` is this library's setlist on it,
@@ -629,6 +631,42 @@
     $("list").scrollTop = 0;
   }
 
+  // ---- a playlist filled from YouTube -------------------------------------------------------
+  /** Its making is the one step to undo, however many songs arrive after it. */
+  function beginImport(name, job) {
+    const id = newPlaylist(name, []);
+    if (S.view !== "playlist") setView("playlist");
+    importing(id, job);
+    return id;
+  }
+  function importing(id, job) {
+    S.importing.set(id, job);
+    importChanged(id);
+  }
+  function importChanged(id) {
+    renderSide();
+    if (S.current === id && S.view === "playlist") { renderHead(); renderList(); renderDisplay(); }
+  }
+  /** A song in its place among those that have come so far, unless it's there already. */
+  function importArrived(id, trackId, at) {
+    const p = pl(id);
+    if (!p || p.entries.some((e) => e.trackId === trackId)) return;
+    p.entries.splice(Math.min(at, p.entries.length), 0, { id: newId("e"), trackId });
+    importChanged(id);
+    changed();
+  }
+  function endImport(id) {
+    S.importing.delete(id);
+    importChanged(id);
+  }
+  function importMenu(a) {
+    menu(a, [
+      { label: "Import from file…", action: importPlaylist },
+      { label: "Import from YouTube…", action: () => yt.importDialog() },
+    ]);
+  }
+  const importButton = (id) => h("button", { type: "button", class: "btn quiet small side-more", id, "data-menu-anchor": "", "aria-haspopup": "menu", onclick: (e) => importMenu(e.currentTarget) }, "Import playlist", h("span", { class: "caret" }, icon("caret")));
+
   // ---- rendering: sidebar ------------------------------------------------------------------
   /** The top of the sidebar: looks like the search panel's box, and opens it. */
   function sideSearch() {
@@ -682,7 +720,7 @@
         ondblclick: () => startRename("playlist", p.id),
         onpointerdown: (e) => { if (e.button === 0 && e.pointerType !== "touch") stickView.startDrag(e, { id: p.id, name: p.name, from: "side" }); },
         oncontextmenu: (e) => { e.preventDefault(); playlistMenu(p, { x: e.clientX, y: e.clientY }); },
-      }, h("span", { class: "nm", text: p.name }), h("span", { class: "mt", text: `${plural(p.entries.length, "track")}${p.join ? " as one" : ""}, ${length(dur)}` })));
+      }, h("span", { class: "nm", text: p.name }), h("span", { class: "mt", text: S.importing.has(p.id) ? `Importing, ${S.importing.get(p.id).done} of ${S.importing.get(p.id).total}` : `${plural(p.entries.length, "track")}${p.join ? " as one" : ""}, ${length(dur)}` })));
     });
     const setItems = () => {
       const plugged = new Set(S.sticks.map(holder).filter((x) => x && x.set).map((x) => x.set.id));
@@ -710,7 +748,7 @@
       sideSearch(),
       sideSection("playlists", "Playlists", S.playlists.length, { label: "New playlist", run: () => newPlaylist() }, () => [
         h("ul", { id: "side-pls" }, S.playlists.length ? plItems() : none("No playlists.")),
-        h("button", { type: "button", class: "btn quiet small side-more", text: "Import a playlist file…", onclick: importPlaylist }),
+        importButton("side-import"),
       ]),
       sideSection("setlists", "Setlists", S.sets.length, { label: "New setlist", run: newSet }, () =>
         h("ul", { id: "side-sets" }, S.sets.length ? setItems() : none("No setlists."))),
@@ -868,7 +906,10 @@
         h("p", { class: "pl-meta" },
           `${plural(plan.items.length, "track")}, ${length(dur)}`,
           missing ? h("span", { class: "warn", text: `, ${missing} missing` }) : null,
-          s ? `. In ${s.name}${p.join ? ", joined into one track" : ""}.` : ".")),
+          s ? `. In ${s.name}${p.join ? ", joined into one track" : ""}.` : "."),
+        S.importing.has(p.id) ? h("p", { class: "pl-meta pl-importing", role: "status" },
+          `Importing from YouTube: ${S.importing.get(p.id).done} of ${plural(S.importing.get(p.id).total, "song")}. `,
+          h("button", { type: "button", class: "btn quiet small inline", id: "import-stop", text: "Stop", onclick: S.importing.get(p.id).cancel })) : null),
       h("div", { class: "tools" },
         h("button", { type: "button", class: `btn small${norm.on ? " tool-on" : ""}`, "data-menu-anchor": "", "aria-haspopup": "dialog", onclick: anchor(volumePopover) },
           norm.on ? `Even volume, ${String(norm.target).replace("-", "−")} LUFS` : "Even volume: off"),
@@ -910,7 +951,8 @@
       { label: "Add files…", key: "Ctrl+O", action: () => addFiles(false) },
       { label: "Add a folder…", action: () => addFiles(true) },
       "-",
-      { label: "Import a playlist file…", action: importPlaylist },
+      { label: "Import from file…", action: importPlaylist },
+      { label: "Import from YouTube…", action: () => yt.importDialog() },
       { label: "Export this playlist…", action: exportPlaylist, disabled: !pl().entries.length },
     ]);
   }
@@ -1717,7 +1759,7 @@
           h("button", { type: "button", class: "btn primary", id: "empty-new", text: "New playlist", onclick: () => newPlaylist() }),
           h("button", { type: "button", class: "btn", text: "Add files…", onclick: () => addFiles(false) }),
           h("button", { type: "button", class: "btn", text: "Add a folder…", onclick: () => addFiles(true) }),
-          h("button", { type: "button", class: "btn", text: "Import a playlist file…", onclick: importPlaylist })),
+          h("button", { type: "button", class: "btn", id: "empty-import", "data-menu-anchor": "", "aria-haspopup": "menu", onclick: (e) => importMenu(e.currentTarget) }, "Import playlist", h("span", { class: "caret" }, icon("caret")))),
       );
       return;
     }
@@ -1752,7 +1794,7 @@
     empty.hidden = rows.length > 0;
     if (!rows.length) {
       empty.replaceChildren(
-        h("p", { text: "This playlist is empty. Drop audio files or folders here, or add them from your music folder." }),
+        h("p", { text: S.importing.has(p.id) ? "Its songs arrive here as they're fetched." : "This playlist is empty. Drop audio files or folders here, or add them from your music folder." }),
         h("div", { class: "tools", style: { "justify-content": "center" } },
           h("button", { type: "button", class: "btn", text: "Add files…", onclick: () => addFiles(false) }),
           h("button", { type: "button", class: "btn", text: "Add a folder…", onclick: () => addFiles(true) })),
@@ -2320,9 +2362,18 @@
     if (t && sp) {
       const place = `${sp.name}, ${sp.index + 1} of ${sp.count}.`;
       sub = sp.item.gap ? `${clock(sp.item.secs)} of silence. ${place}`
-        : `${t.artist || "No artist tag"}. ${sp.item.joined ? `${sp.playlist.name} as one track. ` : ""}${place}${e && R.hasKey(e) ? ` Key ${keyText(R.key(e).pitch)}.` : ""}${pp.silent ? " Demo, no sound." : ""}`;
-    } else if (t && one) sub = `${t.artist || "No artist tag"}. ${pp.trackId.startsWith("yt:") ? "From YouTube." : "From the library, on its own."}${pp.silent ? " Demo track, no sound." : ""}`;
-    else if (t) sub = `${t.artist || "No artist tag"}. ${p.name}, ${idx + 1} of ${p.entries.length}.${R.hasKey(e) ? ` Key ${keyText(R.key(e).pitch)}.` : ""}${pp.silent ? " Demo track, no sound." : ""}`;
+        : `${sp.item.joined ? `${sp.playlist.name} as one track. ` : ""}${place}${e && R.hasKey(e) ? ` Key ${keyText(R.key(e).pitch)}.` : ""}${pp.silent ? " Demo, no sound." : ""}`;
+    } else if (t && one) sub = `${pp.trackId.startsWith("yt:") ? "From YouTube." : "From the library, on its own."}${pp.silent ? " Demo track, no sound." : ""}`;
+    else if (t) sub = `${p.name}, ${idx + 1} of ${p.entries.length}.${R.hasKey(e) ? ` Key ${keyText(R.key(e).pitch)}.` : ""}${pp.silent ? " Demo track, no sound." : ""}`;
+    // Who and what it's from: each takes you to all of that in the library. A song
+    // only heard from YouTube has neither in the library, so its channel is just a name.
+    const heard = !!pp.trackId && pp.trackId.startsWith("yt:");
+    const named = t && !(sp && sp.item.gap);
+    const npLink = (cls, text, title, onclick) => h("button", { type: "button", class: `np-link ${cls}`, text, title, onclick });
+    const who = !named ? null
+      : t.artist && !heard ? npLink("np-artist", t.artist, `All of ${t.artist} in the library`, () => showAllOf("by", t.artist))
+        : t.artist || "No artist tag";
+    const from = named && t.album ? npLink("np-album", t.album, `All of ${t.album} in the library`, () => showAllOf("album", t.album, t.albumartist)) : null;
     fill($("player"), 
       h("div", { class: "pad" },
         h("button", { type: "button", class: "pbtn", "aria-label": "Previous", title: "Previous", disabled: !t, onclick: prevTrack }, icon("prev")),
@@ -2334,11 +2385,45 @@
           title: one ? "A song from the library plays once" : `${inSet(REPEAT[pp.repeat].label)}: ${inSet(REPEAT[pp.repeat].says)}. Click for ${inSet(REPEAT[REPEAT[pp.repeat].next].label).toLowerCase()} (R).`,
           disabled: one, onclick: stepRepeat,
         }, icon(REPEAT[pp.repeat].icon))),
-      h("div", { class: "np" }, h("div", { class: "np-t", text: t ? t.title || t.filename : "Nothing playing" }), h("div", { class: "np-s", text: sub })),
+      h("div", { class: "np" },
+        t ? npLink("np-t", t.title || t.filename, playingFrom(), showPlaying) : h("div", { class: "np-t", text: "Nothing playing" }),
+        h("div", { class: "np-s" }, who, from ? " · " : null, from, named ? ". " : null, sub)),
       h("div", { class: "seek" }, h("span", { id: "t-pos", text: t ? clock(pp.pos) : "0:00" }), seek, h("span", { id: "t-dur", text: t ? clock(pp.dur) : "0:00" })),
       h("label", { class: `aos${one ? " off" : ""}` }, proc, h("span", { text: "Enable Play/Setlist Processing" }), h("small", { text: one ? "A song on its own plays as it is." : processingCaption() })),
       h("div", { class: "vol" }, icon("volume"), vol),
     );
+  }
+
+  /** Where the title in the player bar takes you. */
+  function playingFrom() {
+    const pp = S.player;
+    if (pp.set) return `Show it in ${pp.set.name}`;
+    if (pp.entryId && pl(pp.playlistId)) return `Show it in ${pl(pp.playlistId).name}`;
+    if (pp.trackId && pp.trackId.startsWith("yt:")) return "Show it in the YouTube search";
+    return "Show it in the library";
+  }
+  /** Where what's playing came from: its row in the playlist or setlist, or the library. */
+  function showPlaying() {
+    const pp = S.player;
+    if (pp.set) {
+      openStick(pp.set.id);
+      stickView.reveal();
+    } else if (pp.entryId && pl(pp.playlistId)) {
+      if (S.view !== "playlist") setView("playlist");
+      openPlaylist(pp.playlistId);
+      selectOnly(pp.entryId);
+      syncSelection();
+      revealFocus();
+      $("list").focus({ preventScroll: true });
+    } else if (pp.trackId && pp.trackId.startsWith("yt:")) yt.showHeard(pp.trackId);
+    else if (pp.trackId) {
+      if (lib.inMusic(track(pp.trackId))) lib.revealInLibrary(pp.trackId);
+      else toast("That one isn't in your music folder, so it isn't in the library.");
+    }
+  }
+  /** The library showing an album or an artist, saying so if it has none of them. */
+  function showAllOf(field, name, albumartist) {
+    if (!lib.showBy(field, name, albumartist)) toast(`Nothing ${field === "album" ? "from" : "by"} ${name} is in your music folder.`);
   }
 
   function processingCaption() {
@@ -3914,7 +3999,8 @@
     menu(anchor, [
       { label: "Add files…", key: "Ctrl+O", action: () => addFiles(false) },
       { label: "Add a folder…", action: () => addFiles(true) },
-      { label: "Import a playlist file…", action: importPlaylist },
+      { label: "Import from file…", action: importPlaylist },
+      { label: "Import from YouTube…", action: () => yt.importDialog() },
       { label: "Export this playlist…", action: exportPlaylist, disabled: !pl() },
       { label: "Print a setlist…", key: "Ctrl+P", action: printSetlist, disabled: !stickSet() },
       "-",

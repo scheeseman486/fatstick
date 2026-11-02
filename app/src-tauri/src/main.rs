@@ -770,6 +770,24 @@ async fn youtube_keep(st: State<'_, AppState>, id: String) -> Res<Track> {
 }
 
 #[tauri::command]
+async fn youtube_search_lists(st: State<'_, AppState>, query: String, limit: usize) -> Res<Vec<fatstick_youtube::ListHit>> {
+    let y = st.youtube.clone();
+    off_thread(move || y.search_lists(&query, limit)).await
+}
+
+#[tauri::command]
+async fn youtube_playlist(st: State<'_, AppState>, link: String) -> Res<youtube::PlaylistView> {
+    let y = st.youtube.clone();
+    off_thread(move || y.playlist(&link)).await
+}
+
+#[tauri::command]
+async fn youtube_keep_on_album(st: State<'_, AppState>, id: String, slot: fatstick_youtube::AlbumSlot) -> Res<Track> {
+    let y = st.youtube.clone();
+    off_thread(move || y.keep_on_album(&id, &slot)).await
+}
+
+#[tauri::command]
 async fn youtube_set_folder(st: State<'_, AppState>, path: String) -> Res<youtube::Status> {
     let y = st.youtube.clone();
     off_thread(move || y.set_folder(Path::new(&path))).await
@@ -938,6 +956,9 @@ fn main() {
             youtube_cancel,
             youtube_play,
             youtube_keep,
+            youtube_search_lists,
+            youtube_playlist,
+            youtube_keep_on_album,
             youtube_set_folder,
             selftest_report,
         ])

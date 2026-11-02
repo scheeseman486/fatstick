@@ -82,6 +82,9 @@
       youtubeCancel: (id) => invoke("youtube_cancel", { id }),
       youtubePlay: ({ id, token, from }) => invoke("youtube_play", { id, token, from }),
       youtubeKeep: (id) => invoke("youtube_keep", { id }),
+      youtubeSearchLists: (query, limit) => invoke("youtube_search_lists", { query, limit }),
+      youtubePlaylist: (link) => invoke("youtube_playlist", { link }),
+      youtubeKeepOnAlbum: (id, slot) => invoke("youtube_keep_on_album", { id, slot }),
       youtubeSetFolder: (path) => invoke("youtube_set_folder", { path }),
       async pickFolder(title) {
         const r = await T.dialog.open({ directory: true, multiple: false, title });
@@ -214,7 +217,7 @@
 
     // YouTube, made up: setting up takes a moment, a search answers with a few
     // versions of whatever was typed, and a song "arrives" in a second or so.
-    const YT = { ready: false, cancelSetup: false, hits: new Map(), kept: new Map(), cancelled: new Set(), folder: "YouTube" };
+    const YT = { ready: false, cancelSetup: false, hits: new Map(), kept: new Map(), cancelled: new Set(), folder: "YouTube", lists: new Map(), albums: new Map() };
     const ytStatus = () => ({
       ytdlp: YT.ready ? { path: "tools/yt-dlp", version: "2026.10.26", managed: true } : null,
       deno: YT.ready ? { path: "tools/deno", version: "2.9.6", managed: true } : null,
@@ -232,6 +235,29 @@
       ["{q} - Acoustic Session", "Porch Tapes", 203, 241870],
     ];
     const ytPlain = (q) => q.replace(/\s+/g, " ").trim();
+    /** The demo's playlists: some songs, made up from what's looked for. */
+    function ytList(id, title, channel, n) {
+      const songs = [];
+      for (let i = 0; i < n; i++) {
+        const song = { id: `${id.slice(-5)}${String(i).padStart(2, "0")}zzzzz`.slice(0, 11), title: `The Night Shift - Song ${i + 1}`, channel, duration: 170 + i * 11, views: 90000 - i * 700 };
+        YT.hits.set(song.id, song);
+        songs.push(song);
+      }
+      const list = { id, title, channel, songs };
+      YT.lists.set(id, list);
+      return list;
+    }
+    /** A demo song as a track in the library. */
+    function ytTrack(id, name, more) {
+      const hit = YT.hits.get(id);
+      const split = hit.title.includes(" - ") ? hit.title.split(" - ") : [hit.channel.replace(" - Topic", ""), hit.title];
+      const [artist, title] = [split[0], split.slice(1).join(" - ").replace(/\s*\((Official (Video|Audio)|Lyrics)\)/, "")];
+      return {
+        id: `t-${id}`, path: `${music.root}/${YT.folder}/${name ? name(artist, title) : `${artist} - ${title}`}.opus`, filename: `${artist} - ${title}`, title, artist, album: "", albumartist: "", year: null, track: null, disc: null,
+        genre: "", composer: "", labels: ["youtube"], codec: "opus", bitrate: 128, peakBitrate: 128, vbr: true, sampleRate: 48000, bits: 0, channels: 2, duration: hit.duration, size: hit.duration * 16000,
+        lufs: null, truePeak: null, cover: false, exists: true, quick: false, drm: false, ...more,
+      };
+    }
 
     return {
       kind: "demo",
@@ -538,6 +564,48 @@
         };
         tracks.set(t.id, t);
         YT.kept.set(id, t.id);
+        return t;
+      },
+      async youtubeSearchLists(query, limit) {
+        await sleep(300);
+        const q = ytPlain(query);
+        if (/^nothing/i.test(q)) return [];
+        if (/^fail/i.test(q)) throw new Error("Couldn't reach YouTube. Check the connection and try again.");
+        const forms = [[`The Night Shift - ${q} (Official Album Playlist)`, "The Night Shift", 6], [`${q} - all the songs`, "Late Hours", 4], [`Best of ${q}`, "Lyric Corner", 5]];
+        return forms.slice(0, limit).map(([title, channel, n], i) => {
+          const id = `PLdemo${i}${[...q].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36)}xxxxxxxxxx`.slice(0, 18);
+          const l = ytList(id, title, channel, n);
+          return { id: l.id, title, channel };
+        });
+      },
+      async youtubePlaylist(link) {
+        await sleep(200);
+        const t = link.trim();
+        const id = (t.match(/[?&]list=([\w-]+)/) || [])[1] || (/^(PL|OLAK5uy_)[\w-]{10,}$/.test(t) ? t : "");
+        if (id.startsWith("RD")) throw new Error("That's one of YouTube's mixes, which go on without end, so it can't be fetched whole. Try a playlist or an album.");
+        if (!/^[\w-]{12,64}$/.test(id)) throw new Error("That isn't a link to a YouTube playlist.");
+        const l = YT.lists.get(id) || ytList(id, "The Night Shift - Pasted Album (Official Album Playlist)", "The Night Shift", 4);
+        const clean = l.title.replace(/\s*\((Official[^)]*)\)/, "");
+        const parts = clean.split(" - ");
+        const album = parts.length > 1 && parts[0] === "The Night Shift" ? { title: parts.slice(1).join(" - "), artist: parts[0] } : { title: clean, artist: l.channel };
+        return { id, title: l.title, channel: l.channel, name: clean, album, skipped: /Pasted/.test(l.title) ? 1 : 0, cut: false, songs: l.songs.map((s) => ({ ...s, trackId: YT.albums.get(`${id}/${s.id}`) || YT.kept.get(s.id) || null })) };
+      },
+      async youtubeKeepOnAlbum(id, slot) {
+        if (!music.root) throw new Error("Choose your music folder first.");
+        const key = `${slot.list}/${id}`;
+        if (YT.albums.has(key)) return tracks.get(YT.albums.get(key));
+        const single = YT.kept.get(id);
+        let t;
+        if (single && ![...YT.albums.values()].includes(single)) {
+          t = { ...tracks.get(single), album: slot.album, albumartist: slot.artist, track: slot.track };
+        } else {
+          await this.youtubeFetch(id);
+          const pad = String(slot.track).padStart(2, "0");
+          t = ytTrack(id, (a, x) => `${slot.artist} - ${slot.album}/${pad} - ${a} - ${x}`, { id: `t-${slot.list}-${id}`, album: slot.album, albumartist: slot.artist, track: slot.track });
+        }
+        tracks.set(t.id, t);
+        YT.albums.set(key, t.id);
+        if (!single) YT.kept.set(id, t.id);
         return t;
       },
       async youtubeSetFolder(path) {

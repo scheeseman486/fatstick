@@ -16,9 +16,10 @@
 //! leaves nothing in the music folder and needs nothing fetched again when it's
 //! kept. [`keep`] tags it and copies it into the music folder.
 //!
-//! Only YouTube video ids reach yt-dlp as links (see [`video_id`]), rebuilt into
-//! a watch URL, after a `--`: nothing typed can become an option or send yt-dlp
-//! to another site.
+//! Only YouTube video and playlist ids reach yt-dlp as links (see [`video_id`] and
+//! [`list_id`]), rebuilt into a YouTube URL, after a `--`, and text to search for is
+//! encoded into one: nothing typed can become an option or send yt-dlp to another
+//! site.
 
 pub mod meta;
 pub mod setup;
@@ -36,7 +37,7 @@ use std::time::{Duration, Instant, SystemTime};
 use fatstick_audio::Tools;
 use serde::{Deserialize, Serialize};
 
-pub use meta::SongTags;
+pub use meta::{Album, AlbumSlot, SongTags};
 
 /// The best audio-only stream, Opus first as it's the better sound at the
 /// bitrates YouTube offers. Nothing here can select a video format.
@@ -44,7 +45,13 @@ pub const AUDIO_ANY: &str = "bestaudio[acodec^=opus]/bestaudio[acodec^=mp4a]";
 /// The same without Opus, for an ffmpeg that can't write Ogg.
 pub const AUDIO_AAC: &str = "bestaudio[acodec^=mp4a]";
 
+/// YouTube's search, for playlists only.
+const LIST_FILTER: &str = "EgIQAw%3D%3D";
+/// The most songs taken from one playlist.
+pub const LIST_MOST: usize = 500;
+
 const SEARCH_LIMIT: Duration = Duration::from_secs(60);
+const LIST_TIME_LIMIT: Duration = Duration::from_secs(180);
 const FETCH_LIMIT: Duration = Duration::from_secs(30 * 60);
 
 /// `--ignore-config` and the rest of what every run gets is in [`Ytdlp::common`].
@@ -68,6 +75,29 @@ pub struct Hit {
     pub channel: String,
     pub duration: f64,
     pub views: Option<u64>,
+}
+
+/// One result of a search for playlists.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListHit {
+    pub id: String,
+    pub title: String,
+    pub channel: String,
+}
+
+/// A playlist, and the songs in it that can be fetched, in order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Playlist {
+    pub id: String,
+    pub title: String,
+    pub channel: String,
+    pub songs: Vec<Hit>,
+    /// Entries with nothing to fetch: private and deleted videos, live streams.
+    pub skipped: usize,
+    /// It has more songs than are taken ([`LIST_MOST`]).
+    pub cut: bool,
 }
 
 /// A download under way.
@@ -125,6 +155,50 @@ pub fn video_id(input: &str) -> Option<String> {
     is_video_id(&id).then_some(id)
 }
 
+/// Whether this is the shape of a playlist id. A mix (RD...) isn't one: it's made
+/// up as it's played, and has no end.
+fn is_list_id(id: &str) -> bool {
+    (12..=64).contains(&id.len()) && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_') && !id.starts_with("RD")
+}
+
+/// The `list` of a YouTube link, whatever it is.
+fn list_param(input: &str) -> Option<String> {
+    let s = input.trim();
+    let rest = s.strip_prefix("https://").or_else(|| s.strip_prefix("http://")).unwrap_or(s);
+    let (host, path) = rest.split_once('/')?;
+    let host = host.to_ascii_lowercase();
+    let host = host.strip_prefix("www.").or_else(|| host.strip_prefix("m.")).or_else(|| host.strip_prefix("music.")).unwrap_or(&host);
+    if !["youtube.com", "youtu.be", "youtube-nocookie.com"].contains(&host) {
+        return None;
+    }
+    let (_, query) = path.split_once('?')?;
+    query.split(['&', '#']).find_map(|kv| kv.strip_prefix("list=")).map(str::to_string)
+}
+
+/// The playlist in a link, or a playlist's id as it is.
+pub fn list_id(input: &str) -> Option<String> {
+    let s = input.trim();
+    let id = list_param(s).or_else(|| (s.starts_with("PL") || s.starts_with("OLAK5uy_")).then(|| s.to_string()))?;
+    is_list_id(&id).then_some(id)
+}
+
+/// Whether a link is to one of YouTube's endless mixes.
+pub fn is_mix_link(input: &str) -> bool {
+    list_param(input).is_some_and(|l| l.starts_with("RD"))
+}
+
+fn encode_query(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
 /// A date version ("2026.10.26") as numbers.
 fn version_of(v: &str) -> Option<(u32, u32, u32)> {
     let mut p = v.trim().split('.').map(|x| x.parse::<u32>().ok());
@@ -155,6 +229,22 @@ impl Ytdlp {
         let mut a = self.common();
         a.extend(["--flat-playlist".into(), "--dump-single-json".into(), "--".into()]);
         a.push(format!("ytsearch{limit}:{}", clean.trim()).into());
+        a
+    }
+
+    pub fn list_search_args(&self, query: &str, limit: usize) -> Vec<OsString> {
+        let clean: String = query.chars().filter(|c| !c.is_control()).take(200).collect();
+        let mut a = self.common();
+        a.extend(["--flat-playlist".into(), "--dump-single-json".into(), "--playlist-end".into(), limit.to_string().into(), "--".into()]);
+        a.push(format!("https://www.youtube.com/results?search_query={}&sp={LIST_FILTER}", encode_query(clean.trim())).into());
+        a
+    }
+
+    /// What's in a playlist, with one more than is taken to tell if that's all of it.
+    pub fn list_args(&self, id: &str) -> Vec<OsString> {
+        let mut a = self.common();
+        a.extend(["--flat-playlist".into(), "--dump-single-json".into(), "--playlist-end".into(), (LIST_MOST + 1).to_string().into(), "--".into()]);
+        a.push(format!("https://www.youtube.com/playlist?list={id}").into());
         a
     }
 
@@ -191,6 +281,20 @@ impl Ytdlp {
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<Hit>, String> {
         let out = run(self.command(self.search_args(query, limit)), None, SEARCH_LIMIT, &mut |_| {})?;
         parse_search(&out.stdout)
+    }
+
+    pub fn search_lists(&self, query: &str, limit: usize) -> Result<Vec<ListHit>, String> {
+        let out = run(self.command(self.list_search_args(query, limit)), None, SEARCH_LIMIT, &mut |_| {})?;
+        parse_list_search(&out.stdout)
+    }
+
+    /// What's in a playlist.
+    pub fn list(&self, id: &str) -> Result<Playlist, String> {
+        if !is_list_id(id) {
+            return Err("That isn't a YouTube playlist.".into());
+        }
+        let out = run(self.command(self.list_args(id)), None, LIST_TIME_LIMIT, &mut |_| {})?;
+        parse_list(&out.stdout, id)
     }
 
     /// The one video a pasted link is for.
@@ -328,6 +432,41 @@ pub fn parse_search(stdout: &str) -> Result<Vec<Hit>, String> {
     let v: serde_json::Value = serde_json::from_str(stdout.trim()).map_err(|e| format!("yt-dlp's answer couldn't be read: {e}"))?;
     let mut seen = HashSet::new();
     Ok(v.get("entries").and_then(|e| e.as_array()).map(|e| e.iter().filter_map(hit_of).filter(|h| seen.insert(h.id.clone())).collect()).unwrap_or_default())
+}
+
+/// The results of a search for playlists.
+pub fn parse_list_search(stdout: &str) -> Result<Vec<ListHit>, String> {
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).map_err(|e| format!("yt-dlp's answer couldn't be read: {e}"))?;
+    let mut seen = HashSet::new();
+    let hit = |e: &serde_json::Value| {
+        let s = |k: &str| e.get(k).and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+        let id = s("id");
+        is_list_id(&id).then(|| ListHit { title: s("title"), channel: [s("channel"), s("uploader")].into_iter().find(|x| !x.is_empty()).unwrap_or_default(), id })
+    };
+    Ok(v.get("entries").and_then(|e| e.as_array()).map(|e| e.iter().filter_map(hit).filter(|h| seen.insert(h.id.clone())).collect()).unwrap_or_default())
+}
+
+/// What `--flat-playlist --dump-single-json` says is in a playlist. A song that's
+/// in it twice is taken once.
+pub fn parse_list(stdout: &str, id: &str) -> Result<Playlist, String> {
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).map_err(|e| format!("yt-dlp's answer couldn't be read: {e}"))?;
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+    let entries = v.get("entries").and_then(|e| e.as_array()).cloned().unwrap_or_default();
+    let cut = entries.len() > LIST_MOST;
+    let mut seen = HashSet::new();
+    let mut skipped = 0;
+    let mut songs = Vec::new();
+    for e in entries.iter().take(LIST_MOST) {
+        match hit_of(e) {
+            Some(h) if seen.insert(h.id.clone()) => songs.push(h),
+            Some(_) => {}
+            None => skipped += 1,
+        }
+    }
+    if songs.is_empty() {
+        return Err("That playlist has no songs that can be fetched.".into());
+    }
+    Ok(Playlist { id: id.to_string(), title: s("title"), channel: [s("channel"), s("uploader")].into_iter().find(|x| !x.is_empty()).unwrap_or_default(), songs, skipped, cut })
 }
 
 /// A line from the progress template in [`Ytdlp::fetch_args`].
@@ -590,15 +729,24 @@ fn copy_new(src: &Path, to: &Path) -> std::io::Result<()> {
 /// file appears whole, under its final name, or not at all; nothing in `dir` is
 /// ever replaced. Returns where it went.
 pub fn keep(store: &Store, f: &Fetched, dir: &Path) -> Result<PathBuf, String> {
+    save(store, f, &meta::tag_edit(&f.tags, &watch_url(&f.id)), dir, &meta::file_stem(&f.tags, &f.id))
+}
+
+/// A fetched song as a track of an album: tagged as that, in the album's folder in
+/// `dir`, its name starting with its place. Otherwise as [`keep`].
+pub fn keep_on_album(store: &Store, f: &Fetched, dir: &Path, slot: &AlbumSlot) -> Result<PathBuf, String> {
+    let stem = format!("{:02} - {}", slot.track, meta::file_stem(&meta::on_album(&f.tags, slot), &f.id));
+    save(store, f, &meta::album_edit(&f.tags, slot, &watch_url(&f.id)), &dir.join(meta::album_folder(slot)), &stem)
+}
+
+fn save(store: &Store, f: &Fetched, edit: &fatstick_audio::tagwrite::TagEdit, dir: &Path, stem: &str) -> Result<PathBuf, String> {
     let src = store.path_of(f);
     let ext = src.extension().unwrap_or_default().to_string_lossy().to_string();
     // The tags go in here, so a slow network drive only sees the finished file.
-    let edit = meta::tag_edit(&f.tags, &watch_url(&f.id));
-    fatstick_audio::tagwrite::write_tags(&src, &edit).map_err(|e| format!("Couldn't tag the file: {e}"))?;
+    fatstick_audio::tagwrite::write_tags(&src, edit).map_err(|e| format!("Couldn't tag the file: {e}"))?;
     std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't make {}: {e}", dir.display()))?;
     let tmp = dir.join(format!(".fatstick-youtube-{}.{ext}", f.id));
     copy_new(&src, &tmp).map_err(|e| format!("Couldn't copy it into {}: {e}", dir.display()))?;
-    let stem = meta::file_stem(&f.tags, &f.id);
     let mut n = 0;
     loop {
         let name = match n {
@@ -629,6 +777,78 @@ mod tests {
     }
     fn text(a: &[OsString]) -> Vec<String> {
         a.iter().map(|x| x.to_string_lossy().into_owned()).collect()
+    }
+
+    #[test]
+    fn playlist_links() {
+        let id = "PLpg0EOoO2vdUxDyiIfZGjwfI8fh6JRvg6";
+        for link in [
+            format!("https://www.youtube.com/playlist?list={id}"),
+            format!("https://music.youtube.com/playlist?list={id}&si=abc"),
+            format!("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list={id}&index=3"),
+            format!("https://youtu.be/dQw4w9WgXcQ?list={id}"),
+            format!("  youtube.com/playlist?list={id}  "),
+            id.to_string(),
+        ] {
+            assert_eq!(list_id(&link).as_deref(), Some(id), "{link}");
+        }
+        assert_eq!(list_id("https://music.youtube.com/playlist?list=OLAK5uy_abcdefghijklmnop").as_deref(), Some("OLAK5uy_abcdefghijklmnop"));
+        for not in ["fleetwood mac", "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://evil.example/playlist?list=PLpg0EOoO2vdUxDy", "https://www.youtube.com/playlist?list=short", "https://www.youtube.com/playlist?list=PLabc$(rm)defghijkl"] {
+            assert_eq!(list_id(not), None, "{not}");
+        }
+        // A mix goes on without end: not a playlist, and said to be one.
+        let mix = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ";
+        assert_eq!(list_id(mix), None);
+        assert!(is_mix_link(mix) && !is_mix_link(&format!("https://www.youtube.com/playlist?list={id}")));
+    }
+
+    #[test]
+    fn typing_only_reaches_youtube() {
+        let a = text(&yt().list_search_args("--exec rm & sp=x #Rumours", 25));
+        let url = a.last().unwrap();
+        assert_eq!(a[a.len() - 2], "--");
+        assert_eq!(url, "https://www.youtube.com/results?search_query=--exec%20rm%20%26%20sp%3Dx%20%23Rumours&sp=EgIQAw%3D%3D");
+        assert!(a.contains(&"--flat-playlist".to_string()) && a.contains(&"--ignore-config".to_string()));
+        let a = text(&yt().list_args("PLpg0EOoO2vdUxDy"));
+        assert_eq!(a.last().unwrap(), "https://www.youtube.com/playlist?list=PLpg0EOoO2vdUxDy");
+        assert_eq!(a[a.iter().position(|x| x == "--playlist-end").unwrap() + 1], "501");
+        assert!(!a.iter().any(|x| x == "--format" || x == "-f"), "listing asks for no file");
+        assert!(yt().list("not a list").is_err());
+    }
+
+    #[test]
+    fn what_a_search_for_playlists_finds() {
+        // As yt-dlp answers: url entries, with no count of songs.
+        let out = r#"{"_type":"playlist","entries":[
+            {"_type":"url","ie_key":"YoutubeTab","id":"PLpg0EOoO2vdUxDy","title":"Rumours","channel":"Fleetwood Mac","uploader":"Fleetwood Mac"},
+            {"_type":"url","ie_key":"YoutubeTab","id":"PLpg0EOoO2vdUxDy","title":"The same one again","channel":"x"},
+            {"_type":"url","id":"RDmixmixmixmixmix","title":"A mix","channel":"x"},
+            {"_type":"url","id":"PLuploaderonly01","title":"No channel","uploader":"Someone"}]}"#;
+        let h = parse_list_search(out).unwrap();
+        assert_eq!(h.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["PLpg0EOoO2vdUxDy", "PLuploaderonly01"]);
+        assert_eq!(h[0].channel, "Fleetwood Mac");
+        assert_eq!(h[1].channel, "Someone");
+        assert!(parse_list_search("not json").is_err());
+    }
+
+    #[test]
+    fn what_a_playlist_holds() {
+        let out = r#"{"_type":"playlist","id":"PLx","title":"Rumours","channel":"Fleetwood Mac","playlist_count":5,"entries":[
+            {"id":"aaaaaaaaaa1","title":"One","duration":100,"channel":"Fleetwood Mac"},
+            {"id":"aaaaaaaaaa2","title":"[Private video]"},
+            {"id":"aaaaaaaaaa1","title":"One again","duration":100,"channel":"Fleetwood Mac"},
+            {"id":"aaaaaaaaaa3","title":"A stream","duration":100,"live_status":"is_live"},
+            {"id":"aaaaaaaaaa4","title":"Two","duration":200,"uploader":"Someone"}]}"#;
+        let p = parse_list(out, "PLpg0EOoO2vdUxDy").unwrap();
+        assert_eq!((p.id.as_str(), p.title.as_str(), p.channel.as_str()), ("PLpg0EOoO2vdUxDy", "Rumours", "Fleetwood Mac"));
+        assert_eq!(p.songs.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["aaaaaaaaaa1", "aaaaaaaaaa4"]);
+        assert_eq!((p.skipped, p.cut), (2, false));
+        assert!(parse_list(r#"{"entries":[{"id":"aaaaaaaaaa2","title":"[Deleted video]"}]}"#, "PLx").unwrap_err().contains("no songs"));
+        // Past the most that's taken: it says so, and takes that many.
+        let many: Vec<String> = (0..=LIST_MOST).map(|i| format!(r#"{{"id":"a{i:010}","title":"S","duration":1}}"#)).collect();
+        let p = parse_list(&format!(r#"{{"entries":[{}]}}"#, many.join(",")), "PLx").unwrap();
+        assert!(p.cut);
+        assert_eq!(p.songs.len(), LIST_MOST);
     }
 
     #[cfg(unix)]

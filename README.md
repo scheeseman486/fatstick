@@ -14,8 +14,9 @@ GPL version 3 or later.
 
 ## What it does
 
-- **Playlists.** Make them in the app, or import M3U/M3U8, XSPF (VLC) and PLS
-  files; export as M3U8 or XSPF. Drop files and folders from the file manager. A
+- **Playlists.** Make them in the app, or use "Import playlist" under the list:
+  "Import from file" takes M3U/M3U8, XSPF (VLC) and PLS files, and "Import from
+  YouTube" takes a playlist from there (see YouTube, below). Export as M3U8 or XSPF. Drop files and folders from the file manager. A
   folder is added in album order (disc, track number, then name). Moved or
   renamed files can be found again ("Locate"). Your music files only change
   when you change them in the library (tags as you edit them; file names
@@ -92,6 +93,24 @@ GPL version 3 or later.
   download is for you to check.
 
   ![The YouTube side of the search panel, one song playing and another on its way](docs/youtube.png)
+
+  "Playlists" under the box searches for those, and a link to one opens it. Open
+  one to hear its songs or add any of them, or add all of it to the library as an
+  album, which makes no playlist of it. Each song is tagged with the album (the
+  playlist's title without "(Official Album Playlist)" and the like), the album's
+  artist ("The Band - The Album" says who; otherwise the channel, if the songs are
+  all from one, or Various Artists) and its place in the playlist, and goes in a
+  folder of the album's own. A few come at a time. Stop keeps what has come, and
+  asking again gets the rest. A song already in the library on its own joins the
+  album where it is rather than being filed twice; a song on another album gets a
+  copy of its own. Private and deleted videos are left out, and it says how many;
+  at most 500 songs are taken; YouTube's mixes never end, so they're refused.
+
+  ![A YouTube playlist opened, its songs on their way into the library as an album](docs/youtube-playlist.png)
+
+  "Import from YouTube" asks for a link to a playlist and does all of that, and adds
+  a playlist to the list too, which fills up as the songs arrive. Undo takes that
+  playlist away in one step, and the album stays.
 
   yt-dlp and Deno don't come with the app, as YouTube changes often and yt-dlp
   has to keep up with it. The first time, the panel offers to get them (about 85
@@ -191,6 +210,9 @@ GPL version 3 or later.
   slider or picking a shape changes what's playing as it plays. On the stick
   the fades are rendered into the track in their shapes, after any key
   shift; the file itself is never changed.
+- **The player bar goes where the song is.** Its title takes you to the song where
+  it's playing from: its row in the playlist or the setlist, or the library. Its
+  artist opens the library on all of theirs, and its album on the whole album.
 - **The player bar is always there.** Every dialog opens above the player
   bar, which stays usable and undimmed, and Space plays and pauses wherever
   the focus is (a dialog's button, a tick box, the tag editor) except in a
@@ -477,7 +499,7 @@ tags into two files as they're edited (no prompts) and renames them from the
 library view, and checks that
 a file copied into the folder shows up by itself (and that the scan's own
 reading of the folder doesn't set off another scan). The fourth searches YouTube,
-hears songs and adds them, with `tests/fake_ytdlp.py` standing in for yt-dlp, so
+hears songs and adds them, keeps a playlist as an album and imports another as a playlist too, with `tests/fake_ytdlp.py` standing in for yt-dlp, so
 the tests don't depend on YouTube; its log shows that every fetch named audio-only
 formats. The fifth removes every playlist and setlist and folds a list away, and the sixth restarts to see that they stay that way. Then the image is read with tools that aren't ours: fsck.fat, mtools (the order a player sees),
 ffprobe (codec, sample rate, tags, cover, lengths), and ffmpeg's EBU R128

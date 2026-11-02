@@ -1,7 +1,8 @@
 //! YouTube in the app: searching it, fetching a song's audio (never its video:
 //! see `fatstick_youtube`) into the cache to hear it, and keeping it, which
 //! tags it and copies it into the music folder, into the library. Songs kept
-//! are remembered by video, so a song isn't fetched or filed twice.
+//! are remembered by video, so a song isn't fetched or filed twice. A playlist can
+//! be kept as an album: each song tagged with its place on it, in a folder of its own.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -12,7 +13,7 @@ use fatstick_audio::Tools;
 use fatstick_library::folder::inside;
 use fatstick_library::{scan, Library, Track};
 use fatstick_youtube::setup::{self, Found, Program, SetupProgress, Sources};
-use fatstick_youtube::{Fetched, Hit, Progress, Store, Ytdlp};
+use fatstick_youtube::{meta, Album, AlbumSlot, Fetched, Hit, ListHit, Progress, Store, Ytdlp};
 use serde::Serialize;
 
 use crate::folder::MusicFolder;
@@ -20,6 +21,8 @@ use crate::folder::MusicFolder;
 /// Which track each video became: { video id: track id }. Kept on this side,
 /// like the excluded devices.
 pub const KEPT: &str = "youtubeKept";
+/// Which track each video became on an album: { "playlist id/video id": track id }.
+const ALBUMS: &str = "youtubeAlbums";
 /// Where kept songs go, relative to the music folder.
 const FOLDER: &str = "youtubeFolder";
 const DEFAULT_FOLDER: &str = "YouTube";
@@ -79,6 +82,25 @@ pub struct HitView {
     pub hit: Hit,
     /// The track this video became, if it's in the library.
     pub track_id: Option<String>,
+}
+
+/// A playlist, ready to be shown and kept as an album.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistView {
+    pub id: String,
+    pub title: String,
+    pub channel: String,
+    /// Its title without "(Official Playlist)" and the like, to name a playlist.
+    pub name: String,
+    pub album: Album,
+    pub songs: Vec<HitView>,
+    pub skipped: usize,
+    pub cut: bool,
+}
+
+fn album_key(list: &str, video: &str) -> String {
+    format!("{list}/{video}")
 }
 
 fn now_ms() -> u64 {
@@ -217,6 +239,28 @@ impl Youtube {
         Ok(hits.into_iter().map(|hit| HitView { track_id: self.kept_track(&hit.id).map(|t| t.id), hit }).collect())
     }
 
+    /// Playlists, by what they're called.
+    pub fn search_lists(&self, query: &str, limit: usize) -> Result<Vec<ListHit>, String> {
+        self.ytdlp()?.search_lists(query, limit.clamp(5, 100))
+    }
+
+    /// What's in the playlist a link is for.
+    pub fn playlist(&self, link: &str) -> Result<PlaylistView, String> {
+        let id = match fatstick_youtube::list_id(link) {
+            Some(id) => id,
+            None if fatstick_youtube::is_mix_link(link) => return Err("That's one of YouTube's mixes, which go on without end, so it can't be fetched whole. Try a playlist or an album.".into()),
+            None => return Err("That isn't a link to a YouTube playlist.".into()),
+        };
+        let p = self.ytdlp()?.list(&id)?;
+        let channels: Vec<&str> = p.songs.iter().map(|s| s.channel.as_str()).collect();
+        let album = meta::album_of(&p.title, &channels);
+        let songs = p.songs.iter().map(|hit| {
+            let on = self.album_track(&album_key(&id, &hit.id)).or_else(|| self.kept_track(&hit.id));
+            HitView { hit: hit.clone(), track_id: on.map(|t| t.id) }
+        }).collect();
+        Ok(PlaylistView { name: meta::clean_title(&p.title), album, channel: p.channel, title: p.title, id, songs, skipped: p.skipped, cut: p.cut })
+    }
+
     // ---- fetching ---------------------------------------------------------------------
 
     /// A song's audio in the store: from an earlier fetch, from the fetch already
@@ -338,6 +382,55 @@ impl Youtube {
         let mut kept: HashMap<String, String> = lib.setting(KEPT).ok().flatten().and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
         kept.insert(id.to_string(), tid.clone());
         lib.set_setting(KEPT, &serde_json::to_string(&kept).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        lib.track(&tid).map_err(|e| e.to_string())?.ok_or_else(|| "The track went missing.".into())
+    }
+
+    fn albums(&self) -> HashMap<String, String> {
+        self.lib.lock().unwrap().setting(ALBUMS).ok().flatten().and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default()
+    }
+
+    /// The track a video became on an album, if it's still there.
+    fn album_track(&self, key: &str) -> Option<Track> {
+        let tid = self.albums().remove(key)?;
+        self.lib.lock().unwrap().track(&tid).ok().flatten().filter(|t| t.exists)
+    }
+
+    /// A song of a playlist into the library, as a track of its album, once. If
+    /// it's already there on its own, it joins the album where it is, rather than
+    /// being filed twice. On another album, this album gets a copy of its own.
+    pub fn keep_on_album(self: &Arc<Self>, id: &str, slot: &AlbumSlot) -> Result<Track, String> {
+        let key = album_key(&slot.list, id);
+        if let Some(t) = self.album_track(&key) {
+            return Ok(t);
+        }
+        let dir = self.folder().ok_or("Choose your music folder first.")?;
+        let already = self.kept_track(id);
+        let single = already.as_ref().filter(|t| !self.albums().values().any(|x| *x == t.id));
+        let fetched = if single.is_none() { Some(self.fetch(id)?) } else { None };
+        let _one_at_a_time = self.keeping.lock().unwrap();
+        if let Some(t) = self.album_track(&key) {
+            return Ok(t);
+        }
+        let tools = self.tools.clone().ok_or("ffmpeg isn't available.")?;
+        let path = match (single, &fetched) {
+            (Some(t), _) => {
+                let p = PathBuf::from(&t.path);
+                fatstick_audio::tagwrite::write_tags(&p, &meta::album_place(slot)).map_err(|e| format!("Couldn't tag {}: {e}", p.display()))?;
+                p
+            }
+            (None, Some(f)) => fatstick_youtube::keep_on_album(&self.store, f, &dir, slot)?,
+            (None, None) => return Err("The song went missing.".into()),
+        };
+        let tid = scan::read_file(&self.lib, &tools, &path).map_err(|e| e.to_string())?;
+        let lib = self.lib.lock().unwrap();
+        let mut albums: HashMap<String, String> = lib.setting(ALBUMS).ok().flatten().and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
+        albums.insert(key, tid.clone());
+        lib.set_setting(ALBUMS, &serde_json::to_string(&albums).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        if already.is_none() {
+            let mut kept: HashMap<String, String> = lib.setting(KEPT).ok().flatten().and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
+            kept.insert(id.to_string(), tid.clone());
+            lib.set_setting(KEPT, &serde_json::to_string(&kept).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        }
         lib.track(&tid).map_err(|e| e.to_string())?.ok_or_else(|| "The track went missing.".into())
     }
 }

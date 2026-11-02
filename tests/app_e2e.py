@@ -16,7 +16,8 @@ runs a debug build of the app under Xvfb with FATSTICK_SELFTEST:
    folder show up by itself. ffprobe reads the tags back.
 4. tests/app_selftest4.js searches YouTube with tests/fake_ytdlp.py standing in
    for yt-dlp, hears a song without keeping it and adds others to the library and
-   a playlist. ffprobe checks they hold audio alone, and the stand-in's log that
+   a playlist, keeps a playlist as an album and imports another as a playlist too.
+   ffprobe checks they hold audio alone and how they're tagged, and the stand-in's log that
    no command line ever asked for anything else.
 5. tests/app_selftest5.js removes every playlist and setlist and folds the
    lists away, and then restarts to see that they stay that way.
@@ -298,8 +299,23 @@ def main():
     yt_env = dict(env, FATSTICK_YTDLP=os.path.join(ROOT, "tests", "fake_ytdlp.py"), FATSTICK_DENO=deno, FAKE_YTDLP_LOG=ytlog)
     run_app("phase 4", "app_selftest4.js", {"root": cfg["root"], "outside": work}, yt_env)
     yt_dir = os.path.join(cfg["root"], "YouTube")
-    kept = sorted(os.listdir(yt_dir)) if os.path.isdir(yt_dir) else []
-    record("the songs added are in the YouTube folder, and nothing else is", kept == ["Some Channel - Second Song.opus", "The Band - First Song.opus", "The Band - Third Song Proper.opus"], str(kept))
+    found = sorted(os.listdir(yt_dir)) if os.path.isdir(yt_dir) else []
+    kept = [n for n in found if os.path.isfile(os.path.join(yt_dir, n))]
+    record("the songs added are in the YouTube folder, and nothing else is", kept == ["Some Channel - Second Song.opus", "The Band - First Song.opus", "The Band - Third Song Proper.opus"], str(found))
+    albums = sorted(n for n in found if n not in kept)
+    record("albums go in folders of their own", albums == ["Road Trip Tunes", "The Band - Half Broken", "The Band - The Big Album"], str(albums))
+    big = os.path.join(yt_dir, "The Band - The Big Album")
+    songs = sorted(os.listdir(big)) if os.path.isdir(big) else []
+    record("an album's songs are numbered, with nothing else there", songs == ["01 - The Band - Album Song One.opus", "02 - The Band - Album Song Two.opus", "03 - The Band - Album Song Three.opus"], str(songs))
+    for i, name in enumerate(songs):
+        j = json.loads(subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format", os.path.join(big, name)], capture_output=True, text=True).stdout or "{}")
+        streams = j.get("streams", [])
+        tags = {k.lower(): v for k, v in {**j.get("format", {}).get("tags", {}), **(streams[0].get("tags", {}) if streams else {})}.items()}
+        record(f"{name}: tagged as the album, audio alone (ffprobe)", [s.get("codec_type") for s in streams] == ["audio"] and tags.get("album") == "The Big Album" and tags.get("album_artist") == "The Band" and tags.get("track") == str(i + 1) and tags.get("grouping") == "youtube" and tags.get("comment", "").startswith("https://www.youtube.com/watch?v=albumsong0"), str(tags))
+    joined = os.path.join(yt_dir, "Some Channel - Second Song.opus")
+    j = json.loads(subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format", joined], capture_output=True, text=True).stdout or "{}")
+    tags = {k.lower(): v for k, v in {**j.get("format", {}).get("tags", {}), **((j.get("streams") or [{}])[0].get("tags", {}))}.items()}
+    record("a song that joined an album stays where it was, tagged with it", tags.get("album") == "Road Trip Tunes" and tags.get("album_artist") == "Various Artists" and tags.get("track") == "2" and tags.get("grouping") == "youtube", str(tags))
     for name in kept:
         path = os.path.join(yt_dir, name)
         j = json.loads(subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format", path], capture_output=True, text=True).stdout or "{}")
@@ -317,7 +333,7 @@ def main():
     record("no command line mentions video formats", not any("bestvideo" in x or x == "-x" or "merge-output" in x for a in asked for x in a))
     record("every run ignored yt-dlp's own config", all("--ignore-config" in a for a in asked if a != ["--version"]))
     record("every run was given Deno", all(f"deno:{deno}" in a for a in asked if a != ["--version"]))
-    record("nothing typed reached yt-dlp except after --", all(a[a.index("--") + 1].startswith(("ytsearch", "https://www.youtube.com/watch?v=")) for a in asked if a != ["--version"]))
+    record("nothing typed reached yt-dlp except after --", all(a[a.index("--") + 1].startswith(("ytsearch", "https://www.youtube.com/watch?v=", "https://www.youtube.com/playlist?list=", "https://www.youtube.com/results?search_query=")) for a in asked if a != ["--version"]))
 
     # Phases 5 and 6: everything removed stays removed.
     run_app("phase 5", "app_selftest5.js", {"stage": "remove"}, env)

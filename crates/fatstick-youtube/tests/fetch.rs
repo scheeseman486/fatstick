@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use fatstick_audio::Tools;
-use fatstick_youtube::{audio_alone, keep, Store, Ytdlp};
+use fatstick_youtube::{audio_alone, keep, keep_on_album, AlbumSlot, Store, Ytdlp};
 
 fn fake() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fake_ytdlp.py")
@@ -90,6 +90,47 @@ fn an_ffmpeg_without_ogg_gets_aac_in_a_plain_m4a() {
     let text = String::from_utf8_lossy(&o.stdout);
     assert!(text.contains("aac"), "{text}");
     assert!(text.lines().last().unwrap().parse::<f64>().unwrap() > 4.0, "{text}");
+}
+
+#[test]
+fn a_playlist_is_found_listed_and_kept_as_an_album() {
+    let (d, yt, store, tools) = setup();
+    let found = yt.search_lists("the big album", 10).unwrap();
+    assert_eq!(found[0].id, "PLfakealbum000001");
+    assert_eq!(found[0].channel, "The Band");
+    assert!(yt.search_lists("nothing", 10).unwrap().is_empty());
+    assert!(yt.list("PLnosuchlist0000").unwrap_err().contains("does not exist"));
+
+    let p = yt.list("PLfakealbum000001").unwrap();
+    assert_eq!(p.title, "The Band - The Big Album (Official Album Playlist)");
+    assert_eq!(p.songs.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), ["albumsong01", "albumsong02", "albumsong03"]);
+    assert_eq!(p.skipped, 1, "the private video");
+    let channels: Vec<&str> = p.songs.iter().map(|s| s.channel.as_str()).collect();
+    let album = fatstick_youtube::meta::album_of(&p.title, &channels);
+    assert_eq!((album.title.as_str(), album.artist.as_str()), ("The Big Album", "The Band"));
+
+    let no = AtomicBool::new(false);
+    let music = d.path().join("Music/YouTube");
+    let f = yt.fetch(&store, Some(&tools), "albumsong02", &no, &mut |_| {}).unwrap();
+    let slot = AlbumSlot { list: p.id.clone(), album: album.title, artist: album.artist, track: 2, channel: "The Band".into() };
+    let kept = keep_on_album(&store, &f, &music, &slot).unwrap();
+    let ext = kept.extension().unwrap().to_string_lossy().to_string();
+    assert_eq!(kept, music.join("The Band - The Big Album").join(format!("02 - The Band - Album Song Two.{ext}")));
+    assert_eq!(tag(&kept, "album"), "The Big Album");
+    assert_eq!(tag(&kept, "album_artist"), "The Band");
+    assert_eq!(tag(&kept, "track"), "2");
+    assert_eq!(tag(&kept, "title"), "Album Song Two");
+    assert_eq!(tag(&kept, "grouping"), "youtube");
+    assert_eq!(tag(&kept, "comment"), "https://www.youtube.com/watch?v=albumsong02");
+    audio_alone(&tools, &kept).unwrap();
+
+    // The same cached file kept on its own has none of that any more.
+    let single = keep(&store, &f, &music).unwrap();
+    assert_eq!(single.parent().unwrap(), music);
+    assert_eq!(tag(&single, "album"), "");
+    assert_eq!(tag(&single, "album_artist"), "");
+    assert_eq!(tag(&single, "track"), "");
+    assert_eq!(tag(&kept, "track"), "2", "and the album's copy keeps it");
 }
 
 #[test]

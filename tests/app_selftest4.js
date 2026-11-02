@@ -53,15 +53,15 @@
 
     // Searching.
     await search("the band");
-    await until(() => $$(".yr").length >= 7);
-    check("a search lists what YouTube has", $$(".yr").length === 7, `${$$(".yr").length}`);
+    await until(() => $$(".yr").length >= 11);
+    check("a search lists what YouTube has", $$(".yr").length === 11, `${$$(".yr").length}`);
     const row = (id) => document.getElementById(`yr-${id}`);
     check("each with its channel and length", /The Band VEVO/.test(row("aaaaaaaaaa1").textContent) && /0:04/.test(row("aaaaaaaaaa1").textContent));
     await search("nothing");
     await until(() => /Nothing on YouTube/.test($(".srch-scope").textContent));
     check("a search with no results says so", $$(".yr").length === 0, $(".srch-scope").textContent);
     await search("the band");
-    await until(() => $$(".yr").length >= 7);
+    await until(() => $$(".yr").length >= 11);
     const link = await T.core.invoke("youtube_search", { query: "https://youtu.be/aaaaaaaaaa2?t=3", limit: 25 });
     check("a pasted link is that video", link.length === 1 && link[0].id === "aaaaaaaaaa2", JSON.stringify(link));
 
@@ -156,7 +156,78 @@
     check("clearing the cache clears what was only heard", gone);
     check("the kept song is still in the library", A.track(tid).exists);
 
+    // A playlist: found by a search, opened and kept as an album.
+    $("#yt-kind-lists").click();
+    await search("the big album");
+    await until(() => $$(".yp").length >= 3);
+    check("a search for playlists finds them", $$(".yp").length === 3 && /The Big Album/.test($$(".yp")[0].textContent), `${$$(".yp").length}`);
+    $(".yp .yp-open").click();
+    await until(() => $(".yp-head"));
+    await until(() => $$(".yr").length === 3);
+    check("opening one lists its songs, without the private one", $$(".yr").length === 3 && /1 song can't be fetched/.test($(".yp-head").textContent), $(".yp-head").textContent);
+    check("and what it'd be as an album", /As an album: The Big Album, by The Band/.test($(".yp-head").textContent));
+    const plsAtFirst = S.playlists.length;
+    $("#yp-album").click();
+    check("adding it says it's on its way", !!(await until(() => $("#yp-prog-text"), 5000)));
+    const whole = await until(() => /The Big Album is in your library: 3 songs/.test(toast()), 60000);
+    check("all of it arrives", !!whole, toast());
+    const onAlbum = [...S.tracks.values()].filter((t) => t.album === "The Big Album").sort((a, b) => a.track - b.track);
+    check("as an album in the library, in order", onAlbum.map((t) => `${t.track} ${t.title}`).join() === "1 Album Song One,2 Album Song Two,3 Album Song Three", onAlbum.map((t) => `${t.track} ${t.title}`).join());
+    check("by its artist, read back from the files", onAlbum.every((t) => t.albumartist === "The Band" && t.artist === "The Band" && JSON.stringify(t.labels) === '["youtube"]'), JSON.stringify(onAlbum[0]));
+    check("and no playlist is made of it", S.playlists.length === plsAtFirst);
+    const noRefetch = await T.core.invoke("youtube_keep_on_album", { id: "albumsong01", slot: { list: "PLfakealbum000001", album: "The Big Album", artist: "The Band", track: 1, channel: "The Band" } });
+    check("asking again is the same track", noRefetch.id === onAlbum[0].id);
+
+    // Import: the same, and a playlist, of songs from several channels, one kept on its own earlier.
+    const single = [...S.tracks.values()].find((t) => t.title === "Second Song");
+    const beforeImport = S.tracks.size;
+    await A.yt.importDialog();
+    const box = await until(() => $("#yt-import"));
+    check("Import from YouTube asks for a playlist", !!box);
+    box.value = "https://www.youtube.com/watch?v=aaaaaaaaaa1&list=RDaaaaaaaaaa1";
+    box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const mixRefused = await until(() => { const e = $("#yt-import-err"); return e && !e.hidden && e.textContent; }, 8000);
+    check("a mix is refused", /without end/.test(mixRefused || ""), String(mixRefused));
+    box.value = "https://www.youtube.com/playlist?list=PLfakemix00000002";
+    box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const imported = await until(() => /Road Trip Tunes is in your library and your playlists: 2 songs/.test(toast()), 60000);
+    check("a playlist's songs arrive", !!imported, toast());
+    const madePl = S.playlists.find((x) => x.name === "Road Trip Tunes");
+    check("and it's in the playlist list, in its order", madePl && madePl.entries.map((e) => A.track(e.trackId).title).join() === "Mixed One,Second Song", madePl && madePl.entries.map((e) => A.track(e.trackId).title).join());
+    const mixed = [...S.tracks.values()].filter((t) => t.album === "Road Trip Tunes").sort((a, b) => a.track - b.track);
+    check("and an album of many artists in the library", mixed.length === 2 && mixed.every((t) => t.albumartist === "Various Artists") && mixed[0].artist === "Other Band", JSON.stringify(mixed.map((t) => [t.artist, t.albumartist, t.track])));
+    check("a song kept on its own joined it rather than being filed twice", mixed[1].id === single.id && S.tracks.size === beforeImport + 1 && mixed[1].track === 2, `${S.tracks.size} after ${beforeImport}`);
+
+    // One that fails: says so, and keeps the rest.
+    A.lib.closeSearch();
+    A.yt.open();
+    const half = await T.core.invoke("youtube_playlist", { link: "PLfakebroken00003" });
+    check("the app reads a playlist by its id", half.songs.length === 2 && half.album.title === "Half Broken");
+    const blocked = await T.core.invoke("youtube_keep_on_album", { id: "blockedsong", slot: { list: half.id, album: "Half Broken", artist: "The Band", track: 2, channel: "The Band" } }).then(() => "", (e) => String(e));
+    check("a song that can't be had says why", /Updating yt-dlp/.test(blocked), blocked);
+    const another = await T.core.invoke("youtube_keep_on_album", { id: "albumsong01", slot: { list: half.id, album: "Half Broken", artist: "The Band", track: 1, channel: "The Band" } });
+    check("a song on one album gets a copy of its own on another", another.id !== onAlbum[0].id && another.album === "Half Broken" && A.track(onAlbum[0].id).exists);
+    const nomix = await T.core.invoke("youtube_playlist", { link: "not a playlist" }).then(() => "", (e) => String(e));
+    check("anything else isn't a playlist", /isn't a link to a YouTube playlist/.test(nomix), nomix);
+    $("#yt-kind-songs") && $("#yt-kind-songs").click();
+
+    // The player bar goes to what's playing. (Heard in the library: it's in the music folder.)
+    A.lib.closeSearch();
+    A.setView("playlist");
+    A.playTrack(onAlbum[1].id);
+    const shown = await until(() => $("#player .np-album"), 5000);
+    check("the player bar links its album and artist", !!shown && $("#player .np-album").textContent === "The Big Album" && $("#player .np-artist").textContent === "The Band");
+    $("#player .np-album").click();
+    await sleep(100);
+    check("its album opens the library on all of it", S.view === "library" && $$(".lr").length === 3, `${S.view} ${$$(".lr").length}`);
+    $("#player button.np-t").click();
+    await sleep(100);
+    check("its title finds it there", A.lib.state.L.sel.has(onAlbum[1].id));
+    A.stopPlayback();
+    A.setView("playlist");
+
     // The other side of the panel is as it was.
+    A.yt.open();
     $("#srch-tab-music").click();
     check("the Your music tab goes back to searching your music", S.searchSource === "music" && !!$("#srch-in"));
     A.lib.closeSearch();

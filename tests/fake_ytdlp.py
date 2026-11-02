@@ -2,7 +2,8 @@
 """Stands in for yt-dlp in the tests, so they don't depend on YouTube.
 
 Answers the way the real one does, for what the app asks: --version, a
-`ytsearchN:` search, one video's description, and a download, which makes a real
+`ytsearchN:` search, a search for playlists, what's in a playlist, one video's
+description, and a download, which makes a real
 audio file with ffmpeg in the format the --format selector asks for. It only
 answers a download whose selector names audio-only formats, as the real one would
 pick whatever else was asked for. Every command line is logged, as one JSON line,
@@ -30,8 +31,18 @@ CATALOGUE = [
     ("blockedsong", "Blocked Song", "Some Channel", 3),
     ("hasvideo000", "Has Video", "Some Channel", 3),
     ("slowsongslo", "Slow Song", "Some Channel", 3),
+    ("albumsong01", "Album Song One", "The Band", 2),
+    ("albumsong02", "Album Song Two", "The Band", 2),
+    ("albumsong03", "Album Song Three", "The Band", 2),
+    ("mixedsong01", "Other Band - Mixed One", "Other Band VEVO", 2),
 ]
 BY_ID = {c[0]: c for c in CATALOGUE}
+# What a playlist holds. None is a private video: yt-dlp lists it with no duration.
+PLAYLISTS = {
+    "PLfakealbum000001": ("The Band - The Big Album (Official Album Playlist)", "The Band", ["albumsong01", None, "albumsong02", "albumsong03"]),
+    "PLfakemix00000002": ("Road Trip Tunes", "Somebody", ["mixedsong01", "aaaaaaaaaa2"]),
+    "PLfakebroken00003": ("Half Broken", "The Band", ["albumsong01", "blockedsong"]),
+}
 
 
 def describe(video):
@@ -80,6 +91,24 @@ def main():
         if m.group(2) == "nothing":
             hits = []
         print(json.dumps({"_type": "playlist", "id": m.group(2), "entries": hits}))
+        return
+
+    m = re.fullmatch(r"https://www\.youtube\.com/results\?search_query=([^&]*)&sp=EgIQAw%3D%3D", target)
+    if m:
+        if m.group(1) == "nothing":
+            found = []
+        else:
+            found = [{"_type": "url", "ie_key": "YoutubeTab", "id": k, "url": f"https://www.youtube.com/playlist?list={k}", "title": v[0], "channel": v[1], "uploader": v[1]} for k, v in PLAYLISTS.items()]
+        print(json.dumps({"_type": "playlist", "id": m.group(1), "entries": found}))
+        return
+
+    m = re.fullmatch(r"https://www\.youtube\.com/playlist\?list=([\w-]+)", target)
+    if m:
+        if m.group(1) not in PLAYLISTS:
+            fail(f"{m.group(1)}: The playlist does not exist.")
+        title, channel, songs = PLAYLISTS[m.group(1)]
+        entries = [describe(BY_ID[s]) if s else {"_type": "url", "id": "privatevide", "title": "[Private video]", "duration": None, "channel": None} for s in songs]
+        print(json.dumps({"_type": "playlist", "id": m.group(1), "title": title, "channel": channel, "uploader": channel, "playlist_count": len(entries), "entries": entries}))
         return
 
     m = re.fullmatch(r"https://www\.youtube\.com/watch\?v=([\w-]{11})", target)

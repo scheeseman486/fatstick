@@ -261,6 +261,24 @@ body.pl-dragging, body.pl-dragging * { cursor: grabbing !important; }
 @keyframes yt-spin { to { transform: rotate(360deg); } }
 .yt-err { color: var(--error); }
 .yt-note { color: var(--ink-2); }
+.srch.yt { grid-template-rows: auto auto auto auto minmax(0, 1fr) auto; }
+.yt-kinds { display: flex; gap: 4px; }
+.yt-kinds[hidden] { display: none; }
+.yt-kind[aria-pressed="true"] { background: var(--sel); border-color: transparent; color: var(--sel-ink); font-weight: 600; }
+/* A playlist in a search: opening it is the whole row but for its button. */
+.yp .yp-open { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.yp .yp-open:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+.yp .sr-t { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.25; }
+.yp-bar { grid-column: 1 / -1; }
+.yp-head { display: grid; gap: 4px; justify-items: start; padding: 0 0 10px; margin-bottom: 6px; border-bottom: 1px solid var(--rule); }
+.yp-head h3 { margin: 0; font-size: 14px; }
+.yp-sub { margin: 0; font-size: 12.5px; color: var(--ink-2); }
+.yp-do { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.yp-back { margin-left: -8px; }
+.yt-import-f { display: grid; gap: 4px; margin: 10px 0 6px; }
+.yt-import-f .input { width: 100%; }
+#yt-import-err[hidden] { display: none; }
+.pl-importing { display: flex; align-items: baseline; gap: 2px; color: var(--accent-text); }
 .yr-act { display: inline-flex; align-items: center; gap: 2px; min-height: 26px; }
 .yr-act .btn.small.icon { width: 24px; height: 24px; }
 .yr-add { opacity: 0.75; }
@@ -661,6 +679,10 @@ html.framed .player { padding-inline: 2px; }
 .np { min-width: 0; }
 .np-t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .np-s { font-size: 12.5px; color: var(--chassis-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-link { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.np-link:hover { text-decoration: underline; }
+.np-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: 2px; }
+.np-t.np-link { display: block; max-width: 100%; font-weight: 600; text-align: left; }
 .seek { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .seek input { width: 100%; accent-color: var(--chassis-ink); }
 .aos { display: grid; grid-template-columns: auto auto; column-gap: 8px; align-items: center; font-size: 13px; cursor: pointer; max-width: 22em; }

@@ -1078,6 +1078,17 @@
         case "labels": return (t.labels || []).map((l) => [lkey(l), l]);
         case "decade": return t.year ? [[decadeOf(t.year), decadeOf(t.year)]] : [];
         case "missing": return MISSING.filter((m) => m.test(t)).map((m) => [m.key, m.label]);
+        // All of someone's: as the artist, on a track shared with others, or as the album's artist.
+        case "by": {
+          const names = new Set();
+          for (const v of [t.artist, t.albumartist]) {
+            const s = String(v || "").trim();
+            if (!s) continue;
+            names.add(s);
+            for (const part of s.split(/\s*,\s*|\s+&\s+|\s+(?:feat\.?|ft\.?|featuring)\s+/i)) if (part) names.add(part);
+          }
+          return [...names].map((n) => [n.toLowerCase(), n]);
+        }
         default: {
           const v = String(t[field] || "").trim();
           return v ? [[v.toLowerCase(), v]] : [];
@@ -1428,6 +1439,33 @@
       fill(tagsBox, tagEditor.el);
       if (same) tagsBox.scrollTop = top;
     }
+    /**
+     * The library showing all of an album ("album") or an artist ("by"), in album
+     * order. `false`, and it stays where it is, if the music folder has none.
+     * Albums of one name stay apart by their album artist, when `albumartist` says.
+     */
+    function showBy(field, label, albumartist) {
+      const name = String(label || "").trim();
+      const key = name.toLowerCase();
+      const has = (t) => keysOf(t, field).some(([k]) => k === key);
+      const found = libList().list.filter(has);
+      if (!name || !found.length) return false;
+      const whose = String(albumartist || "").trim();
+      const many = new Set(found.map((t) => String(t.albumartist || "").trim().toLowerCase()).filter(Boolean)).size > 1;
+      core.setView("library");
+      L.q = "";
+      V.q.value = "";
+      L.filters = [{ field, value: key, label: name }];
+      if (field === "album" && whose && many) L.filters.push({ field: "albumartist", value: whose.toLowerCase(), label: whose });
+      L.sort = { key: "album", dir: 1 };
+      L.best = false;
+      computeRows();
+      setSel(new Set(), null);
+      renderView();
+      V.scroll.scrollTop = 0;
+      V.scroll.focus({ preventScroll: true });
+      return true;
+    }
     function revealInLibrary(id) {
       core.setView("library");
       L.q = "";
@@ -1504,7 +1542,7 @@
       /** The playlist's selection changed. */
       followList() { if (S.sel.size) tagSource = "list"; renderEditor(); },
       inMusic, renameDialog, renderView, refresh, useFolder, markPlaying, trackToPlay, renderSearch, openSearch, closeSearch, searchRoot, rowsDown, listKey, rangeOf,
-      onProgress, onScanned, onKey, display, revealInLibrary,
+      onProgress, onScanned, onKey, display, revealInLibrary, showBy,
       /** The folder's state from the window's start, unless a scan's event beat it here. */
       initial(music) {
         if (!scanEvents) S.music = music || null;

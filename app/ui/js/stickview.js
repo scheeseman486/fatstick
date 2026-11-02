@@ -392,6 +392,14 @@
     function onCancel(ev) { if (drag && ev.pointerId === drag.pointerId) finish(false); }
     window.addEventListener("click", (ev) => { if (swallowClick) { ev.stopPropagation(); ev.preventDefault(); swallowClick = false; } }, true);
 
-    return { render, markPlaying, startDrag, dragging: () => !!(drag && drag.started) };
+    /** Bring what's playing into sight, opening what it's folded away in. */
+    function reveal() {
+      const sp = S.player.set;
+      const row = sp && root.querySelector(`[data-file="${CSS.escape(sp.file)}"]`);
+      for (let d = row && row.closest("details"); d; d = d.parentElement && d.parentElement.closest("details")) d.open = true;
+      followed = null;
+      markPlaying();
+    }
+    return { render, markPlaying, reveal, startDrag, dragging: () => !!(drag && drag.started) };
   };
 })(window.Fatstick = window.Fatstick || {});

@@ -1781,7 +1781,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.waitForTimeout(80);
     check('the last playlist can be removed', await p.evaluate(() => Fatstick.app.S.playlists.length === 0 && Fatstick.app.pl() === undefined));
     check('the sidebar says none', /No playlists/.test(await p.locator('#side-pls').textContent()) && await p.locator('.side-more').isVisible());
-    check('the window says none and offers ways to make one', (await p.locator('#pl-name').textContent()) === 'No playlists' && await p.locator('#empty-new').isVisible() && /Import a playlist file/.test(await p.locator('#list-empty').textContent()));
+    check('the window says none and offers ways to make one', (await p.locator('#pl-name').textContent()) === 'No playlists' && await p.locator('#empty-new').isVisible() && /Import playlist/.test(await p.locator('#list-empty').textContent()));
     check('with no tools, columns or hint for a list that isn\'t there', (await p.locator('#pl-head .tools').count()) === 0 && await p.locator('#list-cols').isHidden() && await p.locator('#list-foot').isHidden());
     check('the display says so', /NO PLAYLISTS/.test(await p.locator('#disp-text').textContent()), await p.locator('#disp-text').textContent());
     check('setlists lost it too, and are still there', await p.evaluate(() => Fatstick.app.S.sets.length > 0 && Fatstick.app.S.sets.every((s) => s.playlistIds.every((x) => !x.startsWith('p-')))));
@@ -1884,6 +1884,268 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.waitForTimeout(60);
     check('the window\'s button makes a playlist, and opens it', await p.evaluate(() => Fatstick.app.S.playlists.length === 1 && Fatstick.app.pl().name === 'Fresh') && (await p.locator('#pl-name').textContent()) === 'Fresh' && /This playlist is empty/.test(await p.locator('#list-empty').textContent()));
     if (process.argv[2]) await p.screenshot({ path: path.join(out, 'empty.png') });
+  }
+
+  // 38. YouTube playlists: found, opened, kept as albums and imported.
+  {
+    await p.reload();
+    await p.waitForFunction(() => window.Fatstick.app && window.Fatstick.app.ready);
+    const toastSays = (re) => p.waitForFunction((src) => new RegExp(src).test(document.getElementById('toast').textContent), re.source, { timeout: 15000 });
+    const A = (fn, arg) => p.evaluate(fn, arg);
+    const libraryOf = (album) => A((album) => [...Fatstick.app.S.tracks.values()].filter((t) => t.album === album).sort((x, y) => x.track - y.track).map((t) => ({ title: t.title, artist: t.artist, albumartist: t.albumartist, track: t.track, labels: t.labels, path: t.path })), album);
+    await p.keyboard.press('Control+Shift+F');
+    await p.locator('#yt-get').click();
+    const yin = p.locator('#yt-in:not([disabled])');
+    await yin.waitFor({ timeout: 8000 });
+    check('songs are searched for, to begin with', (await p.locator('#yt-kind-songs').getAttribute('aria-pressed')) === 'true');
+    await p.locator('#yt-kind-lists').click();
+    check('"Playlists" searches for those', (await p.locator('#yt-kind-lists').getAttribute('aria-pressed')) === 'true' && /Search for playlists/.test(await yin.getAttribute('placeholder')) && /Press Enter to search for playlists/.test(await p.locator('.srch-scope').textContent()));
+    await yin.fill('nothing at all');
+    await yin.press('Enter');
+    await p.waitForFunction(() => /No playlists on YouTube/.test(document.querySelector('.srch-scope').textContent));
+    check('finding none says so', (await p.locator('.yp').count()) === 0);
+    await yin.fill('fail please');
+    await yin.press('Enter');
+    await p.locator('.yt-err').waitFor();
+    check('a failed search says why', /Couldn't reach YouTube/.test(await p.locator('.yt-err').textContent()));
+    await yin.fill('Harbour Lights');
+    await yin.press('Enter');
+    await p.locator('.yp').first().waitFor();
+    check('playlists come with their channels', (await p.locator('.yp').count()) === 3 && /The Night Shift/.test(await p.locator('.yp').first().textContent()) && /3 playlists for “Harbour Lights”/.test(await p.locator('.srch-scope').textContent()));
+    await p.locator('#yt-kind-songs').click();
+    await p.locator('.yr').first().waitFor();
+    check('"Songs" searches for the same thing, as songs', (await p.locator('.yr').count()) === 25 && (await p.locator('.yp').count()) === 0);
+    await p.locator('#yt-kind-lists').click();
+    await p.waitForFunction(() => document.querySelectorAll('.yp').length === 3);
+    check('and back, without asking again', (await p.locator('.yr').count()) === 0);
+
+    // Opening one.
+    await p.locator('.yp .yp-open').first().click();
+    await p.locator('.yp-head').waitFor();
+    check('opening one shows its songs', (await p.locator('.yr').count()) === 6 && /Harbour Lights/.test(await p.locator('.yp-head h3').textContent()));
+    check('and what it would be as an album', /As an album: Harbour Lights, by The Night Shift/.test(await p.locator('.yp-head').textContent()));
+    await p.locator('.yr').nth(1).click();
+    check('its songs can be selected, like any', await p.locator('.yr.sel').count() === 1);
+    await yin.press('Escape');
+    check('Escape goes back to the playlists', (await p.locator('.yp').count()) === 3 && (await yin.inputValue()) === 'Harbour Lights');
+    await p.locator('.yp .yp-open').first().click();
+    await p.locator('.yp-back').click();
+    check('so does its back button', (await p.locator('.yp').count()) === 3);
+    await p.locator('.yp').first().click({ button: 'right', position: { x: 20, y: 10 } });
+    check('its menu offers the album, and the playlist too', await p.getByRole('menuitem', { name: 'Add to the library as an album' }).isVisible() && await p.getByRole('menuitem', { name: 'Add as an album and a playlist' }).isVisible());
+    await p.keyboard.press('Escape');
+    // A link goes straight to it, whichever kind is on.
+    await yin.fill('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLpastedinto00001&index=2');
+    await yin.press('Enter');
+    await p.locator('.yp-head').waitFor();
+    check('a pasted link opens the playlist', /Pasted Album/.test(await p.locator('.yp-head').textContent()) && (await p.locator('.yr').count()) === 4);
+    check('and says if some can\'t be fetched', /1 song can't be fetched/.test(await p.locator('.yp-head').textContent()));
+
+    // The whole of it, as an album.
+    const plsBefore = await A(() => Fatstick.app.S.playlists.length);
+    await p.locator('#yp-album').click();
+    await p.locator('#yp-prog-text').waitFor();
+    check('adding it shows how far along it is, and can be stopped', /Getting them: \d of 4/.test(await p.locator('#yp-prog-text').textContent()) && await p.locator('.yp-head .yp-stop').isVisible());
+    await toastSays(/Pasted Album is in your library: 4 songs/);
+    const pasted = await libraryOf('Pasted Album');
+    check('its songs are in the library as an album, in order', pasted.map((t) => t.track).join() === '1,2,3,4' && pasted.every((t) => t.albumartist === 'The Night Shift'), JSON.stringify(pasted.map((t) => t.track)));
+    check('each labelled "youtube", in a folder of the album', pasted.every((t) => t.labels.join() === 'youtube' && /\/YouTube\/The Night Shift - Pasted Album\/0\d - /.test(t.path)), pasted[0].path);
+    check('and no playlist is made of it', (await A(() => Fatstick.app.S.playlists.length)) === plsBefore);
+    check('its songs are marked as in the library', (await p.locator('.yr .sr-in').count()) === 4);
+    check('the head says it\'s there', /It's in your library/.test(await p.locator('#yp-album').textContent()) && await p.locator('#yp-album').isDisabled());
+    await p.locator('#toast').getByRole('button', { name: 'Show' }).click();
+    await p.waitForTimeout(100);
+    check('"Show" opens the library on just that album, in order', await A(() => Fatstick.app.S.view === 'library') && (await p.locator('.lr').count()) === 4 && /Pasted Album/.test(await p.locator('.lib-chips').textContent()));
+    const inOrder = await p.locator('.lr').evaluateAll((rows) => rows.map((r) => r.dataset.tid));
+    check('in track order', JSON.stringify(inOrder) === JSON.stringify(await A(() => [...Fatstick.app.S.tracks.values()].filter((t) => t.album === 'Pasted Album').sort((x, y) => x.track - y.track).map((t) => t.id))), inOrder.join());
+
+    // From its row, and stopped part way.
+    await A(() => Fatstick.app.yt.open());
+    await p.locator('#yt-kind-lists').click();
+    await yin.fill('Second One');
+    await yin.press('Enter');
+    await p.waitForFunction(() => /for “Second One”/.test(document.querySelector('.srch-scope').textContent));
+    await p.locator('.yp .yp-add').first().click();
+    await p.locator('.yp .yp-stop').first().waitFor();
+    // In one step, as the demo's songs arrive quickly.
+    const rowWent = await p.waitForFunction(() => {
+      const r = document.querySelector('.yp');
+      if (!/\d of 6/.test(r.querySelector('.yp-act').textContent)) return false;
+      const seen = !r.querySelector('.yp-bar').hidden;
+      r.querySelector('.yp-stop').click();
+      return { seen };
+    });
+    check('a row shows how far along it is', (await rowWent.jsonValue()).seen);
+    await toastSays(/^Stopped\. \d of 6 songs from Second One/);
+    check('stopping it leaves what came, and says so', await A(() => !Fatstick.app.yt.state.albums.get(Fatstick.app.yt.state.lists[0].id).going.size));
+    await p.locator('.yp .yp-open').first().click();
+    await p.locator('.yp-head').waitFor();
+    check('what\'s left can be got', /Get the rest/.test(await p.locator('#yp-album').textContent()));
+    await p.locator('#yp-album').click();
+    await toastSays(/Second One is in your library: 6 songs/);
+    check('getting the rest makes a whole album, once', (await libraryOf('Second One')).map((t) => t.track).join() === '1,2,3,4,5,6');
+    await p.locator('.srch-close').click();
+    await p.waitForTimeout(250);
+
+    // A song already there on its own joins the album rather than being filed twice.
+    await A(() => Fatstick.app.yt.open());
+    await p.locator('#yt-kind-lists').click();
+    await yin.fill('Third One');
+    await yin.press('Enter');
+    await p.waitForFunction(() => /for “Third One”/.test(document.querySelector('.srch-scope').textContent));
+    await p.locator('.yp .yp-open').first().click();
+    await p.locator('.yr .yr-add').first().waitFor();
+    await p.locator('.yr .yr-add').first().click();
+    await toastSays(/In your library: /);
+    const alone = await A(() => [...Fatstick.app.S.tracks.values()].filter((t) => t.path.includes('/YouTube/') && !t.album).length);
+    await p.locator('#yp-album').click();
+    await toastSays(/Third One is in your library: 6 songs/);
+    check('a song kept on its own joins the album', (await A(() => [...Fatstick.app.S.tracks.values()].filter((t) => t.path.includes('/YouTube/') && !t.album).length)) === alone - 1 && (await libraryOf('Third One')).length === 6);
+    await p.locator('.srch-close').click();
+    await p.waitForTimeout(250);
+
+    // Import: a menu, then a dialog.
+    await p.locator('[data-pl]').first().click();
+    await p.locator('#side-import').click();
+    const fromFile = p.getByRole('menuitem', { name: 'Import from file…' });
+    const fromYt = p.getByRole('menuitem', { name: 'Import from YouTube…' });
+    check('the import is a menu of two', await fromFile.isVisible() && await fromYt.isVisible());
+    await fromFile.click();
+    check('"Import from file" is the old one', /Importing M3U/.test(await p.locator('#toast').textContent()));
+    await p.locator('#app-menu').click();
+    check('the Menu has both', await fromFile.isVisible() && await fromYt.isVisible());
+    await p.keyboard.press('Escape');
+    await p.getByRole('button', { name: 'Add', exact: true }).click();
+    check('and the Add menu', await fromFile.isVisible() && await fromYt.isVisible());
+    await p.keyboard.press('Escape');
+    await p.locator('#side-import').click();
+    await fromYt.click();
+    await p.locator('#yt-import').waitFor();
+    check('"Import from YouTube" asks for a playlist', (await p.locator('#modal-title').textContent()) === 'Import from YouTube' && await p.locator('#yt-import').evaluate((x) => document.activeElement === x));
+    check('and says what happens to it', /as an album, and in your playlists as a playlist/.test(await p.locator('#modal').textContent()));
+    const inp = p.locator('#yt-import');
+    await p.locator('#yt-import-go').click();
+    check('with nothing typed, nothing happens', await inp.isVisible() && await p.locator('#yt-import-err').isHidden());
+    await inp.fill('some words');
+    await inp.press('Enter');
+    await p.locator('#yt-import-err:not([hidden])').waitFor();
+    check('something else says it isn\'t a playlist', /isn't a link to a YouTube playlist/.test(await p.locator('#yt-import-err').textContent()) && !(await p.locator('#yt-import-go').isDisabled()));
+    await inp.fill('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ');
+    await p.locator('#yt-import-go').click();
+    await p.waitForFunction(() => /mixes/.test(document.getElementById('yt-import-err').textContent));
+    check('a mix is refused, saying why', /go on without end/.test(await p.locator('#yt-import-err').textContent()));
+    const nPls = await A(() => Fatstick.app.S.playlists.length);
+    await inp.fill('https://music.youtube.com/playlist?list=PLimported0000001');
+    await inp.press('Enter');
+    await p.locator('#yt-import').waitFor({ state: 'detached' });
+    await p.locator('#import-stop').waitFor();
+    check('a playlist is made and opened at once', await A(() => Fatstick.app.S.playlists.length) === nPls + 1 && (await p.locator('#pl-name').textContent()) === 'The Night Shift - Pasted Album');
+    check('its head says how far along it is', /Importing from YouTube: \d of 4 songs/.test(await p.locator('.pl-importing').textContent()));
+    const importedId = await A(() => Fatstick.app.pl().id);
+    check('so does the sidebar', /Importing, \d of 4/.test(await p.locator(`[data-pl="${importedId}"] .mt`).textContent()));
+    await toastSays(/Pasted Album is in your library and your playlists: 4 songs/);
+    const entries = await A(() => Fatstick.app.pl().entries.map((e) => Fatstick.app.track(e.trackId)).map((t) => ({ title: t.title, track: t.track })));
+    check('its songs fill it, in the playlist\'s order', entries.map((t) => t.track).join() === '1,2,3,4', JSON.stringify(entries));
+    check('the head goes back to normal', (await p.locator('.pl-importing').count()) === 0 && /4 tracks/.test(await p.locator('.pl-meta').textContent()));
+    await p.locator('#list').focus();
+    await p.keyboard.press('Control+z');
+    await p.waitForTimeout(80);
+    check('undo takes the playlist away in one step, and leaves the album', await A(() => Fatstick.app.S.playlists.length) === nPls && (await libraryOf('Pasted Album')).length >= 4);
+
+    // Stopped on the way, the playlist stays as far as it got.
+    await p.locator('#side-import').click();
+    await fromYt.click();
+    await inp.fill('PLimported0000002');
+    await inp.press('Enter');
+    await p.waitForFunction(() => { const b = document.getElementById('import-stop'); if (b) b.click(); return !!b; });
+    await toastSays(/^Stopped\. \d of 4 songs/);
+    check('an import can be stopped', (await p.locator('.pl-importing').count()) === 0);
+    await p.locator('#list').focus();
+    await p.keyboard.press('Control+z');
+    await p.waitForTimeout(80);
+    await p.evaluate(() => Fatstick.app.lib.closeSearch());
+
+    // ---- the player bar ------------------------------------------------------------------------
+    await p.locator('[data-pl="p-road"]').click();
+    await p.waitForTimeout(100);
+    const trackAt = (i) => A((i) => { const a = Fatstick.app; const e = a.pl().entries[i]; const t = a.track(e.trackId); return { entry: e.id, id: t.id, title: t.title, artist: t.artist, album: t.album }; }, i);
+    const t2 = await trackAt(1);
+    await A((id) => Fatstick.app.playEntry(id), t2.entry);
+    await p.waitForTimeout(100);
+    check('the title, artist and album are links', (await p.locator('#player button.np-t').textContent()) === t2.title && (await p.locator('#player .np-artist').textContent()) === t2.artist && (await p.locator('#player .np-album').textContent()) === t2.album);
+    check('with where it is after them', new RegExp(`Road Trip, 2 of \\d+`).test(await p.locator('#player .np-s').textContent()));
+    await p.locator('[data-pl="p-gym"]').click();
+    await p.locator('#list .row').first().click();
+    await p.locator('#player button.np-t').click();
+    await p.waitForTimeout(80);
+    check('its title goes back to it in its playlist', (await A(() => Fatstick.app.pl().id)) === 'p-road' && await p.locator(`#row-${t2.entry}`).evaluate((r) => r.classList.contains('sel') && r.getBoundingClientRect().height > 0) && await A((id) => [...Fatstick.app.S.sel].join() === id, t2.entry));
+    await p.locator('#lib-btn').click();
+    await p.waitForTimeout(150);
+    await p.locator('#player button.np-t').click();
+    await p.waitForTimeout(80);
+    check('from the library too', (await A(() => Fatstick.app.S.view)) === 'playlist' && (await A(() => Fatstick.app.pl().id)) === 'p-road');
+    await p.locator('#player .np-album').click();
+    await p.waitForTimeout(120);
+    const albumRows = await p.locator('.lr').count();
+    const wantAlbum = await A((album) => { const a = Fatstick.app; const key = album.toLowerCase(); return [...a.S.tracks.values()].filter((t) => (t.album || '').toLowerCase() === key && t.path.startsWith('~/Music') && !t.forgotten).length; }, t2.album);
+    check('its album opens the library on the whole album', (await A(() => Fatstick.app.S.view)) === 'library' && albumRows === wantAlbum && new RegExp(t2.album).test(await p.locator('.lib-chips').textContent()), `${albumRows} of ${wantAlbum}`);
+    check('with nothing selected', await A(() => Fatstick.app.lib.state.L.sel.size === 0));
+    await p.locator('#player .np-artist').click();
+    await p.waitForTimeout(120);
+    const artistRows = await p.locator('.lr .c-artist, .lr').count();
+    const wantArtist = await A((artist) => { const a = Fatstick.app; const key = artist.toLowerCase(); return [...a.S.tracks.values()].filter((t) => t.path.startsWith('~/Music') && !t.forgotten && [t.artist, t.albumartist].some((x) => (x || '').toLowerCase() === key)).length; }, t2.artist);
+    check('its artist opens the library on all of theirs', await A((artist) => Fatstick.app.lib.state.L.filters.length === 1 && Fatstick.app.lib.state.L.filters[0].field === 'by' && Fatstick.app.lib.state.L.filters[0].label === artist, t2.artist) && (await p.locator('.lr').count()) >= Math.min(wantArtist, 1) && new RegExp(t2.artist).test(await p.locator('.lib-chips').textContent()), `${await p.locator('.lr').count()} of ${wantArtist}`);
+    await p.locator('.lib-chips .tag .x').first().click();
+    check('and that filter comes off like any other', await A(() => Fatstick.app.lib.state.L.filters.length === 0));
+    // Something that isn't in the library.
+    await A(() => { const t = Fatstick.app.pl('p-road').entries[1]; const k = Fatstick.app.track(t.trackId); k.saved = k.path; k.path = '/elsewhere/song.mp3'; Fatstick.app.S.tracksVersion++; });
+    await p.locator('#player .np-album').click();
+    await p.waitForTimeout(60);
+    await A(() => { const t = Fatstick.app.pl('p-road').entries[1]; const k = Fatstick.app.track(t.trackId); k.path = k.saved; Fatstick.app.S.tracksVersion++; });
+    await A(() => Fatstick.app.stopPlayback());
+    await p.waitForTimeout(60);
+    check('with nothing playing, the title isn\'t a link', (await p.locator('#player button.np-t').count()) === 0 && (await p.locator('#player .np-t').textContent()) === 'Nothing playing');
+    // Played from the library.
+    await A(() => Fatstick.app.setView('library'));
+    await p.waitForTimeout(100);
+    const lr = await A(() => { const a = Fatstick.app; const id = a.lib.state.L.ids[3]; a.playTrack(id); return id; });
+    await A(() => { const L = Fatstick.app.lib.state.L; L.q = ''; });
+    await p.locator('[data-pl="p-road"]').click();
+    await p.waitForTimeout(100);
+    await p.locator('#player button.np-t').click();
+    await p.waitForTimeout(120);
+    check('played from the library, its title goes to it there', (await A(() => Fatstick.app.S.view)) === 'library' && await A((id) => Fatstick.app.lib.state.L.sel.has(id) && Fatstick.app.lib.state.L.ids.includes(id), lr));
+    await A(() => Fatstick.app.stopPlayback());
+    // Played from a setlist, with its folder folded away.
+    await A(() => Fatstick.app.setView('playlist'));
+    await p.locator('[data-set="set-car"]').click();
+    await p.waitForTimeout(100);
+    await p.getByRole('button', { name: 'Collapse all' }).click();
+    await p.locator('#sv-play').click();
+    await p.waitForTimeout(150);
+    await p.locator('[data-pl="p-gym"]').click();
+    await p.waitForTimeout(100);
+    await p.locator('#player button.np-t').click();
+    await p.waitForTimeout(150);
+    check('played from a setlist, its title goes to it there, opened', (await A(() => Fatstick.app.S.view)) === 'stick' && (await A(() => Fatstick.app.S.setId)) === 'set-car' && await p.locator('#stickview .lay-file.sv-now').isVisible());
+    await A(() => Fatstick.app.stopPlayback());
+    // Heard from YouTube, and not in the library.
+    await A(() => Fatstick.app.setView('playlist'));
+    await p.keyboard.press('Control+Shift+F');
+    await p.locator('#yt-kind-songs').click();
+    await yin.fill('A song to hear');
+    await yin.press('Enter');
+    await p.waitForFunction(() => /for “A song to hear”/.test(document.querySelector('.srch-scope').textContent));
+    await p.locator('.yr').nth(3).dblclick();
+    await p.waitForFunction(() => { const t = Fatstick.app.S.player.trackId; return t && t.startsWith('yt:'); }, null, { timeout: 8000 });
+    await p.waitForTimeout(60);
+    check('a song only heard has no artist or album to go to', (await p.locator('#player .np-artist').count()) === 0 && (await p.locator('#player .np-album').count()) === 0 && /Lyric Corner/.test(await p.locator('#player .np-s').textContent()));
+    await p.locator('.srch-close').click();
+    await p.waitForTimeout(250);
+    await p.locator('#player button.np-t').click();
+    await p.waitForTimeout(250);
+    check('its title goes back to the search it came from', await A(() => Fatstick.app.S.searching && Fatstick.app.S.searchSource === 'youtube') && await p.locator('.yr.playing').isVisible());
+    await A(() => { Fatstick.app.stopPlayback(); Fatstick.app.lib.closeSearch(); });
   }
 
   check('no console errors', errs.length === 0, errs.join(' / '));
