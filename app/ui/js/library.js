@@ -811,7 +811,7 @@
         h("div", { class: "srch-box" },
           h("span", { class: "srch-ic" }, icon("search")),
           SE.input,
-          h("button", { type: "button", class: "btn quiet small icon", title: "Close the search (Esc)", "aria-label": "Close the search", onclick: closeSearch }, icon("close"))),
+          h("button", { type: "button", class: "btn quiet small icon srch-close", title: "Close the search (Esc)", "aria-label": "Close the search", onclick: closeSearch }, icon("close"))),
         SE.scope, SE.list,
         h("p", { class: "srch-foot", text: "Double-click a song to hear it. Drag songs into the playlist to add them." }));
     }
@@ -819,12 +819,10 @@
       if (!SE.root) buildSearch();
       return SE.root;
     }
-    /** The sidebar in search mode: the panel (kept, so typing keeps its focus) and the foot. */
-    function renderSearch(side, foot) {
+    /** The sidebar in search mode: the panel, kept, so typing keeps its focus. */
+    function renderSearch(side) {
       const r = searchRoot();
-      if (r.parentNode !== side) fill(side, r, foot);
-      else if (r.nextSibling) r.nextSibling.replaceWith(foot);
-      else side.append(foot);
+      if (r.parentNode !== side) fill(side, r);
       fill(SE.tabs, core.searchTabs());
       refreshSearch();
     }

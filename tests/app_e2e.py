@@ -2,7 +2,7 @@
 """The real app, end to end, on a disk image standing in for a USB stick.
 
 Makes real audio (FLAC, Opus, MP3s at 320 kbps and at 22.05 kHz, WAV), then
-runs a debug build of the app three times under Xvfb with FATSTICK_SELFTEST:
+runs a debug build of the app under Xvfb with FATSTICK_SELFTEST:
 
 1. tests/app_selftest.js drives the window from an empty library to a
    finished sync of two playlists, with silence between them, the first
@@ -18,6 +18,8 @@ runs a debug build of the app three times under Xvfb with FATSTICK_SELFTEST:
    for yt-dlp, hears a song without keeping it and adds others to the library and
    a playlist. ffprobe checks they hold audio alone, and the stand-in's log that
    no command line ever asked for anything else.
+5. tests/app_selftest5.js removes every playlist and setlist and folds the
+   lists away, and then restarts to see that they stay that way.
 
 Then it reads the image with tools that aren't ours: fsck.fat, mtools (the
 order a player sees), ffprobe (codec, bitrate, tags, cover) and ebur128
@@ -316,6 +318,10 @@ def main():
     record("every run ignored yt-dlp's own config", all("--ignore-config" in a for a in asked if a != ["--version"]))
     record("every run was given Deno", all(f"deno:{deno}" in a for a in asked if a != ["--version"]))
     record("nothing typed reached yt-dlp except after --", all(a[a.index("--") + 1].startswith(("ytsearch", "https://www.youtube.com/watch?v=")) for a in asked if a != ["--version"]))
+
+    # Phases 5 and 6: everything removed stays removed.
+    run_app("phase 5", "app_selftest5.js", {"stage": "remove"}, env)
+    run_app("phase 6", "app_selftest5.js", {"stage": "restart"}, env)
 
     shutil.rmtree(work, ignore_errors=True)
     passed = sum(ok for _, ok in RESULTS)

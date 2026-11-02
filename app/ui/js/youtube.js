@@ -91,7 +91,7 @@
         h("div", { class: "srch-box" },
           h("span", { class: "srch-ic" }, icon("search")),
           Y.input,
-          h("button", { type: "button", class: "btn quiet small icon", title: "Close the search (Esc)", "aria-label": "Close the search", onclick: () => lib.closeSearch() }, icon("close"))),
+          h("button", { type: "button", class: "btn quiet small icon srch-close", title: "Close the search (Esc)", "aria-label": "Close the search", onclick: () => lib.closeSearch() }, icon("close"))),
         Y.scope, Y.list, Y.foot);
     }
     function root() {
@@ -99,11 +99,9 @@
       return Y.root;
     }
     /** The sidebar in search mode, as the music search has it. */
-    function renderSearch(side, foot) {
+    function renderSearch(side) {
       const r = root();
-      if (r.parentNode !== side) fill(side, r, foot);
-      else if (r.nextSibling) r.nextSibling.replaceWith(foot);
-      else side.append(foot);
+      if (r.parentNode !== side) fill(side, r);
       fill(Y.tabs, core.searchTabs());
       refresh();
     }

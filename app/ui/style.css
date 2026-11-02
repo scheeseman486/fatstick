@@ -147,14 +147,25 @@ input[type="range"] { accent-color: var(--accent); }
   overflow-x: hidden;
   overflow-y: auto;
   min-width: 0;
-  padding: 12px 8px 0;
+  padding: 0 8px 12px;
   display: flex;
   flex-direction: column;
   gap: 18px;
   min-height: 0;
 }
 .side-h { display: flex; align-items: center; justify-content: space-between; padding: 0 6px 4px 8px; }
-.side-h h2 { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.side-h h2 { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); min-width: 0; }
+/* The caret hangs in the gutter, so the heading lines up with the rows under it. */
+.side-fold {
+  display: flex; align-items: center; margin-left: -16px; padding: 2px 8px 2px 0;
+  border: 0; border-radius: var(--r-s); background: none; color: inherit; font: inherit; cursor: pointer;
+}
+.side-fold:hover { color: var(--ink); }
+.side-fold:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.side-fold .ic { transition: transform 0.12s ease; }
+.side-fold[aria-expanded="false"] .ic { transform: rotate(-90deg); }
+.side-n { margin-left: 5px; font-weight: 400; color: var(--ink-3); }
+.side-none { padding: 2px 8px 4px; font-size: 13px; color: var(--ink-3); }
 .side ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
 .side > section, .side li { min-width: 0; }
 .side-item {
@@ -177,25 +188,24 @@ body.pl-dragging, body.pl-dragging * { cursor: grabbing !important; }
 .side-item input { width: 100%; height: 24px; }
 .side-more { justify-self: start; margin-left: 2px; }
 
-/* The foot of the sidebar: the search button, bottom left. */
-.side-foot {
-  position: sticky; bottom: 0; z-index: 1; margin: auto -8px 0; padding: 8px 8px 10px;
-  background: var(--pane); border-top: 1px solid var(--rule);
+/* The top of the sidebar: the search panel's box, until it's opened. */
+.side-top {
+  position: sticky; top: 0; z-index: 1; margin: 0 -8px -10px; padding: 12px 8px 10px;
+  background: var(--pane);
 }
 .srch-btn {
-  display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 10px;
+  position: relative; display: flex; align-items: center; width: 100%; height: 34px; padding: 0 8px 0 30px;
   border: 1px solid var(--input-border); border-radius: var(--r-s); background: var(--input-bg);
-  color: var(--ink-2); font-size: 13.5px; cursor: pointer; text-align: left;
+  color: var(--ink-3); font-size: 15px; font-style: italic; cursor: text; text-align: left;
 }
-.srch-btn:hover { color: var(--ink); border-color: var(--accent); }
-.srch-btn.on { background: var(--sel); border-color: transparent; color: var(--sel-ink); }
-.side.drop-new #side-pls { box-shadow: 0 0 0 2px var(--accent); border-radius: var(--r-row); background: var(--accent-soft); }
+.srch-btn:hover { border-color: var(--accent); }
+.side.drop-new #side-pls, .side.drop-new #sec-playlists.closed .side-h { box-shadow: 0 0 0 2px var(--accent); border-radius: var(--r-row); background: var(--accent-soft); }
 
 /* ---- search ------------------------------------------------------------------- */
 /* The sidebar widens into the search panel; the list stays where songs drop. */
 .app { transition: grid-template-columns 0.18s ease; }
 .app.searching { --side-w: 340px; }
-.app.searching .side { overflow: hidden; gap: 0; }
+.app.searching .side { overflow: hidden; gap: 0; padding: 12px 8px 8px; }
 .srch { flex: 1 1 auto; min-height: 0; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; gap: 6px; }
 .srch-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--rule); }
 .srch-tab {
@@ -341,6 +351,7 @@ body.pl-dragging, body.pl-dragging * { cursor: grabbing !important; }
   padding-inline: 10px;
 }
 .list-cols { margin-inline: 8px; padding-block: 5px; font-size: 12px; color: var(--ink-2); border-bottom: 1px solid var(--rule); }
+.list-cols:empty { display: none; }
 .list { overflow: auto; outline: none; padding: 4px 8px 16px; min-height: 0; overscroll-behavior: contain; }
 .row {
   height: var(--row-h);
@@ -499,6 +510,7 @@ body.modal-player .player { position: relative; z-index: 60; }
 .list-empty p { margin: 0; max-width: 40ch; }
 .list-wrap.file-over .list { background: var(--accent-soft); }
 .list-foot { margin: 0; padding: 7px 18px 9px; font-size: 12px; color: var(--ink-3); border-top: 1px solid var(--rule); }
+.list-foot:empty { display: none; }
 .list-foot kbd { font: inherit; padding: 0 4px; border: 1px solid var(--rule); border-radius: 3px; }
 
 /* ---- the processing panel ------------------------------------------------------------ */
@@ -906,7 +918,7 @@ html.framed .player { padding-inline: 2px; }
   .toast { bottom: 140px; }
   .app.searching .side { flex-direction: column; overflow: visible; }
   .srch-res { max-height: 55vh; }
-  .side-foot { position: static; margin: 0; flex: 1 1 100%; border-top: 0; padding: 0; background: none; }
+  .side-top { position: static; margin: 0; flex: 1 1 100%; padding: 0; background: none; }
   .lib-body { grid-template-columns: minmax(0, 1fr); }
   .lib-facets { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 220px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   .lib-scroll { height: 60vh; }

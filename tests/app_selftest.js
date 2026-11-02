@@ -30,7 +30,20 @@
     const A = await until(() => window.Fatstick.app && window.Fatstick.app.ready && window.Fatstick.app, 20000);
     if (!check("the window started", !!A)) throw new Error("no app");
     const S = A.S;
-    check("first run: one empty playlist and one stick", S.playlists.length === 1 && S.sets.length === 1 && S.playlists[0].entries.length === 0);
+    check("first run: no playlists and no setlists", S.playlists.length === 0 && S.sets.length === 0 && A.pl() === undefined && A.stickSet() === undefined);
+    check("the window says so, and offers to make one", /No playlists/.test($("#pl-name").textContent) && !!$("#empty-new") && /No setlists/.test($("#side-sets").textContent));
+    // Made by hand, each named as its row asks.
+    const makeNamed = async (button, name) => {
+      $(button).click();
+      const input = await until(() => $("#side .input"));
+      input.value = name;
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await until(() => !$("#side .input"));
+    };
+    await makeNamed("#empty-new", "Playlist 1");
+    check("\"New playlist\" makes one, and opens it", S.playlists.length === 1 && A.pl() === S.playlists[0] && S.playlists[0].name === "Playlist 1" && S.playlists[0].entries.length === 0);
+    await makeNamed('#sec-setlists [aria-label="New setlist"]', "My setlist");
+    check("the Setlists list's button makes one, with the open playlist in it", S.sets.length === 1 && A.stickSet() === S.sets[0] && S.sets[0].name === "My setlist" && S.sets[0].playlistIds[0] === S.playlists[0].id);
     check("the bundled ffmpeg was found", !S.ffmpegError, S.ffmpegError || "");
 
     // A folder, read by the library and added in album order.

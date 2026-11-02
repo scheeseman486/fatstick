@@ -555,7 +555,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('Esc clears, then closes the search', !(await p.locator('#app').evaluate((a) => a.classList.contains('searching'))));
     await p.keyboard.press('Control+f');
     check('Ctrl+F opens it again', await p.locator('#srch-in').evaluate((x) => document.activeElement === x));
-    await p.locator('#srch-btn').click();
+    await p.locator('.srch-close').click();
 
     // 21. The library view: browse by tag, select, drag onto a playlist.
     await p.locator('#lib-btn').click();
@@ -703,14 +703,14 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.locator('.srch-res .sr').first().click({ button: 'right' });
     await p.getByRole('menuitem', { name: 'Edit tags' }).click();
     check('"Edit tags" on a search result shows that one', (await tTitle.inputValue()) === 'Everywhere');
-    await p.locator('#srch-btn').click();
+    await p.locator('.srch-close').click();
     check('with the search closed, it\'s the playlist\'s selection again', (await tTitle.inputValue()) === first);
     await p.locator('#srch-btn').click();
     check('open again, it\'s the result again', (await tTitle.inputValue()) === 'Everywhere');
     await p.locator('#srch-in').fill('');
     await p.waitForFunction(() => document.querySelectorAll('.srch-res .sr').length === 0);
     check('a selected result that goes from the list goes from the panel', (await tTitle.inputValue()) === first);
-    await p.locator('#srch-btn').click();
+    await p.locator('.srch-close').click();
     // A setlist's view has no tracks to select.
     await p.locator('[data-set="set-car"]').click();
     check('a setlist\'s view has nothing selected', /Select a track in a playlist or the library/.test(await p.locator('.st-tags').textContent()));
@@ -1390,6 +1390,8 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('how it stands, with what profile and stick', (await p.locator('#stickview .pill').count()) === 1 && /Generic profile/.test(await p.locator('#stickview .lay-sub').textContent()));
     check('the display counts folders and says how it stands', /DIR/.test(await p.locator('#disp-unit').textContent()) && /out of date|up to date|synced/.test(await p.locator('#disp-sub').textContent()));
     await road.click();
+    // Its columns are fitted once the list has a width, a frame after it's shown.
+    await p.locator('#list-cols .h-stick').waitFor({ timeout: 3000 }).catch(() => {});
     check('a playlist has its "On the stick" column', /On the stick/.test(await p.locator('#list-cols').textContent()));
     check('a setlist never synced says so', /not synced/.test(await p.locator('[data-set="set-gym"] .flag').textContent()));
     await p.getByRole('button', { name: 'Columns' }).click();
@@ -1654,6 +1656,201 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     }
     await p.evaluate(() => { Fatstick.app.stopPlayback(); Fatstick.app.lib.closeSearch(); });
     check('tracks from YouTube have no tooltips on their rows either', (await p.locator('.sr[title]').count()) === 0);
+  }
+
+  // 37. The sidebar: the search box on top, lists that fold away, lists that can be empty.
+  {
+    await p.evaluate(() => Fatstick.app.setView('playlist'));
+    await p.keyboard.press('Control+f');
+    await p.locator('.srch-close').click();
+    await p.waitForTimeout(250);
+    const rect = (sel) => p.locator(sel).first().evaluate((x) => { const r = x.getBoundingClientRect(); const c = getComputedStyle(x); return { top: r.top, left: r.left, h: r.height, font: c.fontSize, border: c.borderTopColor }; });
+    const side0 = await rect('#side');
+    const closedBox = await rect('#srch-btn');
+    check('the search box is at the top of the sidebar', closedBox.top - side0.top <= 14 && closedBox.top < (await rect('#fold-playlists')).top);
+    check('nothing is left at its foot', (await p.locator('.side-foot').count()) === 0);
+    await p.locator('#srch-btn').click();
+    await p.waitForTimeout(250);
+    const openBox = await rect('#srch-in');
+    check('and it is the same box as the search panel\'s', openBox.h === closedBox.h && openBox.font === closedBox.font && openBox.left === closedBox.left);
+    check('the open panel has one way to close it, by its box', (await p.locator('.srch-close').count()) === 1 && !/Close search/.test(await p.locator('#side').textContent()));
+    await p.locator('.srch-close').click();
+    await p.waitForTimeout(250);
+    check('closing it puts the focus back on the box', await p.evaluate(() => document.activeElement.id === 'srch-btn'));
+    // With the window short and the sidebar scrolled, it's still there.
+    await p.setViewportSize({ width: 1280, height: 420 });
+    await p.locator('#side').evaluate((x) => { x.scrollTop = 200; });
+    await p.waitForTimeout(100);
+    check('it stays in sight as the sidebar scrolls', await p.evaluate(() => {
+      const s = document.getElementById('side');
+      const b = document.getElementById('srch-btn').getBoundingClientRect();
+      const under = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      return s.scrollTop > 0 && b.top >= s.getBoundingClientRect().top && under && !!under.closest('#srch-btn');
+    }));
+    await p.locator('#side').evaluate((x) => { x.scrollTop = 0; });
+    await p.setViewportSize({ width: 1280, height: 800 });
+
+    // Folding away.
+    const open = (key) => p.locator(`#fold-${key}`).getAttribute('aria-expanded');
+    const plsN = await p.locator('[data-pl]').count();
+    const setsN = await p.locator('[data-set]').count();
+    check('both lists start open', (await open('playlists')) === 'true' && (await open('setlists')) === 'true' && plsN > 0 && setsN > 0);
+    await p.locator('#fold-playlists').click();
+    check('a list folds away, with its import link', (await open('playlists')) === 'false' && (await p.locator('[data-pl]').count()) === 0 && (await p.locator('.side-more').count()) === 0);
+    check('leaving the other as it was', (await p.locator('[data-set]').count()) === setsN);
+    check('its heading says how many are in it', new RegExp(`Playlists\\s*${plsN}`).test(await p.locator('#fold-playlists').textContent()));
+    check('the open playlist stays open', await p.locator('#list .row').count() > 0);
+    check('the focus stays on the heading', await p.evaluate(() => document.activeElement.id === 'fold-playlists'));
+    await p.keyboard.press('Enter');
+    check('Enter opens it again', (await open('playlists')) === 'true' && (await p.locator('[data-pl]').count()) === plsN);
+    check('and the focus stays', await p.evaluate(() => document.activeElement.id === 'fold-playlists'));
+    await p.locator('#fold-setlists').click();
+    check('the other folds the same way', (await open('setlists')) === 'false' && (await p.locator('[data-set]').count()) === 0);
+    const heading = await p.locator('#sec-setlists .side-h').evaluate((x) => x.getBoundingClientRect().height);
+    check('a folded list is only its heading', (await p.locator('#sec-setlists').evaluate((x) => x.getBoundingClientRect().height)) <= heading + 1);
+    // Making one shows it, to name it.
+    await p.locator('#sec-setlists [aria-label="New setlist"]').click();
+    check('a new setlist opens its folded list, to be named', (await open('setlists')) === 'true' && await p.locator('#side .input').isVisible());
+    await p.keyboard.press('Escape');
+    await p.keyboard.press('Control+z');
+    await p.waitForTimeout(60);
+    await p.locator('#fold-playlists').click();
+    await p.locator('#sec-playlists [aria-label="New playlist"]').click();
+    check('so does a new playlist', (await open('playlists')) === 'true' && await p.locator('#side .input').isVisible());
+    await p.keyboard.press('Escape');
+    await p.keyboard.press('Control+z');
+    await p.waitForTimeout(60);
+    check('and undoing those leaves things as they were', (await p.locator('[data-pl]').count()) === plsN && (await p.locator('[data-set]').count()) === setsN);
+    // A song dropped on a folded list's heading makes a playlist, and shows it.
+    await p.locator('#fold-playlists').click();
+    await p.keyboard.press('Control+f');
+    await p.locator('#srch-in').fill('Everywhere');
+    await p.locator('.srch-res .sr').first().waitFor();
+    await p.waitForTimeout(250);
+    await p.locator('.srch-close').click();
+    await p.waitForTimeout(250);
+    check('its list is folded still', (await open('playlists')) === 'false');
+    await p.locator('#fold-playlists').click();
+
+    // Removing the last playlist.
+    const removeAll = async (row, label) => {
+      for (;;) {
+        const r = p.locator(row).first();
+        if (!(await r.count())) return;
+        await r.click({ button: 'right' });
+        const item = p.getByRole('menuitem', { name: label });
+        if (await item.isDisabled()) throw new Error(`${label} is disabled`);
+        await item.click();
+        await p.waitForTimeout(30);
+      }
+    };
+    await p.locator('[data-pl]').first().click();
+    await removeAll('[data-pl]', 'Remove playlist');
+    await p.waitForTimeout(80);
+    check('the last playlist can be removed', await p.evaluate(() => Fatstick.app.S.playlists.length === 0 && Fatstick.app.pl() === undefined));
+    check('the sidebar says none', /No playlists/.test(await p.locator('#side-pls').textContent()) && await p.locator('.side-more').isVisible());
+    check('the window says none and offers ways to make one', (await p.locator('#pl-name').textContent()) === 'No playlists' && await p.locator('#empty-new').isVisible() && /Import a playlist file/.test(await p.locator('#list-empty').textContent()));
+    check('with no tools, columns or hint for a list that isn\'t there', (await p.locator('#pl-head .tools').count()) === 0 && await p.locator('#list-cols').isHidden() && await p.locator('#list-foot').isHidden());
+    check('the display says so', /NO PLAYLISTS/.test(await p.locator('#disp-text').textContent()), await p.locator('#disp-text').textContent());
+    check('setlists lost it too, and are still there', await p.evaluate(() => Fatstick.app.S.sets.length > 0 && Fatstick.app.S.sets.every((s) => s.playlistIds.every((x) => !x.startsWith('p-')))));
+    await p.locator('#list').focus();
+    for (const k of ['Control+a', 'Space', 'ArrowDown', 'ArrowUp', 'Delete', 'Control+c', 'Control+x', 'Control+v', 'Alt+ArrowUp', 'e', 'k', 'f', 't', 'Enter', 'Home', 'End']) await p.keyboard.press(k);
+    await p.setViewportSize({ width: 1100, height: 700 });
+    await p.waitForTimeout(80);
+    await p.setViewportSize({ width: 1280, height: 800 });
+    check('its keys do nothing, and a resize is fine', await p.evaluate(() => Fatstick.app.S.playlists.length === 0 && !Fatstick.app.S.player.playing) && (await p.locator('#modal-back').isHidden()));
+    await p.getByRole('button', { name: 'Menu', exact: true }).click();
+    check('the Menu can\'t export a playlist', await p.getByRole('menuitem', { name: /Export this playlist/ }).isDisabled());
+    await p.keyboard.press('Escape');
+    // The library and search add to a new playlist.
+    await p.locator('#lib-btn').click();
+    await p.waitForTimeout(150);
+    await p.locator('.lr').first().click();
+    check('the library offers a new playlist, and nothing to add to', await p.locator('#libview').getByRole('button', { name: 'New playlist', exact: true }).isVisible() && (await p.locator('#libview').getByRole('button', { name: /^Add to / }).count()) === 0);
+    await p.locator('.lr').first().click();
+    await p.locator('.lr').first().press('Shift+Enter');
+    await p.waitForTimeout(80);
+    check('adding from it makes one', await p.evaluate(() => Fatstick.app.S.playlists.length === 1 && Fatstick.app.pl().entries.length === 1));
+    await p.keyboard.press('Control+z');
+    await p.waitForTimeout(80);
+    check('undone, there\'s none again', await p.evaluate(() => Fatstick.app.S.playlists.length === 0 && Fatstick.app.pl() === undefined));
+    await p.evaluate(() => Fatstick.app.setView('playlist'));
+    await p.keyboard.press('Control+f');
+    await p.locator('#srch-in').fill('Everywhere');
+    const res = p.locator('.srch-res .sr').first();
+    await res.waitFor();
+    // Dropped on the empty window, it makes a playlist too.
+    {
+      const from = await res.boundingBox();
+      const to = await p.locator('#list-wrap').boundingBox();
+      await p.mouse.move(from.x + 30, from.y + 10);
+      await p.mouse.down();
+      await p.mouse.move(from.x + 60, from.y + 30, { steps: 3 });
+      await p.mouse.move(to.x + to.width / 2, to.y + 200, { steps: 4 });
+      await p.mouse.up();
+    }
+    await p.waitForTimeout(100);
+    check('a song dropped on the empty window gets a playlist', await p.evaluate(() => Fatstick.app.S.playlists.length === 1 && Fatstick.app.pl().entries.length === 1));
+    await p.locator('.srch-close').click();
+    await p.waitForTimeout(250);
+    await p.keyboard.press('Control+z');
+    await p.waitForTimeout(80);
+    check('undone, there\'s none again either', await p.evaluate(() => Fatstick.app.S.playlists.length === 0));
+    await p.keyboard.press('Control+z');
+    await p.waitForTimeout(80);
+    check('undo brings back the last playlist removed', await p.evaluate(() => Fatstick.app.S.playlists.length >= 1 && !!Fatstick.app.pl()) && (await p.locator('#pl-name').textContent()) !== 'No playlists' && await p.locator('#list-cols').isVisible());
+
+    // Removing the last setlist, with its view and the transfer open.
+    await p.locator('[data-set]').first().click();
+    await p.waitForTimeout(80);
+    await p.locator('#proc-fat').click();
+    await p.waitForTimeout(250);
+    await p.locator('#sv-play').click().catch(() => {});
+    await p.waitForTimeout(80);
+    await removeAll('[data-set]', 'Remove setlist');
+    await p.waitForTimeout(300);
+    check('the last setlist can be removed, and its view goes with it', await p.evaluate(() => Fatstick.app.S.sets.length === 0 && Fatstick.app.stickSet() === undefined && Fatstick.app.S.view === 'playlist'));
+    check('and the transfer closes', await p.evaluate(() => Fatstick.app.S.processing === null) && await p.locator('#stick').isHidden());
+    check('and whatever of it was playing stops', await p.evaluate(() => !Fatstick.app.S.player.set));
+    check('the sidebar says none', /No setlists/.test(await p.locator('#side-sets').textContent()));
+    await p.getByRole('button', { name: 'Menu', exact: true }).click();
+    check('the Menu can\'t print a setlist', await p.getByRole('menuitem', { name: /Print a setlist/ }).isDisabled());
+    await p.keyboard.press('Escape');
+    await p.keyboard.press('Control+p');
+    await p.waitForTimeout(60);
+    check('and neither can Ctrl+P, which says why', await p.locator('#modal-back').isHidden());
+    await p.keyboard.press('Control+z');
+    await p.waitForTimeout(100);
+    check('undo brings one back, with the view left where it is', await p.evaluate(() => Fatstick.app.S.sets.length >= 1 && !!Fatstick.app.stickSet() && Fatstick.app.S.view === 'playlist'));
+    // ...and with its removal undone by a redo, nothing's left open either.
+    await p.locator('[data-set]').first().click();
+    await p.waitForTimeout(60);
+    await p.keyboard.press('Control+Shift+z');
+    await p.waitForTimeout(100);
+    check('redoing it from its own view leaves the view', await p.evaluate(() => Fatstick.app.S.sets.length === 0 && Fatstick.app.S.view === 'playlist'));
+
+    // Making them from nothing.
+    await removeAll('[data-pl]', 'Remove playlist');
+    await p.locator('#sec-setlists [aria-label="New setlist"]').click();
+    await p.locator('#side .input').fill('Empty one');
+    await p.keyboard.press('Enter');
+    await p.waitForTimeout(60);
+    check('a setlist can be made with no playlist to put in it', await p.evaluate(() => Fatstick.app.S.sets.length === 1 && Fatstick.app.S.sets[0].playlistIds.length === 0 && !!Fatstick.app.stickSet()));
+    await p.locator('[data-set]').first().click();
+    await p.waitForTimeout(60);
+    check('and opened', await p.locator('#stickview').isVisible() && /Empty one/.test(await p.locator('#stickview').textContent()));
+    await p.locator('#proc-fat').click();
+    await p.waitForTimeout(250);
+    check('and the transfer opens on it', await p.locator('#set-select').isVisible());
+    await p.locator('#proc-close').click();
+    await p.waitForTimeout(250);
+    await p.evaluate(() => Fatstick.app.setView('playlist'));
+    await p.locator('#empty-new').click();
+    await p.locator('#side .input').fill('Fresh');
+    await p.keyboard.press('Enter');
+    await p.waitForTimeout(60);
+    check('the window\'s button makes a playlist, and opens it', await p.evaluate(() => Fatstick.app.S.playlists.length === 1 && Fatstick.app.pl().name === 'Fresh') && (await p.locator('#pl-name').textContent()) === 'Fresh' && /This playlist is empty/.test(await p.locator('#list-empty').textContent()));
+    if (process.argv[2]) await p.screenshot({ path: path.join(out, 'empty.png') });
   }
 
   check('no console errors', errs.length === 0, errs.join(' / '));

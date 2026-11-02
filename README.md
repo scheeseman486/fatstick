@@ -20,6 +20,11 @@ GPL version 3 or later.
   renamed files can be found again ("Locate"). Your music files only change
   when you change them in the library (tags as you edit them; file names
   after a preview), and nothing ever deletes them.
+- **The sidebar's lists.** The Playlists and Setlists headings fold their lists
+  away, and the app remembers which are folded. Making a new one opens its list again. Either
+  list can be empty: a new library starts with neither, and the last of each can be
+  removed. With no playlist, the middle of the window offers to make one, and
+  music added, dropped or pasted gets a playlist of its own.
 - **Your music library.** "Library" (top right) turns the middle of the
   window into your music folder: choose the folder once and the app reads
   every song in it, then keeps up as files are added, moved or retagged (it
@@ -56,8 +61,8 @@ GPL version 3 or later.
   it, and Ctrl+Z in the library view undoes tag edits one at a time. Nothing asks
   first, and clicking elsewhere saves what was typed. "Clean up file names…" renames files from their tags; files stay in their
   folders and keep their type. Nothing outside the music folder is touched.
-- **Search.** The search button at the bottom left (or Ctrl+F) widens the
-  sidebar into a search panel. Type a title, an artist, an album, a genre,
+- **Search.** The search box at the top of the sidebar (or Ctrl+F) widens the
+  sidebar into a search panel, and × beside the box or Esc closes it. Type a title, an artist, an album, a genre,
   a label, a year or part of a file name: whole-word matches come first,
   then a divider and close ones (a word's start, part of a word, a letter or
   two off). Punctuation doesn't matter: "YMCA" finds "Y.M.C.A." and the
@@ -452,8 +457,8 @@ cargo build --release -p fatstick-cli --target x86_64-unknown-linux-musl
 python3 tests/kernel_stick.py --kroot <kernel dir> --fatstick target/x86_64-unknown-linux-musl/release/fatstick
 ```
 
-`tests/app_e2e.py` runs the real app under Xvfb, four times. The first run starts
-from an empty library, with the transfer panel closed until a setlist's button opens it: it adds two folders of real audio (FLAC, Opus, WAV,
+`tests/app_e2e.py` runs the real app under Xvfb, six times. The first run starts
+from an empty library with no playlists or setlists, and the transfer panel closed until a setlist's button opens it: it makes one of each, adds two folders of real audio (FLAC, Opus, WAV,
 MP3s at 320 kbps and at 22.05 kHz mono), turns on even volume, cuts and pads
 a track, shifts another 5 semitones up (changing its key live while it
 plays), fades a third in and out with a late fade out (changing the fades
@@ -473,7 +478,7 @@ a file copied into the folder shows up by itself (and that the scan's own
 reading of the folder doesn't set off another scan). The fourth searches YouTube,
 hears songs and adds them, with `tests/fake_ytdlp.py` standing in for yt-dlp, so
 the tests don't depend on YouTube; its log shows that every fetch named audio-only
-formats. Then the image is read with tools that aren't ours: fsck.fat, mtools (the order a player sees),
+formats. The fifth removes every playlist and setlist and folds a list away, and the sixth restarts to see that they stay that way. Then the image is read with tools that aren't ours: fsck.fat, mtools (the order a player sees),
 ffprobe (codec, sample rate, tags, cover, lengths), and ffmpeg's EBU R128
 meter and volumedetect (−18 LUFS where the volume was evened out; silence
 where it was added), and the shifted track is measured: 550 Hz became 734 Hz,

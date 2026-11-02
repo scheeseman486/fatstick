@@ -90,6 +90,8 @@
     /** What the processing panel shows (a key of PROCESSES). It's closed (null)
      * whenever the app starts, until something opens it. */
     processing: null,
+    /** The sidebar's lists folded away, kept across restarts. */
+    sideClosed: { playlists: false, setlists: false },
     /** The sidebar shows the search panel, on your music or on YouTube. */
     searching: false,
     searchSource: "music",
@@ -424,13 +426,21 @@
     if (current && pl(current)) S.current = current;
     if (!pl()) S.current = S.playlists[0]?.id;
     if (!stickSet()) S.setId = S.sets[0]?.id;
+    leaveMissingSet();
     const ids = new Set(pl()?.entries.map((e) => e.id));
     S.sel = new Set([...S.sel].filter((id) => ids.has(id)));
     if (!ids.has(S.focus)) S.focus = null;
     const pp = S.player;
     if (pp.entryId && !pl(pp.playlistId)?.entries.some((e) => e.id === pp.entryId)) stopPlayback();
+    if (pp.set && !stickSet(pp.set.id)) stopPlayback();
     renderAll();
     changed();
+  }
+  /** With no setlist left, nothing of one stays open. */
+  function leaveMissingSet() {
+    if (stickSet()) return;
+    if (S.processing === "fat") setProcessing(null);
+    if (S.view === "stick") setView("playlist");
   }
   function undo() {
     const u = S.undo.pop();
@@ -450,7 +460,7 @@
   }
 
   // ---- selection ------------------------------------------------------------------------
-  const entryIds = () => pl().entries.map((e) => e.id);
+  const entryIds = () => (pl() ? pl().entries.map((e) => e.id) : []);
   function selectOnly(id) {
     S.sel = new Set(id ? [id] : []);
     S.anchor = id;
@@ -465,7 +475,7 @@
     for (let k = Math.min(i, j); k <= Math.max(i, j); k++) S.sel.add(ids[k]);
     S.focus = b;
   }
-  const selectedInOrder = () => pl().entries.filter((e) => S.sel.has(e.id));
+  const selectedInOrder = () => (pl() ? pl().entries.filter((e) => S.sel.has(e.id)) : []);
   function syncSelection() {
     const list = $("list");
     for (const r of list.children) {
@@ -591,12 +601,14 @@
   }
   function paste() {
     if (!S.clip || !S.clip.length) return;
+    if (!pl()) { insertTracks(S.clip, { kind: "list", index: null }); return; }
     const ids = entryIds();
     const at = S.focus && ids.includes(S.focus) ? ids.indexOf(S.focus) + 1 : ids.length;
     addTracks(S.clip, S.current, at, `Paste ${plural(S.clip.length, "track")}`);
   }
   function newPlaylist(name, trackIds) {
     const id = newId("p-");
+    foldSection("playlists", true);
     edit(`New playlist`, () => {
       S.playlists.push({ id, name: name || "New playlist", entries: (trackIds || []).map((t) => ({ id: newId("e"), trackId: t })), norm: { on: false, target: -18, mode: "track" } });
     });
@@ -612,20 +624,39 @@
     const sets = setsFor(id);
     if (sets.length && !sets.includes(stickSet())) S.setId = sets[0].id;
     saveSetting("currentPlaylist", id);
-    saveSetting("currentSet", S.setId);
+    saveSetting("currentSet", S.setId || "");
     renderAll();
     $("list").scrollTop = 0;
   }
 
   // ---- rendering: sidebar ------------------------------------------------------------------
-  /** The foot of the sidebar: the search button, bottom left. */
-  function sideFoot() {
-    return h("div", { class: "side-foot" },
+  /** The top of the sidebar: looks like the search panel's box, and opens it. */
+  function sideSearch() {
+    return h("div", { class: "side-top" },
       h("button", {
-        type: "button", class: `srch-btn${S.searching ? " on" : ""}`, id: "srch-btn", "aria-pressed": String(S.searching),
-        title: S.searching ? "Close the search (Esc)" : "Search your music (Ctrl+F) or YouTube (Ctrl+Shift+F)",
-        onclick: () => (S.searching ? lib.closeSearch() : S.searchSource === "youtube" ? yt.open() : lib.openSearch()),
-      }, icon("search"), h("span", { text: S.searching ? "Close search" : "Search" })));
+        type: "button", class: "srch-btn", id: "srch-btn",
+        title: "Search your music (Ctrl+F) or YouTube (Ctrl+Shift+F)",
+        onclick: () => (S.searchSource === "youtube" ? yt.open() : lib.openSearch()),
+      }, h("span", { class: "srch-ic" }, icon("search")), h("span", { text: "Search" })));
+  }
+  /** Fold a list of the sidebar away, or open it. */
+  function foldSection(key, open) {
+    if (S.sideClosed[key] === !open) return;
+    S.sideClosed[key] = !open;
+    saveSetting("sideClosed", S.sideClosed);
+  }
+  /** A list of the sidebar: its heading folds it away. `body` draws what's under it. */
+  function sideSection(key, label, count, add, body) {
+    const closed = S.sideClosed[key];
+    return h("section", { id: `sec-${key}`, class: closed ? "closed" : null },
+      h("div", { class: "side-h" },
+        h("h2", null, h("button", {
+          type: "button", class: "side-fold", id: `fold-${key}`, "aria-expanded": String(!closed),
+          title: `${closed ? "Show" : "Hide"} the ${key}`,
+          onclick: () => { foldSection(key, closed); renderSide(); $(`fold-${key}`).focus({ preventScroll: true }); },
+        }, icon("caret"), h("span", { text: label }), closed && count ? h("span", { class: "side-n", text: String(count) }) : null)),
+        h("button", { type: "button", class: "btn quiet small icon", title: add.label, "aria-label": add.label, onclick: add.run }, icon("plus"))),
+      closed ? null : body());
   }
   /** The search panel's two sides. */
   function searchTabs() {
@@ -638,8 +669,8 @@
   function renderSide() {
     if (S.renaming) return;
     const side = $("side");
-    if (S.searching) { (S.searchSource === "youtube" ? yt : lib).renderSearch(side, sideFoot()); return; }
-    const plItems = S.playlists.map((p) => {
+    if (S.searching) { (S.searchSource === "youtube" ? yt : lib).renderSearch(side); return; }
+    const plItems = () => S.playlists.map((p) => {
       const ts = p.entries.map((e) => track(e.trackId));
       const dur = ts.reduce((a, t) => a + (t.exists ? t.duration || 0 : 0), 0);
       const here = p.id === S.current && S.view === "playlist";
@@ -653,8 +684,9 @@
         oncontextmenu: (e) => { e.preventDefault(); playlistMenu(p, { x: e.clientX, y: e.clientY }); },
       }, h("span", { class: "nm", text: p.name }), h("span", { class: "mt", text: `${plural(p.entries.length, "track")}${p.join ? " as one" : ""}, ${length(dur)}` })));
     });
-    const plugged = new Set(S.sticks.map(holder).filter((x) => x && x.set).map((x) => x.set.id));
-    const setItems = S.sets.map((s) => {
+    const setItems = () => {
+      const plugged = new Set(S.sticks.map(holder).filter((x) => x && x.set).map((x) => x.set.id));
+      return S.sets.map((s) => {
       const plan = planSet(s);
       const st = staleness(plan);
       const inNow = plugged.has(s.id);
@@ -671,18 +703,17 @@
         oncontextmenu: (e) => { e.preventDefault(); setMenu(s, { x: e.clientX, y: e.clientY }); },
       }, h("span", { class: "nm", text: s.name }), flag,
       h("span", { class: "mt", text: `${plural(plan.folders.filter((f) => f.p.gap == null).length, "playlist")}, ${length(plan.all.reduce((a, it) => a + (it.secs || 0), 0))}` })));
-    });
-    fill(side, 
-      h("section", null,
-        h("div", { class: "side-h" }, h("h2", { text: "Playlists" }),
-          h("button", { type: "button", class: "btn quiet small icon", title: "New playlist", "aria-label": "New playlist", onclick: () => newPlaylist() }, icon("plus"))),
-        h("ul", { id: "side-pls" }, plItems),
-        h("button", { type: "button", class: "btn quiet small side-more", text: "Import a playlist file…", onclick: importPlaylist })),
-      h("section", null,
-        h("div", { class: "side-h" }, h("h2", { text: "Setlists" }),
-          h("button", { type: "button", class: "btn quiet small icon", title: "New setlist", "aria-label": "New setlist", onclick: newSet }, icon("plus"))),
-        h("ul", null, setItems)),
-      sideFoot(),
+      });
+    };
+    const none = (text) => h("li", { class: "side-none", text });
+    fill(side,
+      sideSearch(),
+      sideSection("playlists", "Playlists", S.playlists.length, { label: "New playlist", run: () => newPlaylist() }, () => [
+        h("ul", { id: "side-pls" }, S.playlists.length ? plItems() : none("No playlists.")),
+        h("button", { type: "button", class: "btn quiet small side-more", text: "Import a playlist file…", onclick: importPlaylist }),
+      ]),
+      sideSection("setlists", "Setlists", S.sets.length, { label: "New setlist", run: newSet }, () =>
+        h("ul", { id: "side-sets" }, S.sets.length ? setItems() : none("No setlists."))),
     );
   }
 
@@ -705,6 +736,7 @@
   function startRename(kind, id) {
     const obj = kind === "playlist" ? pl(id) : stickSet(id);
     if (!obj) return;
+    foldSection(kind === "playlist" ? "playlists" : "setlists", true);
     S.renaming = null;
     renderSide();
     const btn = document.querySelector(kind === "playlist" ? `[data-pl="${id}"]` : `[data-set="${id}"]`);
@@ -737,12 +769,12 @@
       ...(others.length ? ["-", { heading: "Add to a setlist" }, ...others.map((s) => ({ label: s.name, action: () => edit(`Add ${p.name} to ${s.name}`, () => { s.playlistIds.push(p.id); }) }))] : []),
       "-",
       {
-        label: "Remove playlist", disabled: S.playlists.length < 2,
+        label: "Remove playlist",
         action: () => {
           edit(`Remove playlist ${p.name}`, () => {
             S.playlists = S.playlists.filter((x) => x.id !== p.id);
             for (const s of S.sets) s.playlistIds = s.playlistIds.filter((x) => x !== p.id);
-            if (S.current === p.id) { S.current = S.playlists[0].id; selectOnly(null); }
+            if (S.current === p.id) { S.current = S.playlists[0]?.id; selectOnly(null); }
           });
           if (S.player.playlistId === p.id) stopPlayback();
           toast(`Removed the playlist ${p.name}. Its files are untouched.`, { label: "Undo", run: undo });
@@ -758,9 +790,11 @@
       "-",
       { label: "Rename", action: () => startRename("set", s.id) },
       {
-        label: "Remove setlist", disabled: S.sets.length < 2,
+        label: "Remove setlist",
         action: () => {
-          edit(`Remove setlist ${s.name}`, () => { S.sets = S.sets.filter((x) => x.id !== s.id); if (S.setId === s.id) S.setId = S.sets[0].id; });
+          if (S.player.set && S.player.set.id === s.id) stopPlayback();
+          edit(`Remove setlist ${s.name}`, () => { S.sets = S.sets.filter((x) => x.id !== s.id); if (S.setId === s.id) S.setId = S.sets[0]?.id; });
+          leaveMissingSet();
           toast(`Removed the setlist ${s.name}. Its playlists are untouched, and so is any stick it was synced to.`, { label: "Undo", run: undo });
         },
       },
@@ -769,7 +803,7 @@
   function newSet() {
     const id = newId("set-");
     edit("New setlist", () => {
-      S.sets.push({ id, name: `Setlist ${S.sets.length + 1}`, profileId: S.profiles[0].id, playlistIds: [S.current], stickId: null, label: "" });
+      S.sets.push({ id, name: `Setlist ${S.sets.length + 1}`, profileId: S.profiles[0].id, playlistIds: [S.current].filter(Boolean), stickId: null, label: "" });
       S.setId = id;
     });
     startRename("set", id);
@@ -794,7 +828,7 @@
    * always, then the others the person wants, most useful first, while
    * there's room for each at its narrowest. Shown in their usual order. */
   const COL_ORDER = ["num", "title", "artist", "album", "time", "format", "stick", "gain", "edges", "fades", "key", "name"];
-  function visibleCols(p) {
+  function visibleCols(p = { entries: [], norm: {} }) {
     const em = 14;
     const narrowest = (c) => parseFloat(COLS[c].w.match(/([\d.]+)em/)[1]) * em + 12; // and the gap
     const on = new Set(["num", "title", "time"]);
@@ -818,6 +852,10 @@
 
   function renderHead() {
     const p = pl();
+    if (!p) {
+      fill($("pl-head"), h("div", { class: "pl-title" }, h("h1", { id: "pl-name", text: "No playlists" })));
+      return;
+    }
     const s = listSet();
     const plan = planPlaylist(p, listProfile());
     const dur = plan.present.reduce((a, it) => a + it.t.duration, 0);
@@ -1667,6 +1705,22 @@
 
   function renderList() {
     const p = pl();
+    if (!p) {
+      $("list").replaceChildren();
+      $("list-cols").replaceChildren();
+      $("list-foot").textContent = "";
+      const empty = $("list-empty");
+      empty.hidden = false;
+      empty.replaceChildren(
+        h("p", { text: "Make a playlist, or drop audio files or folders here and one is made from them." }),
+        h("div", { class: "tools", style: { "justify-content": "center" } },
+          h("button", { type: "button", class: "btn primary", id: "empty-new", text: "New playlist", onclick: () => newPlaylist() }),
+          h("button", { type: "button", class: "btn", text: "Add files…", onclick: () => addFiles(false) }),
+          h("button", { type: "button", class: "btn", text: "Add a folder…", onclick: () => addFiles(true) }),
+          h("button", { type: "button", class: "btn", text: "Import a playlist file…", onclick: importPlaylist })),
+      );
+      return;
+    }
     const prf = listProfile();
     const plan = planPlaylist(p, prf);
     const byEntry = new Map(plan.items.map((it) => [it.entry.id, it]));
@@ -2394,7 +2448,7 @@
       unit = pp.repeat === "one" ? "RPT1" : pp.repeat === "all" ? "RPT" : "";
       sub = `${t.title || t.filename}${t.artist ? `, ${t.artist}` : ""}`;
     } else {
-      const p = pl() || { name: "", entries: [] };
+      const p = pl() || { name: "No playlists", entries: [] };
       const live = p.entries.map((e) => track(e.trackId)).filter((t) => t.exists && t.duration);
       main = p.name;
       count = String(p.entries.length);
@@ -3229,7 +3283,7 @@
     if (!pp.entryId && !pp.trackId && !pp.set) {
       if (S.view === "library") { const id = lib.trackToPlay(); if (id) playTrack(id); return; }
       if (S.view === "stick") { if (stickSet()) playSetlist(S.setId); return; }
-      const first = S.focus || pl().entries.find((e) => track(e.trackId).exists)?.id;
+      const first = S.focus || pl()?.entries.find((e) => track(e.trackId).exists)?.id;
       if (first) playEntry(first);
       return;
     }
@@ -3295,13 +3349,14 @@
     sortDropped(ts);
     insertTracks(ts.map((t) => t.id), target);
   }
-  function insertTracks(ids, target, name = "Dropped files") {
+  /** With no playlist to add them to, they get one of their own. */
+  function insertTracks(ids, target, name) {
     if (!ids.length) return;
     if (target && target.kind === "playlist") {
       addTracks(ids, target.id, target.index);
       toast(`Added ${plural(ids.length, "track")} to ${pl(target.id).name}.`, { label: "Undo", run: undo });
-    } else if (target && target.kind === "new") {
-      newPlaylist(name, ids);
+    } else if ((target && target.kind === "new") || !pl()) {
+      newPlaylist(name || (target && target.kind === "new" ? "Dropped files" : "New playlist"), ids);
       toast(`Made a playlist from ${plural(ids.length, "file")}.`, { label: "Undo", run: undo });
     } else {
       addTracks(ids, S.current, target ? target.index : null);
@@ -3329,7 +3384,7 @@
     const folderName = one && r.trackIds.some((id) => track(id).path !== one) ? one.split(/[\\/]/).pop() : null;
     if (r.trackIds.length) insertTracks(r.trackIds, target, folderName || undefined);
     for (const imp of r.playlists) {
-      if (target && target.kind === "list" && !r.trackIds.length && r.playlists.length === 1) insertTracks(imp.trackIds, target);
+      if (target && target.kind === "list" && pl() && !r.trackIds.length && r.playlists.length === 1) insertTracks(imp.trackIds, target);
       else {
         newPlaylist(imp.name, imp.trackIds);
         const missing = imp.trackIds.filter((id) => !track(id).exists).length;
@@ -3449,8 +3504,8 @@
     if (!el) return null;
     const side = el.closest("[data-pl]");
     if (side) return { kind: "playlist", id: side.dataset.pl };
-    if (el.closest("#side-pls") || el.closest(".side-h")) return { kind: "new" };
-    if (el.closest("#list-wrap")) return { kind: "list", index: dropIndexAt(y) };
+    if (el.closest("#side-pls") || el.closest("#sec-playlists .side-h")) return { kind: "new" };
+    if (el.closest("#list-wrap")) return pl() ? { kind: "list", index: dropIndexAt(y) } : { kind: "new" };
     return null;
   }
   function markSideTarget(id) {
@@ -3672,7 +3727,7 @@
   // ---- files dropped from the OS -------------------------------------------------------------------
   function fileHover(x, y) {
     const t = targetAt(x, y);
-    $("list-wrap").classList.toggle("file-over", !!t && t.kind === "list");
+    $("list-wrap").classList.toggle("file-over", !!t && (t.kind === "list" || (t.kind === "new" && !pl())));
     if (t && t.kind === "list") showLine(t.index);
     else hideLine();
     markSideTarget(t && t.kind === "playlist" ? t.id : null);
@@ -3967,6 +4022,7 @@
     if (REPEAT[st.repeat]) S.player.repeat = st.repeat;
     if (st.processing === "off") S.player.processing = false;
     try { setlist.load(JSON.parse(st.setlist || "null")); } catch { /* the defaults */ }
+    try { Object.assign(S.sideClosed, JSON.parse(st.sideClosed || "{}")); } catch { /* both open */ }
     for (const t of d.tracks) putTrack({ ...t });
     S.playlists = clone(d.playlists);
     S.profiles = clone(d.profiles);
@@ -3974,13 +4030,11 @@
     remember("playlist", S.playlists);
     remember("profile", S.profiles);
     remember("set", S.sets);
-    // First run: the generic profile, one empty playlist and one setlist.
+    // First run: the generic profile. Playlists and setlists are the user's to make.
     if (!S.profiles.length) S.profiles.push(clone(GENERIC));
-    if (!S.playlists.length) S.playlists.push({ id: newId("p-"), name: "Playlist 1", entries: [], norm: { on: false, target: -18, mode: "track" } });
-    if (!S.sets.length) S.sets.push({ id: newId("set-"), name: "My setlist", profileId: S.profiles[0].id, playlistIds: [S.playlists[0].id], stickId: null, label: "" });
     for (const r of d.syncs) S.syncs[r.setId] = r;
-    S.current = pl(st.currentPlaylist) ? st.currentPlaylist : S.playlists[0].id;
-    S.setId = stickSet(st.currentSet) ? st.currentSet : (setsFor(S.current)[0] || S.sets[0]).id;
+    S.current = pl(st.currentPlaylist) ? st.currentPlaylist : S.playlists[0]?.id;
+    S.setId = stickSet(st.currentSet) ? st.currentSet : (setsFor(S.current)[0] || S.sets[0])?.id;
     await refreshSticks(true);
     // The demo's sync records predate its settings: they count as current.
     for (const s of S.sets) if (S.syncs[s.id] && S.syncs[s.id].recipe == null) S.syncs[s.id].recipe = recipeOf(planSet(s));
