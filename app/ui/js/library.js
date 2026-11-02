@@ -621,7 +621,7 @@
         title: ok.length === 1 ? "Clean up the file name" : `Clean up ${plural(ok.length, "file name")}`,
         wide: true, tall: true,
         body: [
-          h("p", { text: "New names from the tags, with the same clean-up as names on a stick. Each file stays in its folder and keeps its type; playlists follow the files." }),
+          h("p", { text: "New names from the tags, cleaned up so they work on any file system. Each file stays in its folder and keeps its type; playlists follow the files." }),
           h("div", { class: "form" },
             h("span", { class: "lbl", text: "Name" }),
             h("div", { class: "opts" }, h("div", { class: "tpl-row" }, tplIn, presets), errs,

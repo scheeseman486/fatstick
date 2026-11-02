@@ -511,6 +511,10 @@ body.modal-player .player { position: relative; z-index: 60; }
 .st-sec { display: grid; gap: 8px; min-width: 0; }
 .st-sec > h3 { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .st-sec > h3 .aside { font-weight: 400; color: var(--ink-3); }
+.st-h-tools { display: flex; gap: 8px; }
+.st-sec small { color: var(--ink-3); font-size: 12px; }
+.c-title .sub-find { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.c-title .locate { flex: none; height: 16.8px; min-height: 0; padding: 0; border: 0; font-size: 12px; line-height: 16.8px; }
 .st-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
 .st-head select { font-weight: 600; font-size: 15px; height: 32px; }
 .st-status { font-size: 13px; margin: 0; color: var(--ink-2); }
@@ -954,6 +958,7 @@ html.framed .player { padding-inline: 2px; }
   display: grid; grid-template-columns: 2.2em minmax(0, 1fr) 3.8em 5.4em 5.2em; gap: 0 10px; align-items: baseline;
   padding: 6px 12px; border-top: 1px solid var(--rule); font-size: 13.5px;
 }
+.lay-file.plain { grid-template-columns: 2.2em minmax(0, 1fr) 3.8em; }
 .lay-n, .lay-at { color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .lay-name { min-width: 0; display: grid; }
 .lay-name .nm { overflow-wrap: anywhere; }

@@ -123,10 +123,9 @@
     check("the second playlist is joined into one track", S.playlists[1].join === true && A.planSet(set).folders[2].files.length === 1);
     document.querySelector(`[data-pl="${S.playlists[0].id}"]`).click();
 
-    // A second disk image, excluded through Menu > Exclude devices: saved at
-    // once, no longer offered, and the list can't be overwritten as a plain setting.
-    document.getElementById("app-menu").click();
-    (await until(() => [...document.querySelectorAll('[role="menuitem"]')].find((m) => /Exclude devices/.test(m.textContent)))).click();
+    // A second disk image, excluded from the transfer panel: saved at once, no
+    // longer offered, and the list can't be overwritten as a plain setting.
+    (await until(() => document.getElementById("ex-btn"))).click();
     const spareBox = await until(() => [...document.querySelectorAll(".ex-dev")].find((d) => /spare\.img/.test(d.textContent)), 10000);
     check("Exclude devices lists the second image", !!spareBox);
     const spareId = spareBox.querySelector("input").dataset.id;
@@ -277,6 +276,11 @@
     document.getElementById("repeat").click();
     document.getElementById("repeat").click();
     check("repeat is set to the whole playlist", S.player.repeat === "all");
+    // The processing switch off, to see that kept too.
+    const procOn = document.getElementById("proc-on");
+    check("the processing is on at first", procOn.checked && S.player.processing);
+    procOn.click();
+    check("it can be turned off", !S.player.processing);
   } catch (e) {
     check("no exception", false, String((e && e.stack) || e));
   }

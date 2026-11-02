@@ -964,7 +964,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.locator('[data-pl="p-road"]').click();
   }
 
-  // 32. Devices left out: Menu, "Exclude devices…"; ticked ones aren't shown
+  // 32. Devices left out: "Exclude…" in the transfer panel; ticked ones aren't shown
   // or offered, each change is saved as it's made, and the stick panel says
   // nothing about them.
   {
@@ -972,20 +972,18 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     const devs = () => p.locator('#stick .dev').count();
     const n0 = await devs();
     const box = () => p.locator('.ex-dev', { hasText: 'Generic Flash Disk' }).locator('input');
-    await p.locator('#app-menu').click();
-    await p.getByRole('menuitem', { name: 'Exclude devices…' }).click();
+    await p.locator('#ex-btn').click();
     await p.locator('.ex-dev').first().waitFor();
-    check('"Exclude devices…" lists what is plugged in', /^Exclude devices$/.test(await p.locator('#modal-title').textContent()) && (await p.locator('.ex-dev').count()) === n0, `${await p.locator('.ex-dev').count()} of ${n0}`);
+    check('"Exclude…" lists what is plugged in', /^Exclude devices$/.test(await p.locator('#modal-title').textContent()) && (await p.locator('.ex-dev').count()) === n0, `${await p.locator('.ex-dev').count()} of ${n0}`);
     await box().check();
     await p.locator('.ex-status', { hasText: 'Saved' }).waitFor();
     check('ticking one saves it and takes it out of the stick list at once', (await devs()) === n0 - 1 && !(await p.locator('#stick .dev', { hasText: 'Generic Flash Disk' }).count())
       && /Saved: Generic Flash Disk is excluded/.test(await p.locator('.ex-status').textContent()));
     await p.getByRole('button', { name: 'Done' }).click();
-    check('the stick panel says nothing about excluded devices', !/exclud/i.test(await p.locator('#stick').textContent()));
+    check('the stick panel says nothing about excluded devices', !/exclud/i.test(await p.locator('#stick').evaluate((el) => { const c = el.cloneNode(true); c.querySelector('#ex-btn')?.remove(); return c.textContent; })));
     await p.evaluate(() => Fatstick.app.refreshSticks(true));
     check('looking again leaves it out', (await devs()) === n0 - 1);
-    await p.locator('#app-menu').click();
-    await p.getByRole('menuitem', { name: 'Exclude devices…' }).click();
+    await p.locator('#ex-btn').click();
     await p.locator('.ex-dev').first().waitFor();
     check('and it stays ticked', await box().isChecked());
     // Space plays and pauses over the dialog, even on a box; Enter ticks it.
@@ -1005,8 +1003,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   // 32b. The player bar works under every dialog, undimmed, and Space plays
   // and pauses with any dialog open (on a button too), but types in a text box.
   {
-    await p.locator('#app-menu').click();
-    await p.getByRole('menuitem', { name: 'Exclude devices…' }).click();
+    await p.locator('#ex-btn').click();
     const bar = await p.evaluate(() => {
       const b = document.querySelector('#player .pbtn.play');
       const r = b.getBoundingClientRect();
@@ -1271,14 +1268,162 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('a dialog hears the track live, on its own', now.live && (await calls()).at(-1) === 'play', JSON.stringify(await calls()));
     await p.keyboard.press('Escape');
     await p.evaluate(() => Fatstick.app.stopPlayback());
-    // "As on the stick" asks for the prepared file, and gets the volume.
-    await p.evaluate(() => { Fatstick.app.S.player.asOnStick = true; });
+    // "Hear the prepared files", in the transfer panel, asks for the prepared file.
+    await p.locator('#hear-prepared').check();
     await clear();
     await p.evaluate((id) => Fatstick.app.playEntry(id), ids[0]);
     await p.waitForTimeout(50);
-    const aos = await p.evaluate(() => window.__calls.find((c) => c.k === 'playParts').args);
-    check('"as on the stick" asks for the prepared file, with the volume', !!aos.recipe && typeof aos.parts[0].gainDb === 'number', JSON.stringify(aos.recipe));
-    await p.evaluate(() => { Fatstick.app.S.player.asOnStick = false; Fatstick.app.stopPlayback(); });
+    const heardPrepared = await p.evaluate(() => window.__calls.find((c) => c.k === 'playParts').args);
+    check('"Hear the prepared files" asks for the prepared file', !!heardPrepared.recipe && typeof heardPrepared.parts[0].gainDb === 'number', JSON.stringify(heardPrepared.recipe));
+    await p.locator('#hear-prepared').uncheck();
+    await p.evaluate(() => Fatstick.app.stopPlayback());
+    await p.reload();
+    await p.waitForTimeout(600);
+    await p.evaluate(() => Fatstick.app.setProcessing('fat'));
+    await p.waitForTimeout(260);
+  }
+
+  // 32d. "Enable Play/Setlist Processing": on, what's been set is heard; off, the files.
+  {
+    const cb = p.locator('#proc-on');
+    const sentNow = () => p.evaluate(() => { const P = Fatstick.app.S.player; return { args: P.sent.get(P.token).args, dur: P.dur, pos: P.pos, entry: P.entryId, set: P.set && P.set.file, count: P.set && P.set.count, processing: P.processing }; });
+    check('the player bar has the switch, on', /Enable Play\/Setlist Processing/.test(await p.locator('#player .aos').textContent()) && await cb.isChecked());
+    check('and "As on the stick" is gone', !/As on the stick/.test(await p.locator('#player').textContent()));
+    // A playlist in no setlist, with even volume on, a cut, a key and a fade.
+    const made = await p.evaluate(() => {
+      const A = Fatstick.app;
+      const S = A.S;
+      const q = S.playlists[S.playlists.length - 1];
+      for (const s of S.sets) s.playlistIds = s.playlistIds.filter((x) => x !== q.id);
+      q.norm.on = true;
+      const e = q.entries.find((x) => A.track(x.trackId).exists && A.track(x.trackId).lufs != null) || q.entries[0];
+      Object.assign(e, { cutStart: 3, padEnd: 2, pitch: 2, keepFormants: true, fadeOut: 5 });
+      return { id: q.id, entry: e.id, dur: A.track(e.trackId).duration, lufs: A.track(e.trackId).lufs };
+    });
+    await p.locator(`[data-pl="${made.id}"]`).click();
+    await p.evaluate(({ entry, id }) => Fatstick.app.playEntry(entry, id), made);
+    let now = await sentNow();
+    const part = now.args.parts[0];
+    check('on: a track plays with its cut, silence, key and fade', part.cutStart === 3 && part.padEnd === 2 && part.pitch === 2 && part.fadeOut === 5 && Math.abs(now.dur - (made.dur - 3 + 2)) < 0.01, JSON.stringify(part));
+    if (made.lufs != null) check('with its even volume, in a playlist that\'s in no setlist', part.gainDb !== 0 || made.lufs === -18, JSON.stringify(part));
+    check('and asks for no prepared file', !now.args.recipe);
+    // Off, while it plays: the file as it is, from the same place in the track.
+    await p.evaluate(() => Fatstick.api.seek(10));
+    await p.waitForTimeout(40);
+    await p.evaluate(() => { Fatstick.app.S.player.pos = 10; });
+    await cb.uncheck();
+    await p.waitForTimeout(40);
+    now = await sentNow();
+    check('off: the file as it is, nothing else', JSON.stringify(Object.keys(now.args.parts[0])) === JSON.stringify(['trackId']) && Math.abs(now.dur - made.dur) < 0.01, JSON.stringify(now.args.parts[0]));
+    check('going on from the same place in the track', Math.abs(now.pos - 13) < 0.5, String(now.pos));
+    check('the bar says so', /The files as they are/.test(await p.locator('#player .aos small').textContent()));
+    check('the transfer\'s "Hear the prepared files" waits for it', await p.evaluate(() => { const b = document.getElementById('hear-prepared'); return !b || b.disabled; }));
+    await p.evaluate(() => Fatstick.app.stopPlayback());
+    // A setlist, off: its tracks in order, no silence, a joined playlist as plain tracks.
+    const setup = await p.evaluate(() => {
+      const A = Fatstick.app;
+      const S = A.S;
+      const [a, b] = [S.playlists[0], S.playlists[1]];
+      b.join = true;
+      const set = S.sets.find((x) => x.id === 'set-car');
+      set.gaps = [{ id: 'gap-off', seconds: 9 }];
+      set.playlistIds = [a.id, 'gap-off', b.id];
+      return { b: b.id, n: b.entries.filter((e) => A.track(e.trackId).exists).length };
+    });
+    await p.locator('[data-set="set-car"]').click();
+    await p.getByRole('button', { name: 'Expand all' }).click();
+    const offFiles = await p.evaluate(() => Fatstick.app.setFilesOf(Fatstick.app.stickSet('set-car')).map((x) => x.it.entry.id));
+    check('off: a setlist has no silence to play', !offFiles.includes('gap-off:silence') && offFiles.at(-1) === `${setup.b}:joined`);
+    await p.evaluate((i) => Fatstick.app.playSetlist('set-car', i), offFiles.length - 1);
+    now = await sentNow();
+    check('off: a joined playlist is its tracks as they are', now.args.parts.length === setup.n && now.args.parts.every((x) => JSON.stringify(Object.keys(x)) === '["trackId"]'), String(now.args.parts.length));
+    await p.locator('#stickview [data-file="gap-off:silence"] .lay-fname').dblclick();
+    await p.waitForTimeout(40);
+    check('double-clicking a silence plays from what follows it', (await sentNow()).set === `${setup.b}:joined`);
+    await cb.check();
+    await p.waitForTimeout(40);
+    now = await sentNow();
+    check('on again: its tracks with their changes, and the silence back', now.processing && (await p.evaluate(() => Fatstick.app.setFilesOf(Fatstick.app.stickSet('set-car')).some((x) => x.it.gap))));
+    await p.evaluate(() => Fatstick.app.stopPlayback());
+    await p.reload();
+    await p.waitForTimeout(600);
+  }
+
+  // 32e. What's only about a stick shows while the transfer is open.
+  {
+    await p.waitForTimeout(100);
+    const car = p.locator('[data-set="set-car"]');
+    const road = p.locator('[data-pl="p-road"]');
+    const open = async () => { await car.click(); await p.locator('#proc-fat').click(); await p.waitForTimeout(260); };
+    const close = async () => { await p.locator('#proc-close').click(); await p.locator('#stick').waitFor({ state: 'hidden' }); };
+    check('transfer closed: a playlist has no "On the stick" column', !/On the stick/.test(await p.locator('#list-cols').textContent()) && (await p.locator('#list .c-stick').count()) === 0);
+    await p.getByRole('button', { name: 'Columns' }).click();
+    check('and doesn\'t offer it', !/on the stick/i.test(await p.locator('#menu').textContent()));
+    await p.keyboard.press('Escape');
+    check('a missing file can still be located', (await p.locator('#list .c-title .locate').count()) >= 1);
+    check('on the line that says it is missing, inside its row', await p.locator('#list .row.missing').first().evaluate((r) => {
+      const l = r.querySelector('.locate').getBoundingClientRect(), s = r.querySelector('.sub').getBoundingClientRect(), o = r.getBoundingClientRect();
+      // Two lines are a little taller than a row, whatever else is in it.
+      return Math.abs(l.top + l.height / 2 - (s.top + s.height / 2)) < 2 && l.bottom <= s.bottom + 1;
+    }));
+    check('the display says nothing of syncing', (await p.locator('#disp-sub').textContent()) === '');
+    check('a setlist on the left says its playlists and length, no profile', /^2 playlists, \d/.test(await p.locator('[data-set="set-car"] .mt').textContent()), await p.locator('[data-set="set-car"] .mt').textContent());
+    check('and nothing about not being synced', (await p.locator('[data-set="set-gym"] .flag').count()) === 0);
+    check('a stick plugged in is still marked', /plugged in/.test(await p.locator('[data-set="set-car"] .flag').textContent()));
+    await p.locator('#app-menu').click();
+    check('the menu has nothing about devices', !/Exclude/.test(await p.locator('#menu').textContent()));
+    await p.keyboard.press('Escape');
+    await car.click();
+    await p.waitForTimeout(50);
+    check('a setlist\'s view lists playlists and tracks', (await p.locator('#stickview .lay-folder .lay-fname').first().textContent()) === 'Road Trip');
+    await p.getByRole('button', { name: 'Expand all' }).click();
+    const firstRow = await p.locator('#stickview .lay-file .nm').first().textContent();
+    check('by title, not file name', !/\.mp3$/.test(firstRow), firstRow);
+    check('with no file sizes or how they\'re made', (await p.locator('#stickview .lay-how, #stickview .lay-size').count()) === 0);
+    check('no sync status, profile or stick', (await p.locator('#stickview .pill, #stickview .lay-sub, #stickview .lay-status').count()) === 0);
+    check('its summary counts playlists and tracks', /^2 playlists, \d+ tracks, /.test(await p.locator('#stickview .lay-sum').textContent()), await p.locator('#stickview .lay-sum').textContent());
+    check('the display counts tracks', /TRK/.test(await p.locator('#disp-unit').textContent()));
+    await p.locator('#proc-fat').click();
+    await p.waitForTimeout(260);
+    check('transfer open: its folders', /^01 Road Trip\//.test(await p.locator('#stickview .lay-folder .lay-fname').first().textContent()));
+    check('files, what they are and how big', /\.mp3$/.test(await p.locator('#stickview .lay-file .nm').first().textContent()) && (await p.locator('#stickview .lay-how').count()) > 0 && (await p.locator('#stickview .lay-size').count()) > 0);
+    check('how it stands, with what profile and stick', (await p.locator('#stickview .pill').count()) === 1 && /Generic profile/.test(await p.locator('#stickview .lay-sub').textContent()));
+    check('the display counts folders and says how it stands', /DIR/.test(await p.locator('#disp-unit').textContent()) && /out of date|up to date|synced/.test(await p.locator('#disp-sub').textContent()));
+    await road.click();
+    check('a playlist has its "On the stick" column', /On the stick/.test(await p.locator('#list-cols').textContent()));
+    check('a setlist never synced says so', /not synced/.test(await p.locator('[data-set="set-gym"] .flag').textContent()));
+    await p.getByRole('button', { name: 'Columns' }).click();
+    check('and it\'s in the Columns menu', /On the stick/.test(await p.locator('#menu').textContent()));
+    await p.keyboard.press('Escape');
+    await p.locator('#ex-btn').click();
+    check('devices are excluded from here', /^Exclude devices$/.test(await p.locator('#modal-title').textContent()));
+    await p.keyboard.press('Escape');
+    // Drawn again as the transfer closes, a scrolled setlist stays where it was.
+    await car.click();
+    const kept = await p.evaluate(() => { const x = document.getElementById('sv-scroll'); x.scrollTop = 200; return x.scrollTop; });
+    await p.locator('#proc-fat').focus();
+    await p.keyboard.press('Enter');
+    await p.waitForTimeout(260);
+    check('it stays scrolled where it was, the focus on the button', Math.abs((await p.evaluate(() => document.getElementById('sv-scroll').scrollTop)) - kept) < 2 && kept > 0 && await p.evaluate(() => document.activeElement.id === 'proc-fat'));
+    // Nothing is encoded for a setlist that isn't going on a stick.
+    const jobs = await p.evaluate(async () => {
+      const A = Fatstick.app;
+      const api = Fatstick.api;
+      window.__prep = [];
+      const real = api.prepareQueue;
+      api.prepareQueue = (j) => { window.__prep.push(j.length); return real.call(api, j); };
+      for (const s of A.S.sets) s.stickId = null;
+      A.S.syncs = {};
+      A.S.cache.clear();
+      A.scheduleWork();
+      await new Promise((r) => setTimeout(r, 400));
+      return window.__prep.slice();
+    });
+    check('no encoding in the background for a setlist with no stick', jobs.length === 0 || jobs.at(-1) === 0, JSON.stringify(jobs));
+    await open();
+    await p.waitForTimeout(400);
+    const after = await p.evaluate(() => window.__prep.slice());
+    check('with the transfer open on it, its files are prepared', after.at(-1) > 0, JSON.stringify(after));
     await p.reload();
     await p.waitForTimeout(600);
     await p.evaluate(() => Fatstick.app.setProcessing('fat'));

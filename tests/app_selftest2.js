@@ -78,6 +78,9 @@
     const spare = ex.devices.find((d) => /spare\.img/.test(d.name));
     check("the excluded image is still excluded after a restart", !!spare && spare.excluded && !S.sticks.some((d) => d.id === spare.id), JSON.stringify(ex.devices.map((d) => [d.name, d.excluded])));
     check("so is the repeat mode", S.player.repeat === "all", S.player.repeat);
+    check("and the processing switch", !S.player.processing && !document.getElementById("proc-on").checked);
+    document.getElementById("proc-on").click();
+    check("which turns back on", S.player.processing);
     document.getElementById("repeat").click();
 
     // The stick remembers what it holds: the note phase 1's sync left on it.

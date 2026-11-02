@@ -54,8 +54,7 @@ GPL version 3 or later.
   leaving the field (Esc puts a field back first); a label as soon as it's
   added or taken off. The editor says what it just saved, with Undo beside
   it, and Ctrl+Z in the library view undoes tag edits one at a time. Nothing asks
-  first, and clicking elsewhere saves what was typed. "Clean up file names…" renames files from their tags with
-  the same template language as names on a stick; files stay in their
+  first, and clicking elsewhere saves what was typed. "Clean up file names…" renames files from their tags; files stay in their
   folders and keep their type. Nothing outside the music folder is touched.
 - **Search.** The search button at the bottom left (or Ctrl+F) widens the
   sidebar into a search panel. Type a title, an artist, an album, a genre,
@@ -118,7 +117,12 @@ GPL version 3 or later.
   starts, sits beside any view once open, and stays open as you move between
   them until you close it.
 - **FAT USB Stick transfer.** Where music leaves the app: open a setlist, and its
-  "Transfer this setlist" section has the button. The panel shows the setlist, what is on the stick now, what the next sync would write,
+  "Transfer this setlist" section has the button. What's only about a stick shows
+  while it's open: the setlist's view becomes its folders and files, how each is
+  made and how big; the playlist's "On the stick" column appears; the sidebar and
+  display say whether a setlist is up to date. Nothing is encoded or read in full
+  for a setlist until it goes on a stick (it has a stick picked or has been
+  synced, or this panel is open on it). The panel shows the setlist, what is on the stick now, what the next sync would write,
   whether it fits, and the sync itself. A sync carries on with the panel
   closed: the display counts it up and the button shows it's busy; if it stops,
   a message offers to show why. A stick you plug in is marked in the sidebar,
@@ -127,7 +131,7 @@ GPL version 3 or later.
   particular player, burning a CD.
 
   ![A setlist open, with the FAT USB Stick transfer panel beside it](docs/transfer.png)
-- **Devices left out.** "Exclude devices…" in the menu lists what's plugged
+- **Devices left out.** "Exclude…" in the transfer panel lists what's plugged
   in; a ticked device (a card reader that's always there, a backup drive)
   isn't shown, isn't read (not even for the note a sync leaves) and can't be
   copied to: the app refuses a sync aimed at it. Each tick is saved as it's
@@ -157,7 +161,7 @@ GPL version 3 or later.
   silence to add beside it, and a button to hear it, silence included. The
   picture switches between 0:30 close up and 1:30 wide, and widens by itself
   when a cut goes past half a minute; a longer cut can be typed in. Only the
-  stick's copy changes, never your file.
+  way it plays and goes on a stick changes, never your file.
 - **A track's key.** Play a track higher or lower without changing its
   speed or length: select it and press K, or "Key…" in its right-click
   menu. The slider moves in semitones (named as intervals: "a fourth up"),
@@ -191,8 +195,8 @@ GPL version 3 or later.
   the bottom of the window plays, and that player stays usable while they're
   open. Pause it, or drag its position anywhere in the track: what you hear
   keeps the cuts, silences, key and fades you're trying. Cancel puts back
-  what was there; Apply keeps it. Outside the dialogs the player plays an
-  entry as the stick will have it: the silence added before it (when it
+  what was there; Apply keeps it. Outside the dialogs, with the processing on,
+  the player plays an entry with the silence added before it (when it
   plays from its start), its cut start to its cut end, in its key and with
   its fades, then the silence added after it.
 - **Silence between playlists.** A setlist can hold stretches of
@@ -243,8 +247,7 @@ GPL version 3 or later.
   joined one) to start there; the row playing is marked and followed. Next and
   previous go by file, as on a player, and the repeat button repeats a file or
   the whole setlist. Nothing has to be prepared first: each file is made as it
-  plays, by the same code a sync uses. "As on the stick" plays the prepared file
-  where there is one. An edit counts from the next file.
+  plays, by the same code a sync uses. An edit counts from the next file.
 
   ![A setlist playing, with the file playing marked](docs/setlist.png)
 
@@ -258,8 +261,11 @@ GPL version 3 or later.
   that from the music. Trying something in a dialog plays the track on its own, so
   changes can be heard as it plays. On a stick it's up to the player: cheap ones
   pause between files, and "One track" is the way to have none.
-- **The player.** Listen to a playlist as it is, or "as on the stick", with
-  the gain and bitrate the sync will use. The repeat button (or R) steps
+- **The player.** "Enable Play/Setlist Processing" in the player bar is on unless
+  you turn it off, and is remembered: playlists and setlists play with their cuts,
+  silences, fades, key and even volume. Off, they play the files as they are, with
+  no silences between a setlist's playlists. "Hear the prepared files" in the
+  transfer panel plays the encodes a sync will write, where they're ready. The repeat button (or R) steps
   through play & stop (to the end of the playlist), repeat one song and
   repeat playlist; the display shows RPT or RPT1.
 

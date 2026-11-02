@@ -1,6 +1,7 @@
-// A setlist's view in the main window (click a setlist on the left): every
-// folder and file in the order a player reads them, folders and joined
-// tracks collapsible. It's for organizing the setlist's playlists: drag them
+// A setlist's view in the main window (click a setlist on the left): its
+// playlists and tracks in order, playlists and joined tracks collapsible. With
+// the transfer open, the same list as it goes on a stick: folders and files,
+// how each is made and how big. It's for organizing the setlist's playlists: drag them
 // in from the left (onto the view, or onto a setlist in the sidebar), move
 // them by their handles, put silence between them, take them out. What's
 // in a playlist is edited in the playlist. It plays too, from its Play button
@@ -22,21 +23,25 @@
     }
     const remember = () => { try { if (shownSet) localStorage.setItem(storeKey(shownSet), JSON.stringify([...closed])); } catch { /* not kept */ } };
 
-    /** One file: its place, name on the stick, what it is, length, how it's made, size. */
+    /** The transfer is open: this is about what goes on the stick. */
+    const onStick = () => S.processing === "fat";
+    /** One track: its place, title and artist, what's done to it, length. On a
+     * stick: its file's name, what it is, length, how it's made, size. */
     function fileRow(f, folderKey) {
+      const stick = onStick();
       const subs = [];
-      const who = [f.title, f.artist].filter(Boolean).join(", ");
+      const who = stick ? [f.title, f.artist].filter(Boolean).join(", ") : f.kind === "joined" ? "" : f.artist;
       if (who && f.kind !== "silence") subs.push(who);
       if (f.gain) subs.push(`Gain ${f.gain}`);
       if (f.edges) subs.push(f.edges);
-      for (const n of f.notes || []) subs.push(n);
+      if (stick) for (const n of f.notes || []) subs.push(n);
       for (let i = 0; i < subs.length; i++) subs[i] = subs[i].charAt(0).toUpperCase() + subs[i].slice(1);
-      const row = h("li", { class: "lay-file", dataset: { file: f.id } },
+      const row = h("li", { class: `lay-file${stick ? "" : " plain"}`, dataset: { file: f.id } },
         h("span", { class: "lay-n", text: String(f.n).padStart(2, "0") }),
-        h("span", { class: "lay-name" }, h("span", { class: "nm", text: f.name }), subs.length ? h("span", { class: "sub", text: subs.join(". ") }) : null),
+        h("span", { class: "lay-name" }, h("span", { class: "nm", text: stick ? f.name : f.title }), subs.length ? h("span", { class: "sub", text: subs.join(". ") }) : null),
         h("span", { class: "lay-len", text: clock(f.secs) }),
-        h("span", { class: `lay-how${f.how.startsWith("Copy") ? "" : " enc"}`, text: f.how }),
-        h("span", { class: "lay-size", text: bytes(f.bytes) }));
+        stick ? h("span", { class: `lay-how${f.how.startsWith("Copy") ? "" : " enc"}`, text: f.how }) : null,
+        stick ? h("span", { class: "lay-size", text: bytes(f.bytes) }) : null);
       if (!f.parts) return row;
       // A joined track: the tracks inside, with where each starts.
       const key = `${folderKey}/${f.name}`;
@@ -127,13 +132,18 @@
       const files = d.folders.reduce((a, f) => a + f.files.length, 0);
       const secs = d.folders.reduce((a, f) => a + f.secs, 0);
       const total = d.folders.reduce((a, f) => a + f.bytes, 0);
+      const stick = onStick();
       const where = d.stick ? `Syncs to ${d.stick.name}, ${bytes(d.stick.size)}.` : "No USB stick picked.";
       const space = d.space
         ? `. ${bytes(d.space.used)} of ${bytes(d.space.data)} used${d.space.fits ? "" : ", more than the stick holds"}.`
         : `, about ${bytes(total)}.`;
+      const real = d.folders.filter((f) => f.kind !== "silence");
+      const tracks = real.reduce((a, f) => a + f.tracks, 0);
       const all = (open) => () => {
         for (const el of root.querySelectorAll("details")) el.open = open;
       };
+      const scrolled = root.querySelector("#sv-scroll");
+      const scrollTop = scrolled ? scrolled.scrollTop : 0;
       const list = h("div", { class: "lay-folders", id: "sv-list", role: "list", "aria-label": `What's in ${s.name}, in order` });
       items.forEach((id, i) => {
         if (!d.single && i > 0) list.append(inserter(s, i));
@@ -145,11 +155,11 @@
         h("header", { class: "sv-head" },
           h("div", { class: "lay-title" },
             h("h1", { text: s.name }),
-            h("span", { class: `pill ${d.status.kind === "ok" ? "ok" : d.status.kind === "out" ? "out" : ""}`, text: d.status.kind === "ok" ? "Up to date" : d.status.kind === "out" ? "Out of date" : "New" })),
-          h("p", { class: "lay-sub", text: `${d.profile} profile. Label ${d.label || "none"}. ${where}` }),
-          h("p", { class: `lay-status ${d.status.kind}`, text: d.status.text }),
+            stick ? h("span", { class: `pill ${d.status.kind === "ok" ? "ok" : d.status.kind === "out" ? "out" : ""}`, text: d.status.kind === "ok" ? "Up to date" : d.status.kind === "out" ? "Out of date" : "New" }) : null),
+          stick ? h("p", { class: "lay-sub", text: `${d.profile} profile. Label ${d.label || "none"}. ${where}` }) : null,
+          stick ? h("p", { class: `lay-status ${d.status.kind}`, text: d.status.text }) : null,
           h("div", { class: "lay-bar" },
-            h("p", { class: `lay-sum${d.space && !d.space.fits ? " bad" : ""}`, text: `${plural(d.folders.length, d.single ? "playlist" : "folder")}, ${plural(files, "file")}, ${length(secs)}${space}` }),
+            h("p", { class: `lay-sum${stick && d.space && !d.space.fits ? " bad" : ""}`, text: stick ? `${plural(d.folders.length, d.single ? "playlist" : "folder")}, ${plural(files, "file")}, ${length(secs)}${space}` : `${plural(real.length, "playlist")}, ${plural(tracks, "track")}, ${length(secs)}.` }),
             h("span", { class: "tools" },
               h("button", { type: "button", class: "btn small", id: "sv-play", disabled: !files, title: "Play this setlist from beginning to end, as the stick will have it. Double-click a file to start there.", onclick: () => core.toggleSetlist(s.id) }, icon("play"), "Play"),
               d.single ? null : h("button", { type: "button", class: "btn small", id: "sv-silence", title: "Silence at the end; drag it where it goes", onclick: () => addSilence(s, s.playlistIds.length) }, icon("plus"), "Silence"),
@@ -168,9 +178,11 @@
           items.length ? list : h("div", { class: "sv-empty", id: "sv-list" },
             h("p", { text: "Nothing in this setlist yet. Drag a playlist here from the left." }),
             h("div", { class: "drop-line sv-drop", id: "sv-drop", hidden: true })),
-          d.ignored && d.ignored.length ? h("p", { class: "st-note warn", text: `Not written, as this profile puts one playlist on a stick: ${d.ignored.join(", ")}.` }) : null,
-          h("p", { class: "lay-foot", text: "The order here is the order a player reads the stick in: folders, then files, top to bottom. Drag a playlist in from the left, or by its handle to move it." })),
+          d.ignored && d.ignored.length ? h("p", { class: "st-note warn", text: `${stick ? "Not written" : "Left out"}, as this setlist's player profile puts one playlist on a stick: ${d.ignored.join(", ")}.` }) : null,
+          h("p", { class: "lay-foot", text: stick ? "The order here is the order a player reads the stick in: folders, then files, top to bottom. Drag a playlist in from the left, or by its handle to move it." : "Double-click a track to play from there. Drag a playlist in from the left, or by its handle to move it." })),
       );
+      // Drawn again, it stays where it was scrolled to.
+      if (scrollTop) root.querySelector("#sv-scroll").scrollTop = scrollTop;
       core.renderProcessButtons();
       markPlaying();
     }
@@ -215,7 +227,8 @@
           toast(gap ? `Took the silence out of ${s.name}.` : `Took ${what} out of ${s.name}. The playlist itself is still there.`, { label: "Undo", run: core.undo });
         },
       }, icon("close"));
-      const name = f ? (d.single ? "Top level of the stick" : `${f.folder}/`) : gap ? "Silence" : p.name;
+      const stick = onStick();
+      const name = !f ? (gap ? "Silence" : p.name) : !stick ? (gap ? "Silence" : f.playlist) : d.single ? "Top level of the stick" : `${f.folder}/`;
 
       // Silence, or a playlist this profile doesn't write: a line, nothing inside.
       if (gap || !f) {
@@ -228,24 +241,26 @@
             edit(`Silence of ${v} s`, () => { gapOf(s, id).seconds = v; });
           });
           secs.addEventListener("keydown", (ev) => { if (ev.key === "Enter") secs.blur(); });
-          meta = h("span", { class: "lay-fmeta gap-meta" }, secs, h("span", { text: `s of silence${f ? `, ${bytes(f.bytes)}` : ""}` }));
-        } else meta = h("span", { class: "lay-fmeta", text: "Not written: this profile puts one playlist on a stick" });
+          meta = h("span", { class: "lay-fmeta gap-meta" }, secs, h("span", { text: `s of silence${f && stick ? `, ${bytes(f.bytes)}` : ""}` }));
+        } else meta = h("span", { class: "lay-fmeta", text: `${stick ? "Not written" : "Left out"}: this setlist's player profile puts one playlist on a stick` });
         return h("div", { class: `lay-folder lay-line k-${gap ? "silence" : "off"}`, role: "listitem", dataset: { item: id, ...(f ? { file: f.files[0].id } : {}) } },
           h("div", { class: "lay-sumline" }, grip, h("span", { class: "lay-fname", text: name }), meta, off));
       }
       const key = id; // the playlist, whatever its folder's number
-      const kindText = f.kind === "joined"
-        ? `${plural(f.tracks, "track")} joined into one file, ${length(f.secs)}, ${bytes(f.bytes)}`
-        : `${plural(f.files.length, "file")}, ${length(f.secs)}, ${bytes(f.bytes)}`;
+      const kindText = !stick
+        ? `${plural(f.tracks, "track")}${f.kind === "joined" ? " as one" : ""}, ${length(f.secs)}`
+        : f.kind === "joined"
+          ? `${plural(f.tracks, "track")} joined into one file, ${length(f.secs)}, ${bytes(f.bytes)}`
+          : `${plural(f.files.length, "file")}, ${length(f.secs)}, ${bytes(f.bytes)}`;
       const det = h("details", { class: `lay-folder k-${f.kind}`, open: !closed.has(key) || null, role: "listitem", dataset: { item: id, folder: key } },
         h("summary", null,
           grip,
           h("span", { class: "lay-fname", text: name }),
-          !(f.folder || "").includes(f.playlist) ? h("span", { class: "lay-pl", text: f.playlist }) : null,
+          stick && !(f.folder || "").includes(f.playlist) ? h("span", { class: "lay-pl", text: f.playlist }) : null,
           h("span", { class: "lay-fmeta", text: kindText }),
           off),
         h("ol", { class: "lay-files" }, f.files.map((x) => fileRow(x, key))),
-        f.skipped.length ? h("p", { class: "st-note warn lay-skip", text: `Not on the stick: ${f.skipped.join("; ")}.` }) : null);
+        f.skipped.length ? h("p", { class: "st-note warn lay-skip", text: `${stick ? "Not on the stick" : "Left out"}: ${f.skipped.join("; ")}.` }) : null);
       det.addEventListener("toggle", () => { if (det.open) closed.delete(key); else closed.add(key); remember(); });
       return det;
     }
