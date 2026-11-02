@@ -1721,16 +1721,47 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.keyboard.press('Control+z');
     await p.waitForTimeout(60);
     check('and undoing those leaves things as they were', (await p.locator('[data-pl]').count()) === plsN && (await p.locator('[data-set]').count()) === setsN);
-    // A song dropped on a folded list's heading makes a playlist, and shows it.
+    // A track from the library dropped on a folded list's heading makes a playlist, and shows it.
     await p.locator('#fold-playlists').click();
-    await p.keyboard.press('Control+f');
-    await p.locator('#srch-in').fill('Everywhere');
-    await p.locator('.srch-res .sr').first().waitFor();
-    await p.waitForTimeout(250);
-    await p.locator('.srch-close').click();
-    await p.waitForTimeout(250);
-    check('its list is folded still', (await open('playlists')) === 'false');
-    await p.locator('#fold-playlists').click();
+    await p.locator('#lib-btn').click();
+    await p.waitForTimeout(200);
+    {
+      await p.locator('.lr').first().scrollIntoViewIfNeeded();
+      const from = await p.locator('.lr').first().boundingBox();
+      const to = await p.locator('#fold-playlists').boundingBox();
+      await p.mouse.move(from.x + 40, from.y + 10);
+      await p.mouse.down();
+      await p.mouse.move(from.x + 60, from.y + 30, { steps: 3 });
+      await p.mouse.move(to.x + 30, to.y + to.height / 2, { steps: 4 });
+      await p.waitForTimeout(60);
+      check('a folded list\'s heading takes a drag', await p.locator('#side').evaluate((x) => x.classList.contains('drop-new')));
+      await p.mouse.up();
+    }
+    await p.waitForTimeout(100);
+    check('a track dropped on it makes a playlist, and opens the list', (await open('playlists')) === 'true' && (await p.locator('[data-pl]').count()) === plsN + 1);
+    await p.evaluate(() => Fatstick.app.setView('playlist'));
+    await p.waitForTimeout(60);
+    await p.keyboard.press('Control+z');
+    await p.waitForTimeout(80);
+    check('and undoing that takes it away', (await p.locator('[data-pl]').count()) === plsN);
+    // The Setlists heading doesn't: that was never about playlists.
+    await p.locator('#lib-btn').click();
+    await p.waitForTimeout(200);
+    {
+      await p.locator('.lr').first().scrollIntoViewIfNeeded();
+      const from = await p.locator('.lr').first().boundingBox();
+      const to = await p.locator('#fold-setlists').boundingBox();
+      await p.mouse.move(from.x + 40, from.y + 10);
+      await p.mouse.down();
+      await p.mouse.move(from.x + 60, from.y + 30, { steps: 3 });
+      await p.mouse.move(to.x + 30, to.y + to.height / 2, { steps: 4 });
+      await p.waitForTimeout(60);
+      await p.mouse.up();
+    }
+    await p.waitForTimeout(100);
+    check('a track dropped on the Setlists heading makes nothing', (await p.locator('[data-pl]').count()) === plsN);
+    await p.evaluate(() => Fatstick.app.setView('playlist'));
+    await p.waitForTimeout(60);
 
     // Removing the last playlist.
     const removeAll = async (row, label) => {
@@ -1787,6 +1818,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
       await p.mouse.down();
       await p.mouse.move(from.x + 60, from.y + 30, { steps: 3 });
       await p.mouse.move(to.x + to.width / 2, to.y + 200, { steps: 4 });
+      await p.waitForTimeout(60);
       await p.mouse.up();
     }
     await p.waitForTimeout(100);
