@@ -65,7 +65,7 @@
       $("#fold-setlists").click();
       check("the list opens again, saying it's empty", /No setlists/.test($("#side-sets").textContent));
       $('#sec-setlists [aria-label="New setlist"]').click();
-      const input = await until(() => $("#side .input"), 3000);
+      const input = await until(() => $("#side ul .input"), 3000);
       check("a setlist can be made with no playlist to put in it", !!input && S.sets.length === 1 && S.sets[0].playlistIds.length === 0);
       input.blur();
     }

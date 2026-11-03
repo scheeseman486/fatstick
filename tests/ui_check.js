@@ -279,6 +279,8 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
   // 12. Real files dropped onto the list.
   const files = ['tone.mp3', 'fixture.flac'].map(n => ({ n, b64: fs.readFileSync(path.join(work, n)).toString('base64') }));
   const before = (await titles()).length;
+  // Back from the setlist's view, the list is drawn again once it has a width.
+  await p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   const box = await row(1).boundingBox();
   await p.evaluate(async ({ files, x, y }) => {
     const dt = new DataTransfer();
@@ -513,7 +515,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.screenshot({ path: `${out}/row-tags.png` });
 
     // 20. The search panel: exact matches, a divider, close ones; drag into the list.
-    await p.locator('#srch-btn').click();
+    await p.locator('#side-srch').click();
     await p.waitForTimeout(350);
     check('the search button widens the sidebar into the search panel', await p.locator('#app').evaluate((a) => a.classList.contains('searching')) && (await p.locator('#side').boundingBox()).width > 280);
     await p.keyboard.type('dream');
@@ -693,7 +695,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('and its Undo puts it back', (await p.evaluate((ids) => ids.map((id) => Fatstick.app.track(id).genre), plTags)).every((g) => g !== 'Playlist Rock'));
     // Search results beside the playlist: the last selection made is the one shown.
     await p.keyboard.press('Escape');
-    await p.locator('#srch-btn').click();
+    await p.locator('#side-srch').click();
     await p.locator('#srch-in').fill('Everywhere');
     await p.locator('.srch-res .sr').first().waitFor();
     await p.locator('.srch-res .sr').first().click();
@@ -705,7 +707,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('"Edit tags" on a search result shows that one', (await tTitle.inputValue()) === 'Everywhere');
     await p.locator('.srch-close').click();
     check('with the search closed, it\'s the playlist\'s selection again', (await tTitle.inputValue()) === first);
-    await p.locator('#srch-btn').click();
+    await p.locator('#side-srch').click();
     check('open again, it\'s the result again', (await tTitle.inputValue()) === 'Everywhere');
     await p.locator('#srch-in').fill('');
     await p.waitForFunction(() => document.querySelectorAll('.srch-res .sr').length === 0);
@@ -1022,7 +1024,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.keyboard.press('Escape');
     // A text box: Space types.
     const before = await p.evaluate(() => Fatstick.app.S.player.playing);
-    await p.locator('#srch-btn').click();
+    await p.locator('#side-srch').click();
     await p.locator('#srch-in').click();
     await p.keyboard.type('road trip');
     check('Space in a text box types a space and leaves the player be', (await p.locator('#srch-in').inputValue()) === 'road trip' && (await p.evaluate(() => Fatstick.app.S.player.playing)) === before);
@@ -1642,7 +1644,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('Escape clears the box', (await yin.inputValue()) === '');
     await yin.press('Escape');
     check('and then closes the search', await p.evaluate(() => !Fatstick.app.S.searching));
-    await p.locator('#srch-btn').click();
+    await p.locator('#side-srch').click();
     check('the search button comes back to where you were', await yin.isVisible());
     if (process.argv[2]) {
       await yin.fill('Harbour Lights');
@@ -1665,28 +1667,113 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.keyboard.press('Control+f');
     await p.locator('.srch-close').click();
     await p.waitForTimeout(250);
-    const rect = (sel) => p.locator(sel).first().evaluate((x) => { const r = x.getBoundingClientRect(); const c = getComputedStyle(x); return { top: r.top, left: r.left, h: r.height, font: c.fontSize, border: c.borderTopColor }; });
+    const rect = (sel) => p.locator(sel).first().evaluate((x) => { const r = x.getBoundingClientRect(); const c = getComputedStyle(x); const s = document.getElementById('side').getBoundingClientRect(); return { top: r.top, left: r.left, h: r.height, gapRight: s.right - r.right, font: c.fontSize, border: c.borderTopColor }; });
+    // How a box is drawn, whichever box it is. The focus ring isn't included.
+    const looks = (sel) => p.locator(sel).first().evaluate((x) => {
+      x.blur();
+      const c = getComputedStyle(x);
+      const ph = getComputedStyle(x, '::placeholder');
+      const ic = getComputedStyle(x.parentElement.querySelector('.srch-ic'));
+      return JSON.stringify([x.tagName, x.type, c.height, c.fontSize, c.fontFamily, c.color, c.backgroundColor, c.borderTopWidth, c.borderTopColor, c.borderRadius, c.paddingLeft, c.paddingRight, ph.color, ph.fontStyle, ic.left, ic.color, x.parentElement.className]);
+    });
     const side0 = await rect('#side');
-    const closedBox = await rect('#srch-btn');
+    const closedBox = await rect('#side-srch');
     check('the search box is at the top of the sidebar', closedBox.top - side0.top <= 14 && closedBox.top < (await rect('#fold-playlists')).top);
     check('nothing is left at its foot', (await p.locator('.side-foot').count()) === 0);
-    await p.locator('#srch-btn').click();
+    await p.locator('#side-srch').click();
     await p.waitForTimeout(250);
     const openBox = await rect('#srch-in');
     check('and it is the same box as the search panel\'s', openBox.h === closedBox.h && openBox.font === closedBox.font && openBox.left === closedBox.left);
+    check('filling the sidebar in both', openBox.gapRight === closedBox.gapRight, `${closedBox.gapRight} and ${openBox.gapRight}`);
+    const openLooks = await looks('#srch-in');
+    check('opening it doesn\'t move it', openBox.top === closedBox.top, `${closedBox.top} to ${openBox.top}`);
+    check('with the tabs under it', (await rect('.srch-tabs')).top >= openBox.top + openBox.h);
+    await p.locator('#srch-tab-youtube').click();
+    await p.waitForTimeout(100);
+    const ytBox = await rect('#yt-in');
+    check('on YouTube\'s side too', ytBox.top === closedBox.top && ytBox.h === closedBox.h && (await rect('.srch-tabs')).top >= ytBox.top + ytBox.h, `${closedBox.top} to ${ytBox.top}`);
+    await p.locator('#srch-tab-music').click();
+    await p.waitForTimeout(100);
+    // On a narrow window too, where the sidebar is laid out differently.
+    await p.locator('.srch-close').click();
+    await p.setViewportSize({ width: 760, height: 900 });
+    await p.waitForTimeout(250);
+    const narrowClosed = await rect('#side-srch');
+    await p.locator('#side-srch').click();
+    await p.waitForTimeout(250);
+    const narrowOpen = await rect('#srch-in');
+    check('nor on a narrow window', narrowOpen.top === narrowClosed.top && narrowOpen.h === narrowClosed.h, `${narrowClosed.top} to ${narrowOpen.top}`);
+    await p.setViewportSize({ width: 1280, height: 800 });
+    await p.waitForTimeout(250);
     check('the open panel has one way to close it, by its box', (await p.locator('.srch-close').count()) === 1 && !/Close search/.test(await p.locator('#side').textContent()));
     await p.locator('.srch-close').click();
     await p.waitForTimeout(250);
-    check('closing it puts the focus back on the box', await p.evaluate(() => document.activeElement.id === 'srch-btn'));
+    check('closing it puts the focus back on the list, where the keys are the app\'s', await p.evaluate(() => document.activeElement.id === 'list' && !Fatstick.app.S.searching));
+    {
+      const wasPlaying = await p.evaluate(() => Fatstick.app.S.player.playing);
+      await p.keyboard.press('Space');
+      await p.waitForTimeout(60);
+      check('so Space plays or pauses, and doesn\'t reopen it', (await p.evaluate(() => Fatstick.app.S.player.playing)) !== wasPlaying && await p.evaluate(() => !Fatstick.app.S.searching));
+      await p.keyboard.press('Space');
+      await p.waitForTimeout(60);
+      await p.evaluate(() => Fatstick.app.stopPlayback());
+    }
+    check('it\'s drawn exactly as the panel\'s box is', (await looks('#side-srch')) === openLooks, `${await looks('#side-srch')} / ${openLooks}`);
+    // The same in the dark.
+    await p.emulateMedia({ colorScheme: 'dark' });
+    const darkClosed = await looks('#side-srch');
+    await p.locator('#side-srch').click();
+    await p.waitForTimeout(250);
+    const darkOpen = await looks('#srch-in');
+    check('in the dark as well', darkClosed === darkOpen && darkClosed !== openLooks, `${darkClosed} / ${darkOpen}`);
+    await p.locator('.srch-close').click();
+    await p.emulateMedia({ colorScheme: 'light' });
+    await p.waitForTimeout(250);
+    // It acts like a box: it can be typed in, and Tab passes through it.
+    const searching = () => p.evaluate(() => Fatstick.app.S.searching);
+    await p.locator('#side-srch').focus();
+    check('coming to it opens nothing', !(await searching()));
+    await p.keyboard.press('Space');
+    check('a space in it goes nowhere, or it would be searching for nothing', (await searching()) && (await p.locator('#srch-in').inputValue()) === '');
+    await p.locator('.srch-close').click();
+    await p.waitForTimeout(250);
+    await p.locator('#side-srch').focus();
+    await p.keyboard.press('Escape');
+    check('Escape leaves it', await p.evaluate(() => document.activeElement.id !== 'side-srch') && !(await searching()));
+    await p.locator('#side-srch').focus();
+    await p.keyboard.type('Everyw', { delay: 20 });
+    await p.locator('.srch-res .sr').first().waitFor();
+    check('typing in it opens the search, with what was typed, and goes on', (await searching()) && (await p.locator('#srch-in').inputValue()) === 'Everyw' && await p.locator('#srch-in').evaluate((x) => document.activeElement === x && x.selectionStart === 6));
+    await p.locator('.srch-close').click();
+    await p.waitForTimeout(250);
+    await p.locator('#side-srch').focus();
+    await p.keyboard.press('Enter');
+    check('so does Enter, ready to type over', (await searching()) && await p.locator('#srch-in').evaluate((x) => document.activeElement === x && x.selectionStart === 0 && x.selectionEnd === x.value.length));
+    await p.locator('#srch-in').fill('');
+    await p.locator('.srch-close').click();
+    await p.waitForTimeout(250);
+    await p.locator('#side-srch').fill('Pasted text');
+    check('and text put in it some other way', (await searching()) && (await p.locator('#srch-in').inputValue()) === 'Pasted text');
+    await p.locator('#srch-in').fill('');
+    await p.locator('#srch-tab-youtube').click();
+    await p.locator('.srch-close').click();
+    await p.waitForTimeout(250);
+    await p.locator('#side-srch').focus();
+    await p.keyboard.type('Harb');
+    check('going to YouTube\'s side if that\'s where the search was', (await p.locator('#yt-in').inputValue()) === 'Harb' && await p.locator('#yt-in').evaluate((x) => document.activeElement === x));
+    await p.locator('#yt-in').fill('');
+    await p.keyboard.press('Control+f');
+    await p.locator('.srch-close').click();
+    await p.waitForTimeout(250);
     // With the window short and the sidebar scrolled, it's still there.
     await p.setViewportSize({ width: 1280, height: 420 });
     await p.locator('#side').evaluate((x) => { x.scrollTop = 200; });
     await p.waitForTimeout(100);
     check('it stays in sight as the sidebar scrolls', await p.evaluate(() => {
       const s = document.getElementById('side');
-      const b = document.getElementById('srch-btn').getBoundingClientRect();
+      const b = document.getElementById('side-srch').getBoundingClientRect();
       const under = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
-      return s.scrollTop > 0 && b.top >= s.getBoundingClientRect().top && under && !!under.closest('#srch-btn');
+      return s.scrollTop > 0 && b.top >= s.getBoundingClientRect().top && under && !!under.closest('#side-srch');
     }));
     await p.locator('#side').evaluate((x) => { x.scrollTop = 0; });
     await p.setViewportSize({ width: 1280, height: 800 });
@@ -1711,13 +1798,13 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     check('a folded list is only its heading', (await p.locator('#sec-setlists').evaluate((x) => x.getBoundingClientRect().height)) <= heading + 1);
     // Making one shows it, to name it.
     await p.locator('#sec-setlists [aria-label="New setlist"]').click();
-    check('a new setlist opens its folded list, to be named', (await open('setlists')) === 'true' && await p.locator('#side .input').isVisible());
+    check('a new setlist opens its folded list, to be named', (await open('setlists')) === 'true' && await p.locator('#side ul .input').isVisible());
     await p.keyboard.press('Escape');
     await p.keyboard.press('Control+z');
     await p.waitForTimeout(60);
     await p.locator('#fold-playlists').click();
     await p.locator('#sec-playlists [aria-label="New playlist"]').click();
-    check('so does a new playlist', (await open('playlists')) === 'true' && await p.locator('#side .input').isVisible());
+    check('so does a new playlist', (await open('playlists')) === 'true' && await p.locator('#side ul .input').isVisible());
     await p.keyboard.press('Escape');
     await p.keyboard.press('Control+z');
     await p.waitForTimeout(60);
@@ -1865,7 +1952,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     // Making them from nothing.
     await removeAll('[data-pl]', 'Remove playlist');
     await p.locator('#sec-setlists [aria-label="New setlist"]').click();
-    await p.locator('#side .input').fill('Empty one');
+    await p.locator('#side ul .input').fill('Empty one');
     await p.keyboard.press('Enter');
     await p.waitForTimeout(60);
     check('a setlist can be made with no playlist to put in it', await p.evaluate(() => Fatstick.app.S.sets.length === 1 && Fatstick.app.S.sets[0].playlistIds.length === 0 && !!Fatstick.app.stickSet()));
@@ -1879,7 +1966,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.waitForTimeout(250);
     await p.evaluate(() => Fatstick.app.setView('playlist'));
     await p.locator('#empty-new').click();
-    await p.locator('#side .input').fill('Fresh');
+    await p.locator('#side ul .input').fill('Fresh');
     await p.keyboard.press('Enter');
     await p.waitForTimeout(60);
     check('the window\'s button makes a playlist, and opens it', await p.evaluate(() => Fatstick.app.S.playlists.length === 1 && Fatstick.app.pl().name === 'Fresh') && (await p.locator('#pl-name').textContent()) === 'Fresh' && /This playlist is empty/.test(await p.locator('#list-empty').textContent()));

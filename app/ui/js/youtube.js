@@ -109,12 +109,11 @@
       const kind = (key, label) => h("button", { type: "button", class: "btn small yt-kind", id: `yt-kind-${key}`, text: label, onclick: () => setKind(key) });
       Y.kinds = h("div", { class: "yt-kinds", role: "group", "aria-label": "Search for" }, kind("songs", "Songs"), kind("lists", "Playlists"));
       Y.root = h("div", { class: "srch yt" },
-        Y.tabs,
         h("div", { class: "srch-box" },
           h("span", { class: "srch-ic" }, icon("search")),
           Y.input,
           h("button", { type: "button", class: "btn quiet small icon srch-close", title: "Close the search (Esc)", "aria-label": "Close the search", onclick: () => lib.closeSearch() }, icon("close"))),
-        Y.kinds, Y.scope, Y.list, Y.foot);
+        Y.tabs, Y.kinds, Y.scope, Y.list, Y.foot);
     }
     function root() {
       if (!Y.root) build();
@@ -127,14 +126,18 @@
       fill(Y.tabs, core.searchTabs());
       refresh();
     }
-    function open() {
+    /** `text`: what was typed to open it, to go on from. */
+    function open(text) {
       if (S.view === "library") core.setView("playlist");
       S.searching = true;
       S.searchSource = "youtube";
       core.renderSide();
       document.getElementById("app").classList.add("searching");
       Y.input.focus();
-      Y.input.select();
+      if (typeof text === "string" && text) {
+        Y.input.value = Y.q = text;
+        Y.input.setSelectionRange(text.length, text.length);
+      } else Y.input.select();
       loadStatus();
     }
     async function loadStatus() {

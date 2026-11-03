@@ -91,7 +91,7 @@
     check("the sidebar marks it plugged in", flag && /plugged in/.test(flag.textContent), flag && flag.textContent);
     // A new setlist on the same stick: a warning, and the sync needs a tick.
     document.querySelector('button[aria-label="New setlist"]').click();
-    const nameIn = await until(() => document.querySelector("#side input.input"));
+    const nameIn = await until(() => document.querySelector("#side ul input.input"));
     nameIn.value = "Gym clip";
     nameIn.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     const gym = await until(() => S.sets.find((x) => x.name === "Gym clip"));

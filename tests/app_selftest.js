@@ -35,10 +35,10 @@
     // Made by hand, each named as its row asks.
     const makeNamed = async (button, name) => {
       $(button).click();
-      const input = await until(() => $("#side .input"));
+      const input = await until(() => $("#side ul .input"));
       input.value = name;
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-      await until(() => !$("#side .input"));
+      await until(() => !$("#side ul .input"));
     };
     await makeNamed("#empty-new", "Playlist 1");
     check("\"New playlist\" makes one, and opens it", S.playlists.length === 1 && A.pl() === S.playlists[0] && S.playlists[0].name === "Playlist 1" && S.playlists[0].entries.length === 0);

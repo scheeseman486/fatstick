@@ -194,12 +194,6 @@ body.pl-dragging, body.pl-dragging * { cursor: grabbing !important; }
   position: sticky; top: 0; z-index: 1; margin: 0 -8px -10px; padding: 12px 8px 10px;
   background: var(--pane);
 }
-.srch-btn {
-  position: relative; display: flex; align-items: center; width: 100%; height: 34px; padding: 0 8px 0 30px;
-  border: 1px solid var(--input-border); border-radius: var(--r-s); background: var(--input-bg);
-  color: var(--ink-3); font-size: 15px; font-style: italic; cursor: text; text-align: left;
-}
-.srch-btn:hover { border-color: var(--accent); }
 .side.drop-new #side-pls, .side.drop-new #sec-playlists.closed .side-h { box-shadow: 0 0 0 2px var(--accent); border-radius: var(--r-row); background: var(--accent-soft); }
 
 /* ---- search ------------------------------------------------------------------- */
@@ -219,7 +213,8 @@ body.pl-dragging, body.pl-dragging * { cursor: grabbing !important; }
 .srch-box { display: flex; align-items: center; gap: 4px; position: relative; }
 .srch-ic { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: var(--ink-3); display: inline-flex; pointer-events: none; }
 .srch-in, .lib-q { width: 100%; padding-left: 30px; }
-.srch-box .srch-in { flex: 1 1 auto; height: 34px; font-size: 15px; }
+.srch-box .srch-in { flex: 1 1 auto; height: 34px; font-size: 15px; padding-right: 32px; }
+.srch-box .srch-close { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); }
 .srch-in::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 .srch-scope { margin: 0 2px; font-size: 12.5px; color: var(--ink-2); display: grid; gap: 6px; justify-items: start; }
 .srch-scope .btn { margin-left: -8px; }
@@ -939,7 +934,7 @@ html.framed .player { padding-inline: 2px; }
   .player .aos, .player .vol { display: none; }
   .disp-sub { display: block; }
   .toast { bottom: 140px; }
-  .app.searching .side { flex-direction: column; overflow: visible; }
+  .app.searching .side { flex-direction: column; overflow: visible; padding: 10px 8px; }
   .srch-res { max-height: 55vh; }
   .side-top { position: static; margin: 0; flex: 1 1 100%; padding: 0; background: none; }
   .lib-body { grid-template-columns: minmax(0, 1fr); }

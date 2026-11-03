@@ -806,12 +806,13 @@
         oncontextmenu: (e) => trackMenu(e, SX),
       });
       SE.tabs = h("div", { class: "srch-tabs", role: "tablist", "aria-label": "Search in" });
+      // The box first: it's where the sidebar's search box was, so opening it doesn't move it.
       SE.root = h("div", { class: "srch" },
-        SE.tabs,
         h("div", { class: "srch-box" },
           h("span", { class: "srch-ic" }, icon("search")),
           SE.input,
           h("button", { type: "button", class: "btn quiet small icon srch-close", title: "Close the search (Esc)", "aria-label": "Close the search", onclick: closeSearch }, icon("close"))),
+        SE.tabs,
         SE.scope, SE.list,
         h("p", { class: "srch-foot", text: "Double-click a song to hear it. Drag songs into the playlist to add them." }));
     }
@@ -826,23 +827,33 @@
       fill(SE.tabs, core.searchTabs());
       refreshSearch();
     }
-    function openSearch() {
+    /** `text`: what was typed to open it, to go on from. */
+    function openSearch(text) {
       if (S.view === "library") core.setView("playlist");
       S.searching = true;
       S.searchSource = "music";
       core.renderSide();
       document.getElementById("app").classList.add("searching");
       SE.input.focus();
-      SE.input.select();
+      if (typeof text === "string" && text) {
+        SE.input.value = SE.q = text;
+        SE.input.setSelectionRange(text.length, text.length);
+        refreshSearch();
+      } else SE.input.select();
       renderEditor();
+    }
+    /** The focus back on the list being looked at. */
+    function focusSelection() {
+      const el = S.view === "library" ? V.scroll : S.searching && tagSource === "search" && SE.sel.size ? SE.list : S.view === "playlist" ? $("list") : null;
+      if (el) el.focus({ preventScroll: true });
     }
     function closeSearch() {
       S.searching = false;
       document.getElementById("app").classList.remove("searching");
       core.renderSide();
       renderEditor();
-      const b = document.getElementById("srch-btn");
-      if (b) b.focus({ preventScroll: true });
+      // Back to the list, not the box: there, Space and Ctrl+Z would be typing.
+      focusSelection();
     }
     function refreshSearch() {
       if (!SE.root) return;
@@ -1533,10 +1544,7 @@
       },
       tagsBox, openTags, renderTags: renderEditor,
       /** The Tags panel closed: back to the list its tracks are selected in. */
-      focusSelection() {
-        const el = S.view === "library" ? V.scroll : S.searching && tagSource === "search" && SE.sel.size ? SE.list : S.view === "playlist" ? $("list") : null;
-        if (el) el.focus({ preventScroll: true });
-      },
+      focusSelection,
       /** The panel changed: "Edit tags" under the table is only for when it's elsewhere. */
       panelChanged() { if (S.view === "library" && V.root && root()) renderLibFoot(); },
       /** The playlist's selection changed. */

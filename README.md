@@ -62,8 +62,9 @@ GPL version 3 or later.
   it, and Ctrl+Z in the library view undoes tag edits one at a time. Nothing asks
   first, and clicking elsewhere saves what was typed. "Clean up file names…" renames files from their tags; files stay in their
   folders and keep their type. Nothing outside the music folder is touched.
-- **Search.** The search box at the top of the sidebar (or Ctrl+F) widens the
-  sidebar into a search panel, and × beside the box or Esc closes it. Type a title, an artist, an album, a genre,
+- **Search.** Click the search box at the top of the sidebar or start typing in it
+  (or press Ctrl+F), and the sidebar widens into a search panel around it. × in the
+  box or Esc closes it. Type a title, an artist, an album, a genre,
   a label, a year or part of a file name: whole-word matches come first,
   then a divider and close ones (a word's start, part of a word, a letter or
   two off). Punctuation doesn't matter: "YMCA" finds "Y.M.C.A." and the

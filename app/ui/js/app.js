@@ -668,14 +668,27 @@
   const importButton = (id) => h("button", { type: "button", class: "btn quiet small side-more", id, "data-menu-anchor": "", "aria-haspopup": "menu", onclick: (e) => importMenu(e.currentTarget) }, "Import playlist", h("span", { class: "caret" }, icon("caret")));
 
   // ---- rendering: sidebar ------------------------------------------------------------------
-  /** The top of the sidebar: looks like the search panel's box, and opens it. */
+  /**
+   * The top of the sidebar: the search panel's box, in the place it has in the
+   * panel. It's a box like any: Tab comes to it without opening anything. Clicking
+   * it opens the panel, and so does typing in it, the text going along.
+   */
   function sideSearch() {
+    const open = (text) => (S.searchSource === "youtube" ? yt.open(text) : lib.openSearch(text));
     return h("div", { class: "side-top" },
-      h("button", {
-        type: "button", class: "srch-btn", id: "srch-btn",
-        title: "Search your music (Ctrl+F) or YouTube (Ctrl+Shift+F)",
-        onclick: () => (S.searchSource === "youtube" ? yt.open() : lib.openSearch()),
-      }, h("span", { class: "srch-ic" }, icon("search")), h("span", { text: "Search" })));
+      h("div", { class: "srch-box" },
+        h("span", { class: "srch-ic" }, icon("search")),
+        h("input", {
+          type: "search", class: "input srch-in", id: "side-srch", placeholder: "Search", "aria-label": "Search",
+          title: "Search your music (Ctrl+F) or YouTube (Ctrl+Shift+F)", autocomplete: "off", spellcheck: "false",
+          onclick: () => open(),
+          oninput: (e) => { if (!e.isComposing) open(e.target.value.trim() ? e.target.value : undefined); },
+          oncompositionend: (e) => open(e.target.value),
+          onkeydown: (e) => {
+            if (e.key === "Enter" || e.key === "ArrowDown") { e.preventDefault(); open(); }
+            else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); e.target.blur(); }
+          },
+        })));
   }
   /** Fold a list of the sidebar away, or open it. */
   function foldSection(key, open) {
@@ -744,6 +757,7 @@
       });
     };
     const none = (text) => h("li", { class: "side-none", text });
+    const hadFocus = !!document.activeElement && document.activeElement.id === "side-srch";
     fill(side,
       sideSearch(),
       sideSection("playlists", "Playlists", S.playlists.length, { label: "New playlist", run: () => newPlaylist() }, () => [
@@ -753,6 +767,7 @@
       sideSection("setlists", "Setlists", S.sets.length, { label: "New setlist", run: newSet }, () =>
         h("ul", { id: "side-sets" }, S.sets.length ? setItems() : none("No setlists."))),
     );
+    if (hadFocus) $("side-srch").focus({ preventScroll: true });
   }
 
   /** A setlist's view in the middle of the window. */
