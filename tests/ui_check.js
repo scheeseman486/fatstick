@@ -2148,6 +2148,34 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await A(() => { Fatstick.app.stopPlayback(); Fatstick.app.lib.closeSearch(); });
   }
 
+  // 39. The display: a green LCD in the light, lit light blue in the dark, however the dark was asked for.
+  {
+    const glass = () => p.locator('.glass').evaluate((g) => {
+      const c = getComputedStyle(g);
+      const lum = (rgb) => { const [r, l, b] = rgb.match(/\d+/g).slice(0, 3).map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * l + 0.0722 * b; };
+      const [hi, lo] = [lum(c.backgroundColor), lum(c.color)].sort((x, y) => y - x);
+      return { bg: c.backgroundColor, lit: c.backgroundImage !== 'none', glow: c.boxShadow.includes('205, 255'), contrast: (hi + 0.05) / (lo + 0.05) };
+    });
+    const blue = 'rgb(132, 214, 251)';
+    const green = 'rgb(180, 196, 156)';
+    const theme = (v) => p.evaluate((v) => { const a = Fatstick.app; a.S.theme = v; document.documentElement.setAttribute('data-theme', v); }, v);
+    await p.evaluate(() => document.documentElement.removeAttribute('data-theme'));
+    await p.emulateMedia({ colorScheme: 'light' });
+    let g = await glass();
+    check('in the light, the display is the green LCD, unlit', g.bg === green && !g.lit && !g.glow, JSON.stringify(g));
+    await p.emulateMedia({ colorScheme: 'dark' });
+    g = await glass();
+    check('with the system dark, it glows light blue', g.bg === blue && g.lit && g.glow, JSON.stringify(g));
+    check('and its segments are easy to read', g.contrast >= 7, String(g.contrast));
+    await theme('light');
+    check('the Light theme keeps it green, on a dark system', (await glass()).bg === green);
+    await p.emulateMedia({ colorScheme: 'light' });
+    await theme('dark');
+    g = await glass();
+    check('the Dark theme makes it blue, on a light system', g.bg === blue && g.lit && g.glow, JSON.stringify(g));
+    await p.evaluate(() => { Fatstick.app.S.theme = 'system'; document.documentElement.removeAttribute('data-theme'); });
+  }
+
   check('no console errors', errs.length === 0, errs.join(' / '));
   await b.close();
   server.close();

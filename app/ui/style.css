@@ -66,6 +66,7 @@ html.framed .top { padding-inline: 2px; }
   padding: 10px 16px 9px;
   border-radius: var(--r-glass);
   background-color: var(--disp-bg);
+  background-image: var(--disp-light);
   color: var(--disp-ink);
   box-shadow: var(--glass-shadow);
   min-width: 0;
@@ -490,7 +491,7 @@ body.modal-player .player { position: relative; z-index: 60; }
 .key-mid { display: grid; gap: 8px; min-width: 0; }
 .key-lcd {
   justify-self: center; display: inline-grid; padding: 9px 16px 8px; margin-bottom: 4px;
-  border-radius: var(--r-glass); background-color: var(--disp-bg); color: var(--disp-ink); box-shadow: var(--glass-shadow);
+  border-radius: var(--r-glass); background-color: var(--disp-bg); background-image: var(--disp-light); color: var(--disp-ink); box-shadow: var(--glass-shadow);
 }
 .key-lcd > * { grid-area: 1 / 1; font-size: 30px; }
 .key-range { width: 100%; margin: 0; }
