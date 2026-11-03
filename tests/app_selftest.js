@@ -29,6 +29,7 @@
   try {
     const A = await until(() => window.Fatstick.app && window.Fatstick.app.ready && window.Fatstick.app, 20000);
     if (!check("the window started", !!A)) throw new Error("no app");
+    check("the logo loads, past the app's content rules", $("#logo").complete && $("#logo").naturalWidth === 700, String($("#logo").naturalWidth));
     const S = A.S;
     check("first run: no playlists and no setlists", S.playlists.length === 0 && S.sets.length === 0 && A.pl() === undefined && A.stickSet() === undefined);
     check("the window says so, and offers to make one", /No playlists/.test($("#pl-name").textContent) && !!$("#empty-new") && /No setlists/.test($("#side-sets").textContent));

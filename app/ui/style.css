@@ -59,6 +59,9 @@ html.framed body { background: var(--chassis); }
 }
 html.framed .top { padding-inline: 2px; }
 .display { display: flex; align-items: center; gap: 10px 18px; min-width: 0; flex: 1 1 560px; flex-wrap: wrap; }
+/* In the same row as the readout, centered on it. Where there's no room for both, the readout has the row. */
+.logo { flex: none; display: block; height: 44px; width: auto; user-select: none; -webkit-user-select: none; }
+@media (max-width: 960px) { .logo { display: none; } }
 .glass {
   display: flex;
   align-items: center;

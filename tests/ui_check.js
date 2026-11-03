@@ -2263,6 +2263,43 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.evaluate(() => { Fatstick.app.S.theme = 'system'; document.documentElement.removeAttribute('data-theme'); });
   }
 
+  // 40. The logo: top left, before the readout, on a line with it, at any width.
+  {
+    const placed = () => p.evaluate(() => {
+      const r = (s) => document.querySelector(s).getBoundingClientRect();
+      const [l, g, top] = [r('#logo'), r('.glass'), r('.top')];
+      const logo = document.getElementById('logo');
+      const pad = parseFloat(getComputedStyle(document.querySelector('.top')).paddingLeft);
+      return {
+        loaded: logo.naturalWidth > 0, alt: logo.alt,
+        atLeft: Math.abs(l.left - top.left - pad) < 1, before: l.right <= g.left, centred: Math.abs((l.top + l.bottom) / 2 - (g.top + g.bottom) / 2) < 1,
+        ratio: Math.abs(l.width / l.height - logo.naturalWidth / logo.naturalHeight) < 0.02, sideways: document.documentElement.scrollWidth > innerWidth,
+        readoutFits: g.right <= top.right, first: document.querySelector('.top').firstElementChild.firstElementChild === logo,
+      };
+    });
+    const first = await placed();
+    check('the logo loads, and says what it is', first.loaded && first.alt === 'Fatstick');
+    check('it comes first in the top bar', first.first);
+    for (const [w, h] of [[1280, 800], [1000, 700], [961, 700]]) {
+      await p.setViewportSize({ width: w, height: h });
+      await p.waitForTimeout(120);
+      const at = await placed();
+      check(`at ${w} wide it's at the left, before the readout and centred on it`, at.atLeft && at.before && at.centred && at.ratio && !at.sideways && at.readoutFits, JSON.stringify(at));
+    }
+    for (const [w, h] of [[960, 700], [860, 700], [760, 700], [480, 700]]) {
+      await p.setViewportSize({ width: w, height: h });
+      await p.waitForTimeout(120);
+      const narrow = await p.evaluate(() => {
+        const g = document.querySelector('.glass').getBoundingClientRect();
+        const top = document.querySelector('.top');
+        return { left: g.left - top.getBoundingClientRect().left === parseFloat(getComputedStyle(top).paddingLeft), sideways: document.documentElement.scrollWidth > innerWidth };
+      });
+      check(`at ${w} wide there's no logo, and the readout has its place`, await p.locator('#logo').isHidden() && narrow.left && !narrow.sideways, JSON.stringify(narrow));
+    }
+    await p.setViewportSize({ width: 1280, height: 800 });
+    await p.waitForTimeout(120);
+  }
+
   check('no console errors', errs.length === 0, errs.join(' / '));
   await b.close();
   server.close();
