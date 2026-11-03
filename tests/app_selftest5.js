@@ -35,7 +35,21 @@
     const A = await until(() => window.Fatstick.app && window.Fatstick.app.ready && window.Fatstick.app, 20000);
     if (!check("the window started", !!A)) throw new Error("no app");
     const S = A.S;
+    const chrome = await T.core.invoke("window_chrome");
+    const buttons = (id) => $$(`#${id} .win-btn`).length;
+    check("the window has the buttons this system does", document.documentElement.dataset.os === chrome.os && $$(".win-close").length === 1);
+    const state = await T.core.invoke("window_state");
+    check("and knows what state it's in", state.maximized === false && state.fullscreen === false);
+    const lcd = getComputedStyle($(".glass .seg"));
+    check("nothing in the bar can be selected, the readout included", (lcd.userSelect || lcd.webkitUserSelect) === "none" && lcd.cursor === "default");
     if (cfg.stage === "remove") {
+      check("they're where the system has them", buttons("win-left") === chrome.left.length && buttons("win-right") === chrome.right.length);
+      if (chrome.os === "linux") {
+        $$(".top-tools button").find((b) => b.textContent === "Menu").click();
+        const item = await until(() => $$("#menu [role^=menuitem]").find((b) => b.textContent.includes("On the left")), 3000);
+        item.click();
+        check("the menu moves them", buttons("win-left") === 3 && buttons("win-right") === 0);
+      }
       check("it starts with playlists and setlists from before", S.playlists.length > 0 && S.sets.length > 0);
       while (S.playlists.length) {
         const n = S.playlists.length;
@@ -54,6 +68,7 @@
       // Saving is on a timer and each save is awaited: long enough for both.
       await sleep(1500);
     } else {
+      if (chrome.os === "linux") check("they stayed where the menu put them", buttons("win-left") === 3 && buttons("win-right") === 0);
       check("what was removed stayed removed", S.playlists.length === 0 && S.sets.length === 0);
       check("the folded list stayed folded, the other open", $("#fold-setlists").getAttribute("aria-expanded") === "false" && !$("#side-sets") && $("#fold-playlists").getAttribute("aria-expanded") === "true");
       check("the window says so", /No playlists/.test($("#pl-name").textContent) && /No playlists/.test($("#side-pls").textContent));

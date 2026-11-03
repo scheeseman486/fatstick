@@ -73,6 +73,9 @@
       libraryForget: (del, hide) => invoke("library_forget", { delete: del, hide }),
       libraryWriteTags: (jobs) => invoke("library_write_tags", { jobs }),
       libraryRename: (jobs) => invoke("library_rename", { jobs }),
+      windowChrome: () => invoke("window_chrome"),
+      windowState: () => invoke("window_state"),
+      windowAction: (action) => invoke("window_action", { action }),
       youtubeStatus: () => invoke("youtube_status"),
       youtubeSetup: () => invoke("youtube_setup"),
       youtubeCancelSetup: () => invoke("youtube_cancel_setup"),
@@ -217,6 +220,7 @@
 
     // YouTube, made up: setting up takes a moment, a search answers with a few
     // versions of whatever was typed, and a song "arrives" in a second or so.
+    const DEMO_WINDOW = { state: { maximized: false, fullscreen: false }, asked: [] };
     const YT = { ready: false, cancelSetup: false, hits: new Map(), kept: new Map(), cancelled: new Set(), folder: "YouTube", lists: new Map(), albums: new Map() };
     const ytStatus = () => ({
       ytdlp: YT.ready ? { path: "tools/yt-dlp", version: "2026.10.26", managed: true } : null,
@@ -502,6 +506,24 @@
         return out;
       },
       async pickFolder() { return "~/Music"; },
+      // No window here. With ?os= it draws that system's title bar, for the tests
+      // and the screenshots, which can look at what's been asked of it.
+      async windowChrome() {
+        const q = new URLSearchParams(location.search);
+        const os = q.get("os");
+        if (!os) return null;
+        if (os === "macos") return { os, left: ["close", "minimize", "maximize"], right: [] };
+        const three = ["minimize", "maximize", "close"];
+        return { os, left: q.get("side") === "left" ? ["close", "minimize", "maximize"] : [], right: q.get("side") === "left" ? [] : three };
+      },
+      async windowState() { return { ...DEMO_WINDOW.state }; },
+      async windowAction(action) {
+        DEMO_WINDOW.asked.push(action);
+        if (action === "maximize") DEMO_WINDOW.state.maximized = !DEMO_WINDOW.state.maximized;
+        if (action === "fullscreen") DEMO_WINDOW.state.fullscreen = !DEMO_WINDOW.state.fullscreen;
+        window.dispatchEvent(new Event("resize"));
+      },
+      demoWindow: () => DEMO_WINDOW,
       async youtubeStatus() { return ytStatus(); },
       async youtubeSetup() {
         YT.cancelSetup = false;

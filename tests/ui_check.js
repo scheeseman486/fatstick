@@ -1815,7 +1815,12 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     await p.waitForTimeout(200);
     {
       await p.locator('.lr').first().scrollIntoViewIfNeeded();
-      const from = await p.locator('.lr').first().boundingBox();
+      // The list may redraw under this: a row that's gone has no box, so ask again.
+      let from = null;
+      for (let i = 0; i < 40 && !from; i++) {
+        from = await p.locator('.lr').first().boundingBox();
+        if (!from) await p.waitForTimeout(50);
+      }
       const to = await p.locator('#fold-playlists').boundingBox();
       await p.mouse.move(from.x + 40, from.y + 10);
       await p.mouse.down();
@@ -2274,7 +2279,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
         loaded: logo.naturalWidth > 0, alt: logo.alt,
         atLeft: Math.abs(l.left - top.left - pad) < 1, before: l.right <= g.left, centred: Math.abs((l.top + l.bottom) / 2 - (g.top + g.bottom) / 2) < 1,
         ratio: Math.abs(l.width / l.height - logo.naturalWidth / logo.naturalHeight) < 0.02, sideways: document.documentElement.scrollWidth > innerWidth,
-        readoutFits: g.right <= top.right, first: document.querySelector('.top').firstElementChild.firstElementChild === logo,
+        readoutFits: g.right <= top.right, first: document.querySelector('.display').firstElementChild === logo,
       };
     });
     const first = await placed();
@@ -2298,6 +2303,272 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} $
     }
     await p.setViewportSize({ width: 1280, height: 800 });
     await p.waitForTimeout(120);
+  }
+
+  // ---- the window's own title bar -----------------------------------------------------------------
+  {
+    check('in a plain browser no window buttons are drawn', await p.evaluate(() => !document.documentElement.dataset.os && !document.querySelector('.win-btn')));
+    const open = async (q, w = 1280, h = 800) => {
+      await p.setViewportSize({ width: w, height: h });
+      await p.goto(URL + q);
+      await p.waitForSelector('.win-btn');
+      await p.waitForTimeout(150);
+    };
+    const kinds = (id) => p.locator(`#${id} .win-btn`).evaluateAll((els) => els.map((e) => e.className.match(/win-(close|minimize|maximize)/)[1]).join());
+    const box = (s) => p.locator(s).boundingBox();
+    const asked = () => p.evaluate(() => Fatstick.api.demoWindow().asked.splice(0).join());
+    const label = (s) => p.locator(s).getAttribute('aria-label');
+    const settle = () => p.waitForTimeout(160);
+    /** A bare part of the bar, between the readout and the tools. */
+    const bare = async () => {
+      const tools = await box('.top-tools');
+      const top = await box('.top');
+      const at = { x: tools.x - 30, y: top.y + top.height / 2 };
+      const bareHere = await p.evaluate(({ x, y }) => { const e = document.elementFromPoint(x, y); return !!e.closest('.top') && !e.closest('button, input, select, a'); }, at);
+      return bareHere ? at : null;
+    };
+    const press = async (at, moves) => {
+      await p.mouse.move(at.x, at.y);
+      await p.mouse.down();
+      for (const [dx, dy] of moves) await p.mouse.move(at.x + dx, at.y + dy);
+    };
+    /** Where everything in the bar is. The buttons' boxes against the tools, and their
+     * marks against the readout. The logo isn't in this: its box has nothing in the top
+     * few pixels, and the buttons go there. */
+    const rowAt = () => p.evaluate(() => {
+      const r = (e) => e.getBoundingClientRect();
+      const seen = (e) => getComputedStyle(e).display !== 'none' && r(e).width > 0;
+      const mid = (e) => (r(e).top + r(e).bottom) / 2;
+      const logo = document.getElementById('logo');
+      const glass = document.querySelector('.glass');
+      const tools = document.querySelector('.top-tools');
+      const hit = (x, y) => x.left < y.right - 0.5 && y.left < x.right - 0.5 && x.top < y.bottom - 0.5 && y.top < x.bottom - 0.5;
+      const over = [];
+      for (const w of document.querySelectorAll('.win-btn')) {
+        if (hit(r(w), r(tools))) over.push(`${w.className}/tools`);
+        if (hit(r(w.querySelector('svg')), r(glass))) over.push(`${w.className}/readout`);
+      }
+      return {
+        h: Math.round(r(document.querySelector('.top')).height), logo: seen(logo), logoX: seen(logo) ? r(logo).left : null, logoY: seen(logo) ? r(logo).top : null,
+        glassX: r(glass).left, glassY: r(glass).top, toolsL: r(tools).left, toolsR: r(tools).right,
+        centred: !seen(logo) || Math.abs(mid(logo) - mid(glass)) < 1, over, sideways: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+    const SWEEP = [1400, 1180, 1100, 1061, 1060, 1021, 1020, 961, 960, 920, 861, 860];
+    const plain = {};
+    for (const w of SWEEP) {
+      await p.setViewportSize({ width: w, height: 760 });
+      await p.waitForTimeout(60);
+      plain[w] = await rowAt();
+    }
+
+    // Nothing in the bar can be selected, with or without our own buttons.
+    await p.setViewportSize({ width: 1280, height: 800 });
+    await p.waitForTimeout(60);
+    {
+      const g = await box('.glass');
+      await p.mouse.move(g.x + 20, g.y + g.height / 2);
+      await p.mouse.down();
+      await p.mouse.move(g.x + g.width - 20, g.y + g.height / 2, { steps: 5 });
+      await p.mouse.up();
+      await p.mouse.dblclick(g.x + 60, g.y + g.height / 2);
+      check('the readout\'s text can\'t be selected', await p.evaluate(() => getSelection().toString() === ''));
+      check('and the pointer doesn\'t say it can', await p.locator('.glass .seg').first().evaluate((e) => getComputedStyle(e).cursor === 'default'));
+    }
+
+    // A Mac: coloured lights at the top left, above the logo's letters.
+    await open('?os=macos');
+    check('a Mac has its lights at the top left, red first', await kinds('win-left') === 'close,minimize,maximize' && await kinds('win-right') === '');
+    {
+      const [c, m, x] = [await box('.win-close'), await box('.win-minimize'), await box('.win-maximize')];
+      const colours = await p.evaluate(() => ['close', 'minimize', 'maximize'].map((k) => getComputedStyle(document.querySelector(`.win-${k}`)).backgroundColor).join());
+      check('in the corner, in order, above the logo\'s letters', c.x < 20 && c.y < 8 && c.y + c.height <= 16.5 && c.x < m.x && m.x < x.x, JSON.stringify([c, m, x]));
+      check('they\'re small and round', c.width === 13 && c.height === 13 && await p.locator('.win-close').evaluate((e) => getComputedStyle(e).borderRadius === '50%'));
+      check('in the colours a Mac has', colours === 'rgb(255, 95, 87),rgb(254, 188, 46),rgb(40, 200, 64)', colours);
+    }
+    await p.locator('.win-close').hover();
+    check('their marks show when the pointer is over them', await p.locator('.win-minimize svg').evaluate((e) => getComputedStyle(e).visibility === 'visible'));
+    await p.mouse.move(600, 500);
+    check('and not otherwise', await p.locator('.win-minimize svg').evaluate((e) => getComputedStyle(e).visibility === 'hidden'));
+    await p.locator('.win-maximize').click();
+    check('green goes full screen', await asked() === 'fullscreen');
+    await settle();
+    check('then it leaves it, and yellow does nothing there', await label('.win-maximize') === 'Exit full screen' && await p.locator('.win-minimize').isDisabled());
+    await p.locator('.win-maximize').click();
+    await asked();
+    await settle();
+    await p.locator('.win-maximize').click({ modifiers: ['Alt'] });
+    check('Alt and green maximizes instead', await asked() === 'maximize');
+    await settle();
+    await p.locator('.win-maximize').click({ modifiers: ['Alt'] });
+    await asked();
+    await settle();
+    await p.mouse.move(600, 500);
+    await p.evaluate(() => window.dispatchEvent(new Event('blur')));
+    const awayColour = await p.locator('.win-close').evaluate((e) => getComputedStyle(e).backgroundColor);
+    await p.evaluate(() => window.dispatchEvent(new Event('focus')));
+    check('they go grey while another window has the focus', awayColour !== 'rgb(255, 95, 87)' && await p.locator('.win-close').evaluate((e) => getComputedStyle(e).backgroundColor === 'rgb(255, 95, 87)'), awayColour);
+    await p.getByRole('button', { name: 'Menu', exact: true }).click();
+    check('nothing to choose about them in the menu', (await p.locator('#menu').getByText('Window buttons').count()) === 0);
+    await p.keyboard.press('Escape');
+
+    // Windows: plain square buttons in the very corner.
+    await open('?os=windows');
+    check('Windows has its buttons at the right, Close last', await kinds('win-right') === 'minimize,maximize,close' && await kinds('win-left') === '');
+    {
+      const [m, x, c, t] = [await box('.win-minimize'), await box('.win-maximize'), await box('.win-close'), await box('.top-tools')];
+      check('square, side by side, in the very corner', [m, x, c].every((b) => b.width === 46 && b.height === 32 && b.y === 0) && m.x + 46 === x.x && x.x + 46 === c.x && c.x + 46 === 1280, JSON.stringify([m, x, c]));
+      check('with Library and Menu underneath them', t.y >= c.y + c.height, JSON.stringify(t));
+    }
+    await p.locator('.win-close').hover();
+    check('Close goes red under the pointer', await p.locator('.win-close').evaluate((e) => getComputedStyle(e).backgroundColor === 'rgb(196, 43, 28)'));
+    await p.getByRole('button', { name: 'Menu', exact: true }).click();
+    check('nothing to choose about them in the menu', (await p.locator('#menu').getByText('Window buttons').count()) === 0);
+    await p.keyboard.press('Escape');
+
+    // Linux: round, KDE's way, at whichever end the desktop has them.
+    await open('?os=linux');
+    check('Linux has them at the right when the desktop does', await kinds('win-right') === 'minimize,maximize,close' && await kinds('win-left') === '');
+    {
+      const [m, x, c, t] = [await box('.win-minimize'), await box('.win-maximize'), await box('.win-close'), await box('.top-tools')];
+      check('round, a little apart, with Library and Menu underneath them', [m, x, c].every((b) => b.width === 22 && b.height === 22) && m.x + 24 === x.x && x.x + 24 === c.x && t.y >= c.y + c.height && await p.locator('.win-close').evaluate((e) => getComputedStyle(e).borderRadius === '50%'), JSON.stringify([m, x, c, t]));
+    }
+    await open('?os=linux&side=left');
+    {
+      const glyph = await p.locator('.win-minimize svg').boundingBox();
+      check('and at the left when it does, Close first, in the corner, above the logo\'s letters', await kinds('win-left') === 'close,minimize,maximize' && await kinds('win-right') === '' && (await box('.win-close')).x < 8 && glyph.y + glyph.height <= 18, JSON.stringify(glyph));
+    }
+    const pick = async (name) => {
+      await p.getByRole('button', { name: 'Menu', exact: true }).click();
+      await p.locator('#menu').getByText(name, { exact: true }).click();
+    };
+    await p.getByRole('button', { name: 'Menu', exact: true }).click();
+    check('the menu can move them', await p.locator('#menu').getByText('Window buttons').isVisible() && await p.locator('#menu').getByText('As the desktop has them').isVisible());
+    await p.keyboard.press('Escape');
+    await pick('On the right');
+    check('to the right', await kinds('win-right') === 'minimize,maximize,close' && await kinds('win-left') === '');
+    await pick('As the desktop has them');
+    check('and back to where the desktop has them', await kinds('win-left') === 'close,minimize,maximize');
+    await pick('On the right');
+    await pick('On the left');
+    check('or to the left', await kinds('win-left') === 'close,minimize,maximize' && await kinds('win-right') === '');
+
+    // Every system, at every size around where the logo goes: the buttons move nothing
+    // across, make nothing bigger, and sit on nothing.
+    for (const q of ['?os=macos', '?os=windows', '?os=linux', '?os=linux&side=left']) {
+      await open(q, 1400);
+      const wrong = [];
+      for (const w of SWEEP) {
+        await p.setViewportSize({ width: w, height: 760 });
+        await p.waitForTimeout(60);
+        const at = await rowAt();
+        const was = plain[w];
+        const same = at.h === was.h && at.logo === was.logo && at.logoX === was.logoX && at.logoY === was.logoY && at.glassX === was.glassX && at.toolsL === was.toolsL && at.toolsR === was.toolsR;
+        const rowSame = !at.logo || at.glassY === was.glassY;
+        if (!same || !rowSame || !at.centred || at.over.length || at.sideways) wrong.push(`${w}: ${JSON.stringify(at)} was ${JSON.stringify(was)}`);
+      }
+      check(`${q}: nothing in the bar moves across or grows for the buttons, from 1400 down to the smallest window`, wrong.length === 0, wrong.join(' / '));
+    }
+    await open('?os=linux');
+    check('there\'s still a logo when there\'s room', (await rowAt()).logo);
+    await p.setViewportSize({ width: 860, height: 760 });
+    await p.waitForTimeout(60);
+    check('and not when there isn\'t', !(await rowAt()).logo);
+    await p.setViewportSize({ width: 1280, height: 800 });
+    await p.waitForTimeout(60);
+
+    // Moving the window.
+    const spot = await bare();
+    check('the bar has somewhere bare to take hold of', !!spot);
+    await p.mouse.click(spot.x, spot.y);
+    check('a plain click on it does nothing', await asked() === '');
+    await press(spot, [[1, 1]]);
+    check('nor does a shaky one', await asked() === '');
+    await p.mouse.move(spot.x + 12, spot.y + 4);
+    check('moving the pointer moves the window', await asked() === 'drag');
+    await p.mouse.move(spot.x + 40, spot.y + 20);
+    await p.mouse.up();
+    await p.mouse.move(spot.x + 60, spot.y + 40);
+    check('once, and then the page leaves it alone', await asked() === '');
+    await p.mouse.click(spot.x, spot.y);
+    await p.mouse.move(spot.x + 30, spot.y + 2);
+    check('a button released is a button released', await asked() === '');
+    const glass = await box('.glass');
+    await press({ x: glass.x + 60, y: glass.y + glass.height / 2 }, [[20, 6]]);
+    await p.mouse.up();
+    check('it works from the readout too', await asked() === 'drag');
+    const lib = await box('#lib-btn');
+    await press({ x: lib.x + 8, y: lib.y + 8 }, [[-20, 6]]);
+    await p.mouse.up();
+    check('but not from a button', await asked() === '');
+    await press({ x: 100, y: 400 }, [[30, 6]]);
+    await p.mouse.up();
+    check('nor from anywhere else in the window', await asked() === '');
+
+    // Anywhere in the bar that isn't a button takes hold of the window.
+    {
+      const top = await box('.top');
+      const wrong = [];
+      let bareN = 0, allN = 0;
+      for (const fy of [0.08, 0.5, 0.92]) {
+        for (let x = 6; x < top.width; x += 37) {
+          const at = { x, y: top.y + top.height * fy };
+          allN++;
+          if (await p.evaluate(({ x, y }) => !!document.elementFromPoint(x, y).closest('button'), at)) continue;
+          bareN++;
+          await press(at, [[8, 6]]);
+          await p.mouse.up();
+          const got = await asked();
+          await p.waitForTimeout(350);
+          if (got !== 'drag') wrong.push(`${x},${at.y}: ${got}`);
+        }
+      }
+      check('every part of the bar but its buttons moves the window', wrong.length === 0, wrong.join(' / '));
+      check('and that\'s most of it', bareN / allN > 0.8, `${bareN} of ${allN}`);
+      const l = await box('#logo');
+      await press({ x: l.x + 70, y: l.y + 30 }, [[8, 6]]);
+      await p.mouse.up();
+      check('the logo too', await asked() === 'drag');
+      await p.waitForTimeout(350);
+      const seg = await p.locator('.glass .seg').first().boundingBox();
+      await press({ x: seg.x + 8, y: seg.y + seg.height / 2 }, [[8, 6]]);
+      await p.mouse.up();
+      check('and the readout\'s letters', await asked() === 'drag');
+      await p.waitForTimeout(350);
+    }
+
+    // Maximizing.
+    check('it starts as a Maximize button', await label('.win-maximize') === 'Maximize' && await p.evaluate(() => !document.documentElement.classList.contains('win-max')));
+    const before = await p.locator('.win-maximize').innerHTML();
+    await p.mouse.dblclick(spot.x, spot.y);
+    check('a double click on the bar maximizes, and no move starts', await asked() === 'maximize');
+    await settle();
+    check('then it\'s a Restore button with its own icon', await label('.win-maximize') === 'Restore' && await p.locator('.win-maximize').innerHTML() !== before && await p.evaluate(() => document.documentElement.classList.contains('win-max')));
+    await p.locator('.win-maximize').click();
+    check('which restores', await asked() === 'maximize');
+    await settle();
+    check('and goes back to what it was', await label('.win-maximize') === 'Maximize' && await p.locator('.win-maximize').innerHTML() === before);
+    await p.locator('.win-minimize').click();
+    check('Minimize asks for that', await asked() === 'minimize');
+    await p.locator('.win-close').click();
+    check('and so does Close', await asked() === 'close');
+
+    // With a dialog open.
+    await p.evaluate(() => Fatstick.ui.modal({ title: 'A dialog', body: 'Open', buttons: [] }));
+    const shown = () => p.locator('#modal-back').isVisible();
+    await p.mouse.click(spot.x, spot.y);
+    check('a click on the dimmed bar leaves a dialog open', await shown() && await asked() === '');
+    await press(spot, [[20, 6]]);
+    await p.mouse.up();
+    check('and the window still moves by it', await shown() && await asked() === 'drag');
+    await p.mouse.dblclick(spot.x, spot.y);
+    check('a double click there doesn\'t maximize', await shown() && await asked() === '');
+    await p.locator('.win-minimize').click();
+    check('the buttons still work', await shown() && await asked() === 'minimize');
+    await p.mouse.click(30, 500);
+    check('lower down, a click on the dimming closes it', !(await shown()));
+    await p.goto(URL);
+    await p.waitForTimeout(150);
   }
 
   check('no console errors', errs.length === 0, errs.join(' / '));

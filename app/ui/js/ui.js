@@ -226,7 +226,10 @@
     }
   });
   document.addEventListener("pointerdown", (e) => {
-    if (e.target.id === "modal-back") closeModal();
+    if (e.target.id !== "modal-back") return;
+    // With the app's own title bar, the top bar moves the window, dimmed or not.
+    if (document.documentElement.dataset.os && e.clientY < document.querySelector(".top").getBoundingClientRect().bottom) return;
+    closeModal();
   });
 
   // ---- hover tips -------------------------------------------------------------------------

@@ -211,6 +211,13 @@ GPL version 3 or later.
   slider or picking a shape changes what's playing as it plays. On the stick
   the fades are rendered into the track in their shapes, after any key
   shift; the file itself is never changed.
+- **Its own title bar.** The system draws no title bar: the top bar moves the window
+  (double-click to maximize), and the window's buttons sit over its top corners without
+  taking any room from it. On a Mac, coloured lights at the top left; on Windows, square
+  ones in the top right corner; on Linux, round ones in KDE's style, at whichever end the
+  desktop has them (the settings of KDE, GNOME, Cinnamon and MATE are read, and anything
+  else gets them at the right), or as "Window buttons" in the Menu says. Library and Menu
+  sit under the ones at the right.
 - **The player bar goes where the song is.** Its title takes you to the song where
   it's playing from: its row in the playlist or the setlist, or the library. Its
   artist opens the library on all of theirs, and its album on the whole album.
@@ -476,6 +483,7 @@ cargo build --manifest-path app/src-tauri/Cargo.toml && python3 tests/app_e2e.py
 node tests/ui_names.js                                  # the file name rules
 node tests/ui_search.js                                 # search: exact and close matches, and its speed
 node tests/ui_check.js                                  # the window on demo data (needs playwright)
+python3 tests/app_window.py                             # the title bar, in the real app under a real window manager
 # Real Linux driver (needs qemu-system-x86, busybox-static and an extracted Ubuntu kernel):
 cargo build --release -p fatstick-cli --target x86_64-unknown-linux-musl
 python3 tests/kernel_stick.py --kroot <kernel dir> --fatstick target/x86_64-unknown-linux-musl/release/fatstick

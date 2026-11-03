@@ -3,6 +3,7 @@
 // measures, converts and caches audio, plays previews, and writes sticks.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod chrome;
 mod exclude;
 mod folder;
 #[cfg(target_os = "linux")]
@@ -797,6 +798,43 @@ async fn youtube_set_folder(st: State<'_, AppState>, path: String) -> Res<youtub
 
 /// Printing (a setlist): through the webview, as window.print() does nothing
 /// in macOS's web view. The window calls window.print() on other systems.
+/// Which system this is, and where its window buttons go.
+#[tauri::command]
+async fn window_chrome() -> Res<chrome::Chrome> {
+    off_thread(|| Ok(chrome::chrome())).await
+}
+
+#[derive(Serialize)]
+struct WindowState {
+    maximized: bool,
+    fullscreen: bool,
+}
+
+#[tauri::command]
+fn window_state(window: tauri::WebviewWindow) -> Res<WindowState> {
+    Ok(WindowState { maximized: window.is_maximized().map_err(err)?, fullscreen: window.is_fullscreen().map_err(err)? })
+}
+
+/// What the window's own title bar asks for.
+#[tauri::command]
+fn window_action(window: tauri::WebviewWindow, action: String) -> Res<()> {
+    match action.as_str() {
+        "minimize" => window.minimize(),
+        "maximize" => {
+            if window.is_maximized().map_err(err)? {
+                window.unmaximize()
+            } else {
+                window.maximize()
+            }
+        }
+        "fullscreen" => window.set_fullscreen(!window.is_fullscreen().map_err(err)?),
+        "close" => window.close(),
+        "drag" => window.start_dragging(),
+        other => return Err(format!("No such window action: {other}")),
+    }
+    .map_err(err)
+}
+
 #[tauri::command]
 fn print_window(window: tauri::WebviewWindow) -> Res<()> {
     window.print().map_err(err)
@@ -942,6 +980,9 @@ fn main() {
             player_shape,
             track_peaks,
             print_window,
+            window_chrome,
+            window_state,
+            window_action,
             player_resume,
             player_seek,
             player_stop,

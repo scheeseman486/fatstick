@@ -48,6 +48,7 @@ html.framed body { background: var(--chassis); }
 /* ---- display band ---------------------------------------------------------- */
 .top {
   grid-area: top;
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -56,12 +57,69 @@ html.framed body { background: var(--chassis); }
   padding: 12px 18px;
   background: var(--chassis);
   color: var(--chassis-ink);
+  /* It's a title bar: pressing anywhere in it takes hold of the window, the readout
+     included, and nothing in it is there to be selected. */
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
 }
 html.framed .top { padding-inline: 2px; }
 .display { display: flex; align-items: center; gap: 10px 18px; min-width: 0; flex: 1 1 560px; flex-wrap: wrap; }
 /* In the same row as the readout, centered on it. Where there's no room for both, the readout has the row. */
-.logo { flex: none; display: block; height: 44px; width: auto; user-select: none; -webkit-user-select: none; }
+.logo { flex: none; display: block; height: 44px; width: auto; }
 @media (max-width: 960px) { .logo { display: none; } }
+
+/* ---- the window's own buttons ------------------------------------------------- */
+/* They sit over the bar's top corners and take no room from it: nothing else in the
+   bar moves sideways for them, and the bar is no taller. */
+.win-ctl { position: absolute; top: 0; display: flex; z-index: 1; }
+#win-left { left: 0; }
+#win-right { right: 0; }
+.win-ctl:empty { display: none; }
+/* They work under a dialog, as a system's would. */
+body.modal-player .win-ctl { z-index: 60; }
+/* At the right, Library and Menu go underneath them, level with the bottom of the readout. */
+html[data-win-sides*="r"] .top-tools { align-self: flex-end; }
+html[data-os="windows"] .top-tools { margin-bottom: -5px; }
+/* At the left they're above the logo's letters; with no logo, the readout drops below them. */
+@media (max-width: 960px) { html[data-win-sides*="l"] .display { position: relative; top: 8px; } }
+.win-btn { display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--chassis-ink); cursor: default; }
+.win-btn svg { display: block; }
+
+/* A Mac: coloured lights in the top left corner. */
+html[data-os="macos"] #win-left { top: 3px; left: 9px; gap: 8px; }
+html[data-os="macos"] .win-btn { width: 13px; height: 13px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.25); color: rgba(0, 0, 0, 0.6); }
+html[data-os="macos"] .win-btn svg { width: 11px; height: 11px; visibility: hidden; }
+html[data-os="macos"] .win-ctl:hover .win-btn svg, html[data-os="macos"] .win-btn:focus-visible svg { visibility: visible; }
+html[data-os="macos"] .win-close { background: #ff5f57; }
+html[data-os="macos"] .win-minimize { background: #febc2e; }
+html[data-os="macos"] .win-maximize { background: #28c840; }
+html[data-os="macos"] .win-btn:active { filter: brightness(0.8); }
+html[data-os="macos"] .win-btn:disabled { background: var(--chassis-2); }
+html[data-os="macos"].win-away .win-ctl:not(:hover) .win-btn { background: var(--chassis-2); }
+
+/* Windows: plain square buttons, tight in the top right corner. */
+html[data-os="windows"] .win-btn { width: 46px; height: 32px; }
+html[data-os="windows"] .win-btn svg { width: 10px; height: 10px; }
+html[data-os="windows"] .win-btn:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+html[data-os="windows"] .win-btn:active { background: rgba(255, 255, 255, 0.06); }
+html[data-os="windows"] .win-close:hover { background: #c42b1c; }
+html[data-os="windows"] .win-close:active { background: #b3261a; }
+html[data-os="windows"].win-away .win-btn:not(:hover) { color: var(--chassis-ink-2); }
+
+/* Linux: KDE's look, round and flat, at either end of the bar. */
+html[data-os="linux"] .win-ctl { top: 1px; gap: 2px; }
+html[data-os="linux"] #win-left { left: 4px; }
+html[data-os="linux"] #win-right { right: 4px; }
+html[data-os="linux"] .win-btn { width: 22px; height: 22px; border-radius: 50%; transition: background-color 0.1s ease; }
+html[data-os="linux"] .win-btn svg { width: 11px; height: 11px; stroke-width: 1.4; }
+html[data-os="linux"] .win-btn:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
+html[data-os="linux"] .win-btn:active { background: rgba(255, 255, 255, 0.26); }
+html[data-os="linux"] .win-close:hover { background: #da4453; }
+html[data-os="linux"] .win-close:active { background: #c0392b; }
+html[data-os="linux"].win-away .win-btn:not(:hover) { color: var(--chassis-ink-2); }
+/* With no frame from the desktop, an edge to tell it from what's behind it. */
+html[data-os="linux"]:not(.win-max) .app::after { content: ""; position: fixed; inset: 0; z-index: 70; border: 1px solid rgba(127, 127, 127, 0.35); pointer-events: none; }
 .glass {
   display: flex;
   align-items: center;

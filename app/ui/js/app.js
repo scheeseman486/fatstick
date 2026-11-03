@@ -144,6 +144,7 @@
     S, api, DEMO, track, pl, collator, insertTracks, newPlaylist, putTracks, renderSide, renderDisplay, saveSetting, setView, startTrackDrag, playTrack, setProcessing, searchTabs,
     selectedTrackIds: () => (pl() ? selectedInOrder().map((e) => e.trackId) : []),
   });
+  const windowBar = P.chromeSetup({ api, saveSetting });
   const yt = P.youtubeSetup({ S, api, lib, pl, insertTracks, putTracks, renderSide, setView, playTrack, searchTabs, beginImport, importing, importArrived, importChanged, endImport });
   /** What a USB stick holds, going by the note its last sync left on it (or,
    * for a stick the OS hasn't mounted, the volume serial that sync recorded):
@@ -4028,6 +4029,7 @@
       theme("light", "Light"),
       theme("dark", "Dark"),
       "-",
+      ...windowBar.menuItems(),
       { label: "Clear the cache…", action: clearCacheDialog },
       { label: "About Fatstick", action: aboutDialog },
     ]);
@@ -4114,6 +4116,7 @@
     S.ffmpegError = d.ffmpegError;
     const st = d.settings || {};
     S.settings = st;
+    windowBar.load(st.windowButtons);
     lib.initial(d.music);
     lib.loaded();
     if (["system", "light", "dark"].includes(st.theme)) S.theme = st.theme;
